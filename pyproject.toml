@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools", "setuptools_scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aio-lanraragi"
+version = "0.1.1"
+authors = [
+    {name="psilabs-dev"}
+]
+description = "An asynchronous Python API client for LANraragi, written with aiohttp and pydantic for type validation."
+license = { file = "LICENSE" }
+readme = "README.md"
+requires-python = ">=3.12, <3.14"
+dependencies = [
+    "aiohttp",
+    "pydantic"
+]
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "pytest                 >=8.0.0",
+    "pytest-asyncio         >=0.25.0",
+    "ruff",
+    "tox                    >=4.23.0",
+    "twine",
+]
+
+[project.urls]
+Homepage = "https://github.com/psilabs-dev/aio-lanraragi"
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib"
+]
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore:This process .* is multi-threaded:DeprecationWarning"
+]
+log_cli = true
+log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
+log_cli_date_format = "%Y-%m-%d %H:%M:%S"
+
+[tool.ruff]
+extend-select = ["ASYNC", "C4", "SIM"]
+show-fixes = true
+target-version = "py312"
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["lanraragi*"]
