@@ -2,14 +2,48 @@
 
 import http
 import json
+from typing import List
 
 import aiohttp
 from lanraragi.clients.api_clients.base import ApiClient
 from lanraragi.clients.utils import build_err_response
 from lanraragi.models.generics import LRRClientResponse
-from lanraragi.clients.res_processors.archive import process_get_all_archives_response, process_get_archive_categories_response, process_get_archive_metadata_response, process_get_archive_thumbnail_response
-from lanraragi.models.archive import ClearNewArchiveFlagRequest, ClearNewArchiveFlagResponse, DeleteArchiveRequest, DeleteArchiveResponse, DownloadArchiveRequest, DownloadArchiveResponse, ExtractArchiveRequest, ExtractArchiveResponse, GetAllArchivesResponse, GetArchiveCategoriesRequest, GetArchiveCategoriesResponse, GetArchiveMetadataRequest, GetArchiveMetadataResponse, GetArchiveThumbnailRequest, GetArchiveThumbnailResponse, GetUntaggedArchivesResponse, QueueArchiveThumbnailExtractionRequest, QueueArchiveThumbnailExtractionResponse, UpdateArchiveMetadataRequest, UpdateArchiveThumbnailRequest, UpdateArchiveThumbnailResponse, UpdateReadingProgressionRequest, UpdateReadingProgressionResponse, UploadArchiveRequest, UploadArchiveResponse
-from lanraragi.models.base import LanraragiRequest, LanraragiResponse
+from lanraragi.clients.res_processors.archive import (
+    process_get_all_archives_response,
+    process_get_archive_categories_response,
+    process_get_archive_metadata_response,
+    process_get_archive_thumbnail_response
+)
+from lanraragi.models.archive import (
+    GetArchiveMetadataResponse,
+    GetArchiveTankoubonsRequest,
+    ClearNewArchiveFlagRequest,
+    ClearNewArchiveFlagResponse,
+    DeleteArchiveRequest,
+    DeleteArchiveResponse,
+    DownloadArchiveRequest,
+    DownloadArchiveResponse,
+    ExtractArchiveRequest,
+    ExtractArchiveResponse,
+    GetAllArchivesResponse,
+    GetArchiveCategoriesRequest,
+    GetArchiveCategoriesResponse,
+    GetArchiveMetadataRequest,
+    GetArchiveTankoubonsResponse,
+    GetArchiveThumbnailRequest,
+    GetArchiveThumbnailResponse,
+    GetUntaggedArchivesResponse,
+    QueueArchiveThumbnailExtractionRequest,
+    QueueArchiveThumbnailExtractionResponse,
+    UpdateArchiveMetadataRequest,
+    UpdateArchiveThumbnailRequest,
+    UpdateArchiveThumbnailResponse,
+    UpdateReadingProgressionRequest,
+    UpdateReadingProgressionResponse,
+    UploadArchiveRequest,
+    UploadArchiveResponse
+)
+from lanraragi.models.base import LanraragiResponse
 
 class ArchiveApiClient(ApiClient):
 
@@ -53,11 +87,17 @@ class ArchiveApiClient(ApiClient):
             return (process_get_archive_categories_response(content), None)
         return (None, build_err_response(content, status))
     
-    async def get_archive_tankoubons(self, request: LanraragiRequest) -> LRRClientResponse[LanraragiResponse]:
+    async def get_archive_tankoubons(self, request: GetArchiveTankoubonsRequest) -> LRRClientResponse[GetArchiveTankoubonsResponse]:
         """
         GET /api/archives/:id/tankoubons
         """
-        # TODO: skip tankoubons for now.
+        url = self.api_context.build_url(f"/api/archives/{request.arcid}/tankoubons")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        if status == 200:
+            response_j = json.loads(content)
+            tankoubons: List[str] = response_j.get("tankoubons")
+            return (GetArchiveTankoubonsResponse(tankoubons=tankoubons), None)
+        return (None, build_err_response(content, status))
     
     async def get_archive_thumbnail(self, request: GetArchiveThumbnailRequest) -> LRRClientResponse[GetArchiveThumbnailResponse]:
         """
