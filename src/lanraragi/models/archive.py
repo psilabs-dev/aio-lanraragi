@@ -44,6 +44,12 @@ class GetArchiveCategoriesCatRecord(BaseModel):
 class GetArchiveCategoriesResponse(LanraragiResponse):
     categories: List[GetArchiveCategoriesCatRecord] = Field(...)
 
+class GetArchiveTankoubonsRequest(LanraragiRequest):
+    arcid: str = Field(..., min_length=40, max_length=40)
+
+class GetArchiveTankoubonsResponse(LanraragiResponse):
+    tankoubons: List[str] = Field(...)
+
 class GetArchiveThumbnailRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
     page: Optional[int] = Field(None)

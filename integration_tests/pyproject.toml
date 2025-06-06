@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools"]
+
+[project]
+name = "aio-lanraragi-integration-tests"
+version = "0.1.0"
+description = "Integration tests for aio-lanraragi"
+requires-python = ">=3.12, <3.14"
+dependencies = [
+    "docker",
+    "git-python",
+]
+
+[project.urls]
+Homepage = "https://github.com/psilabs-dev/aio-lanraragi"
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib"
+]
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore:This process .* is multi-threaded:DeprecationWarning"
+]
+
+[tool.ruff]
+extend-select = ["ASYNC", "C4", "SIM"]
+show-fixes = true
+target-version = "py312"
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]

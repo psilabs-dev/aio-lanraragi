@@ -8,8 +8,7 @@ from lanraragi.clients.api_clients.base import ApiClient
 from lanraragi.clients.utils import build_err_response
 from lanraragi.models.generics import LRRClientResponse
 from lanraragi.clients.res_processors.misc import handle_get_available_plugins_response, handle_use_plugin_response, process_get_server_info_response
-from lanraragi.models.base import LanraragiRequest, LanraragiResponse
-from lanraragi.models.misc import CleanTempFolderResponse, GetAvailablePluginsRequest, GetAvailablePluginsResponse, GetServerInfoResponse, QueueUrlDownloadRequest, QueueUrlDownloadResponse, RegenerateThumbnailRequest, RegenerateThumbnailResponse, UsePluginAsyncRequest, UsePluginAsyncResponse, UsePluginRequest, UsePluginResponse
+from lanraragi.models.misc import CleanTempFolderResponse, GetAvailablePluginsRequest, GetAvailablePluginsResponse, GetOpdsCatalogRequest, GetOpdsCatalogResponse, GetServerInfoResponse, QueueUrlDownloadRequest, QueueUrlDownloadResponse, RegenerateThumbnailRequest, RegenerateThumbnailResponse, UsePluginAsyncRequest, UsePluginAsyncResponse, UsePluginRequest, UsePluginResponse
 
 
 class MiscApiClient(ApiClient):
@@ -24,12 +23,24 @@ class MiscApiClient(ApiClient):
             return (process_get_server_info_response(content), None)
         return (None, build_err_response(content, status))
 
-    async def get_opds_catalog(self, request: LanraragiRequest) -> LRRClientResponse[LanraragiResponse]:
+    async def get_opds_catalog(self, request: GetOpdsCatalogRequest) -> LRRClientResponse[GetOpdsCatalogResponse]:
         """
-        GET /api/opds
+        - GET /api/opds
+        - GET /api/opds/:id
+
+        Note: the response returns this as an XML string.
         """
-        # TODO: this is complicated.
-        raise NotImplementedError
+        if request.arcid:
+            url = self.api_context.build_url(f"/api/opds/{request.arcid}")
+        else:
+            url = self.api_context.build_url("/api/opds")
+        params = {}
+        if request.category:
+            params["category"] = request.category
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
+        if status == 200:
+            return (GetOpdsCatalogResponse(result=content), None)
+        return (None, build_err_response(content, status))
 
     async def get_available_plugins(self, request: GetAvailablePluginsRequest) -> LRRClientResponse[GetAvailablePluginsResponse]:
         """

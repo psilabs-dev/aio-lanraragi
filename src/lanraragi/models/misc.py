@@ -19,6 +19,13 @@ class GetServerInfoResponse(LanraragiResponse):
     version_desc: str = Field(...)
     version_name: str = Field(...)
 
+class GetOpdsCatalogRequest(LanraragiRequest):
+    arcid: Optional[str] = Field(None, min_length=40, max_length=40)
+    category: Optional[str] = Field(None)
+
+class GetOpdsCatalogResponse(LanraragiResponse):
+    result: str = Field(..., description="XML string")
+
 class GetAvailablePluginsRequest(LanraragiRequest):
     type: Literal["login", "metadata", "script", "all"] = Field(...)
 
