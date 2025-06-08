@@ -24,11 +24,12 @@ class GetArchiveMetadataRequest(LanraragiRequest):
 
 class GetArchiveMetadataResponse(LanraragiResponse):
     arcid: str = Field(..., min_length=40, max_length=40)
-    isnew: Optional[bool] = Field(...)
-    pagecount: Optional[int] = Field(...)
-    progress: Optional[int] = Field(...)
-    tags: Optional[str] = Field(...)
-    lastreadtime: Optional[int] = Field(...)
+    isnew: Optional[bool] = Field(None)
+    pagecount: Optional[int] = Field(None)
+    progress: Optional[int] = Field(None)
+    tags: Optional[str] = Field(None)
+    summary: Optional[str] = Field(None)
+    lastreadtime: Optional[int] = Field(None)
     title: str = Field(...)
     filename: Optional[str] = Field(None)
 
