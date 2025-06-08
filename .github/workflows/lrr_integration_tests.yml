@@ -30,7 +30,7 @@ jobs:
       - name: Install main package (aio-lanraragi)
         run: |
           python -m pip install --upgrade pip
-          pip install .
+          pip install ".[dev]"
           
       - name: Move to integration_tests and install test library
         run: |
@@ -41,7 +41,7 @@ jobs:
         run: |
           cd integration_tests
           export CI=true
-          pytest tests
+          pytest tests --log-cli-level=INFO
         env:
           # Ensure Docker daemon is accessible to Python docker SDK
           DOCKER_HOST: unix:///var/run/docker.sock 

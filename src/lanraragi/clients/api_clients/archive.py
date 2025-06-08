@@ -81,7 +81,7 @@ class ArchiveApiClient(ApiClient):
         """
         GET /api/archives/:id/categories
         """
-        url = self.api_context.build_url(f"/api/archives/{request.id}/categories")
+        url = self.api_context.build_url(f"/api/archives/{request.arcid}/categories")
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
         if status == 200:
             return (process_get_archive_categories_response(content), None)

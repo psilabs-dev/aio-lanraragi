@@ -9,6 +9,10 @@ requires-python = ">=3.12, <3.14"
 dependencies = [
     "docker",
     "git-python",
+    "numpy",
+    "pillow",
+    "pytest",
+    "pytest-asyncio",
 ]
 
 [project.urls]
@@ -30,3 +34,6 @@ target-version = "py312"
 
 [tool.ruff.per-file-ignores]
 "__init__.py" = ["F401"]
+
+[tool.setuptools.package-data]
+aio_lanraragi_tests = ["resources/**/*.ttf", "resources/**/*.txt"]
