@@ -64,6 +64,32 @@ async def upload_archive(client: LRRClient, save_path: Path, filename: str, sema
             request = UploadArchiveRequest(file=file, filename=filename, title=title, tags=tags, file_checksum=checksum)
         return await client.archive_api.upload_archive(request)
 
+async def add_archive_to_category(client: LRRClient, category_id: str, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[AddArchiveToCategoryResponse, LanraragiErrorResponse]:
+    retry_count = 0
+    async with semaphore:
+        while True:
+            response, error = await client.category_api.add_archive_to_category(AddArchiveToCategoryRequest(category_id=category_id, arcid=arcid))
+            if error and error.status == 423: # locked resource
+                retry_count += 1
+                if retry_count > 10:
+                    return response, error
+                await asyncio.sleep(2 ** retry_count)
+                continue
+            return response, error
+
+async def remove_archive_from_category(client: LRRClient, category_id: str, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
+    retry_count = 0
+    async with semaphore:
+        while True:
+            response, error = await client.category_api.remove_archive_from_category(RemoveArchiveFromCategoryRequest(category_id=category_id, arcid=arcid))
+            if error and error.status == 423: # locked resource
+                retry_count += 1
+                if retry_count > 10:
+                    return response, error
+                await asyncio.sleep(2 ** retry_count)
+                continue
+            return response, error
+
 def pmf(t: float) -> float:
     return 2 ** (-t * 100)
 
@@ -308,7 +334,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
 
     # >>>>> ADD ARCHIVE TO CATEGORY SYNC STAGE >>>>>
     for arcid in archive_ids[50:]:
-        response, error = await lanraragi.category_api.add_archive_to_category(AddArchiveToCategoryRequest(category_id=bookmark_cat_id, arcid=arcid))
+        response, error = await add_archive_to_category(lanraragi, bookmark_cat_id, arcid, semaphore)
         assert not error, f"Failed to add archive to category (status {error.status}): {error.error}"
         del response, error
     # <<<<< ADD ARCHIVE TO CATEGORY SYNC STAGE <<<<<
@@ -323,7 +349,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
 
     # >>>>> REMOVE ARCHIVE FROM CATEGORY SYNC STAGE >>>>>
     for arcid in archive_ids[50:]:
-        response, error = await lanraragi.category_api.remove_archive_from_category(RemoveArchiveFromCategoryRequest(category_id=bookmark_cat_id, arcid=arcid))
+        response, error = await remove_archive_from_category(lanraragi, bookmark_cat_id, arcid, semaphore)
         assert not error, f"Failed to remove archive from category (status {error.status}): {error.error}"
         del response, error
     # <<<<< REMOVE ARCHIVE FROM CATEGORY SYNC STAGE <<<<<
@@ -332,7 +358,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
     add_archive_tasks = []
     for arcid in archive_ids[:50]:
         add_archive_tasks.append(asyncio.create_task(
-            lanraragi.category_api.add_archive_to_category(AddArchiveToCategoryRequest(category_id=bookmark_cat_id, arcid=arcid))
+            add_archive_to_category(lanraragi, bookmark_cat_id, arcid, semaphore)
         ))
     gathered: List[Tuple[AddArchiveToCategoryResponse, LanraragiErrorResponse]] = await asyncio.gather(*add_archive_tasks)
     for response, error in gathered:
@@ -361,7 +387,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
     remove_archive_tasks = []
     for arcid in archive_ids[:50]:
         remove_archive_tasks.append(asyncio.create_task(
-            lanraragi.category_api.remove_archive_from_category(RemoveArchiveFromCategoryRequest(category_id=bookmark_cat_id, arcid=arcid))
+            remove_archive_from_category(lanraragi, bookmark_cat_id, arcid, semaphore)
         ))
     gathered: List[Tuple[LanraragiResponse, LanraragiErrorResponse]] = await asyncio.gather(*remove_archive_tasks)
     for response, error in gathered:
