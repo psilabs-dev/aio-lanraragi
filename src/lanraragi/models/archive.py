@@ -34,7 +34,7 @@ class GetArchiveMetadataResponse(LanraragiResponse):
     filename: Optional[str] = Field(None)
 
 class GetArchiveCategoriesRequest(LanraragiRequest):
-    id: str = Field(..., min_length=40, max_length=40)
+    arcid: str = Field(..., min_length=40, max_length=40)
 
 class GetArchiveCategoriesCatRecord(BaseModel):
     archives: List[str] = Field(...)
