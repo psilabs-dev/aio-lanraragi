@@ -3,7 +3,7 @@ import json
 from lanraragi.clients.api_clients.base import ApiClient
 from lanraragi.clients.utils import build_err_response
 from lanraragi.models.generics import LRRClientResponse
-from lanraragi.clients.res_processors.database import process_get_database_stats_response
+from lanraragi.clients.res_processors.database import process_get_database_backup_response, process_get_database_stats_response
 from lanraragi.models.base import LanraragiResponse
 from lanraragi.models.database import CleanDatabaseResponse, GetDatabaseBackupResponse, GetDatabaseStatsRequest, GetDatabaseStatsResponse
 
@@ -52,7 +52,7 @@ class DatabaseApiClient(ApiClient):
         url = self.api_context.build_url("/api/database/backup")
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
         if status == 200:
-            return (GetDatabaseBackupResponse(data=json.loads(content)), None)
+            return (process_get_database_backup_response(content), None)
         return (None, build_err_response(content, status))
 
     async def clear_all_new_flags(self) -> LRRClientResponse[LanraragiResponse]:

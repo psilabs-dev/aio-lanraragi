@@ -138,6 +138,13 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     del response, error
     # <<<<< VALIDATE UPLOAD COUNT STAGE <<<<<
 
+    # >>>>> GET DATABASE BACKUP STAGE >>>>>
+    response, error = await lanraragi.database_api.get_database_backup()
+    assert not error, f"Failed to get database backup (status {error.status}): {error.error}"
+    assert len(response.archives) == num_archives, "Number of archives in database backup does not equal number uploaded!"
+    del response, error
+    # <<<<< GET DATABASE BACKUP STAGE <<<<<
+
 @pytest.mark.asyncio
 async def test_category(lanraragi: LRRClient):
     """
