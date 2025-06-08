@@ -5,8 +5,7 @@ from lanraragi.models.category import GetAllCategoriesResponse, GetAllCategories
 
 
 def process_get_all_categories_response(content: str) -> GetAllCategoriesResponse:
-    response_j = json.loads(content)
-    data = response_j.get("data")
+    data = json.loads(content) # note: this is a list of categories.
     categories: List[GetAllCategoriesResponseRecord] = []
     for category in data:
         archives = category.get("archives")
@@ -15,7 +14,7 @@ def process_get_all_categories_response(content: str) -> GetAllCategoriesRespons
         pinned = category.get("pinned") == "1"
         search = category.get("search")
         categories.append(GetAllCategoriesResponseRecord(
-            archives=archives, id=id, name=name, pinned=pinned, search=search
+            archives=archives, category_id=id, name=name, pinned=pinned, search=search
         ))
     response = GetAllCategoriesResponse(
         data=categories
@@ -29,4 +28,4 @@ def process_get_category_response(content: str) -> GetCategoryResponse:
     name = response_j.get("name")
     pinned = response_j.get("pinned") == "1"
     search = response_j.get("search")
-    return GetCategoryResponse(archives=archives, id=id, name=name, pinned=pinned, search=search)
+    return GetCategoryResponse(archives=archives, category_id=id, name=name, pinned=pinned, search=search)

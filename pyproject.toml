@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aio-lanraragi"
-version = "0.1.1"
+version = "0.1.2"
 authors = [
     {name="psilabs-dev"}
 ]
@@ -33,10 +33,6 @@ Homepage = "https://github.com/psilabs-dev/aio-lanraragi"
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib"
-]
-asyncio_default_fixture_loop_scope = "function"
-filterwarnings = [
-    "ignore:This process .* is multi-threaded:DeprecationWarning"
 ]
 log_cli = true
 log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"

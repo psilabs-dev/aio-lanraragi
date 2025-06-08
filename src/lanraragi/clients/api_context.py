@@ -1,11 +1,18 @@
-import abc
 import asyncio
 import base64
 import contextlib
 import http
 import io
 import logging
-from typing import Any, Dict, Optional, Tuple, Union, override, TypeVar
+from typing import (
+    Any,
+    Dict,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+    override,
+)
 
 import aiohttp
 import aiohttp.client_exceptions
@@ -167,5 +174,8 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
             return (async_response.status, await async_response.text())
 
 def build_auth_header(lrr_api_key: str) -> str:
+    """
+    Converts key to 'Bearer <base64(key)>' format.
+    """
     bearer = base64.b64encode(lrr_api_key.encode(encoding='utf-8')).decode('utf-8')
     return f"Bearer {bearer}"

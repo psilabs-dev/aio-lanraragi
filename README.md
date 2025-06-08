@@ -43,7 +43,7 @@ async with LRRClient("http://localhost:3000", lrr_api_key="lanraragi") as lrr:
 pip install "aio-lanraragi[dev]"
 ```
 
-Only [documented APIs](https://sugoi.gitbook.io/lanraragi/api-documentation) will be supported. Undocumented API calls may be invoked at the `ApiContextManager` layer by library users.
+Only [officially documented APIs](https://sugoi.gitbook.io/lanraragi/api-documentation) will be supported. Undocumented API calls may be invoked at the `ApiContextManager` layer by library users. Under-development APIs shall be decorated with an `@experimental` tag in library and during testing. Deprecated APIs shall be decorated with a `@deprecated` tag.
 
 ### Library Description
 All request/response classes are under the "src/lanraragi/models" directory, and inherit the `LanraragiRequest` and `LanraragiResponse` base class, respectively.
