@@ -1,4 +1,4 @@
-from typing import List
+from typing import Any, List
 from pydantic import BaseModel, Field
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
@@ -16,3 +16,6 @@ class GetDatabaseStatsResponse(LanraragiResponse):
 class CleanDatabaseResponse(LanraragiResponse):
     deleted: int = Field(...)
     unlinked: int = Field(...)
+
+class GetDatabaseBackupResponse(LanraragiResponse):
+    data: List[Any] = Field(...)
