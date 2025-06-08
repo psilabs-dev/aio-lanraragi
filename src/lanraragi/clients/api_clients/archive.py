@@ -168,10 +168,10 @@ class ArchiveApiClient(ApiClient):
     
     async def update_reading_progression(self, request: UpdateReadingProgressionRequest) -> LRRClientResponse[UpdateReadingProgressionResponse]:
         """
-        POST /api/archives/:id/progress/:page
+        PUT /api/archives/:id/progress/:page
         """
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/progress/{request.page}")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.api_context.headers)
         if status == 200:
             response_j = json.loads(content)
             arcid = response_j.get("id")
@@ -207,12 +207,12 @@ class ArchiveApiClient(ApiClient):
     
     async def update_thumbnail(self, request: UpdateArchiveThumbnailRequest) -> LRRClientResponse[UpdateArchiveThumbnailResponse]:
         """
-        POST /api/archives/:id/thumbnail
+        PUT /api/archives/:id/thumbnail
         """
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/thumbnail")
         form_data = aiohttp.FormData(quote_fields=False)
         form_data.add_field('page', request.page)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers, data=form_data)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.api_context.headers, data=form_data)
         if status == 200:
             response_j = json.loads(content)
             new_thumbnail = response_j.get("new_thumbnail")
@@ -221,7 +221,7 @@ class ArchiveApiClient(ApiClient):
     
     async def update_archive_metadata(self, request: UpdateArchiveMetadataRequest) -> LRRClientResponse[LanraragiResponse]:
         """
-        POST /api/archives/:id/metadata
+        PUT /api/archives/:id/metadata
         """
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/metadata")
         form_data = aiohttp.FormData(quote_fields=False)
@@ -231,7 +231,7 @@ class ArchiveApiClient(ApiClient):
             form_data.add_field('tags', request.tags)
         if request.summary:
             form_data.add_field('summary', request.summary)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers, data=form_data)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.api_context.headers, data=form_data)
         if status == 200:
             return (LanraragiResponse(), None)
         return (None, build_err_response(content, status))
