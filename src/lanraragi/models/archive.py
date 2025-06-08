@@ -30,6 +30,7 @@ class GetArchiveMetadataResponse(LanraragiResponse):
     tags: Optional[str] = Field(...)
     lastreadtime: Optional[int] = Field(...)
     title: str = Field(...)
+    filename: Optional[str] = Field(None)
 
 class GetArchiveCategoriesRequest(LanraragiRequest):
     id: str = Field(..., min_length=40, max_length=40)

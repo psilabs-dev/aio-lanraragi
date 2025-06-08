@@ -33,8 +33,9 @@ def process_get_archive_metadata_response(content: str) -> GetArchiveMetadataRes
     tags = response_j.get("tags")
     lastreadtime = response_j.get("lastreadtime")
     title = response_j.get("title")
+    filename = response_j.get("filename")
     return GetArchiveMetadataResponse(
-        arcid=arcid, isnew=isnew, pagecount=pagecount, progress=progress, tags=tags, lastreadtime=lastreadtime, title=title
+        arcid=arcid, isnew=isnew, pagecount=pagecount, progress=progress, tags=tags, lastreadtime=lastreadtime, title=title, filename=filename
     )
 
 def process_get_archive_categories_response(content: str) -> GetArchiveCategoriesResponse:
