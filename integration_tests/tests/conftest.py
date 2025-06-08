@@ -43,11 +43,16 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--git-branch", action="store", default=None, help="Branch to checkout; if not supplied, uses the main branch.")
     parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
     parser.addoption("--experimental", action="store_true", default=False, help="Run experimental tests.")
+    parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
 
 def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
         "markers",
         "experimental: Experimental tests will be skipped by default."
+    )
+    config.addinivalue_line(
+        "markers",
+        "failing: Tests that are known to fail will be skipped by default."
     )
 
 def pytest_collection_modifyitems(config: pytest.Config, items: List[pytest.Item]):
@@ -55,6 +60,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: List[pytest.Item
         return
     skip_experimental = pytest.mark.skip(reason="need --experimental option enabled")
     for item in items:
-        print(item.keywords)
         if 'experimental' in item.keywords:
             item.add_marker(skip_experimental)
+    if config.getoption("--failing"):
+        return
+    skip_failing = pytest.mark.skip(reason="need --failing option enabled")
+    for item in items:
+        if 'failing' in item.keywords:
+            item.add_marker(skip_failing)

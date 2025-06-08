@@ -58,11 +58,11 @@ class DisableBookmarkLinkResponse(LanraragiResponse):
 
 class AddArchiveToCategoryRequest(LanraragiRequest):
     category_id: str = Field(...)
-    archive: str = Field(..., min_length=40, max_length=40)
+    arcid: str = Field(..., min_length=40, max_length=40)
 
 class AddArchiveToCategoryResponse(LanraragiResponse):
     success_message: str = Field(...)
 
 class RemoveArchiveFromCategoryRequest(LanraragiRequest):
     category_id: str = Field(...)
-    archive: str = Field(..., min_length=40, max_length=40)
+    arcid: str = Field(..., min_length=40, max_length=40)

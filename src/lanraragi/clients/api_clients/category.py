@@ -83,11 +83,11 @@ class CategoryApiClient(ApiClient):
         """
         PUT /api/categories/:id/:archive
         """
-        url = self.api_context.build_url(f"/api/categories/{request.category_id}/{request.archive}")
+        url = self.api_context.build_url(f"/api/categories/{request.category_id}/{request.arcid}")
         status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.api_context.headers)
         if status == 200:
             response_j = json.loads(content)
-            success_message = response_j.get("success_message")
+            success_message = response_j.get("successMessage")
             return (AddArchiveToCategoryResponse(success_message=success_message), None)
         return (None, build_err_response(content, status))
 
@@ -95,7 +95,7 @@ class CategoryApiClient(ApiClient):
         """
         DELETE /api/categories/:id/:archive
         """
-        url = self.api_context.build_url(f"/api/categories/{request.category_id}/{request.archive}")
+        url = self.api_context.build_url(f"/api/categories/{request.category_id}/{request.arcid}")
         status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.api_context.headers)
         if status == 200:
             return (LanraragiResponse(), None)
