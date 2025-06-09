@@ -81,8 +81,8 @@ class ExtractArchiveRequest(LanraragiRequest):
     force: Optional[bool] = Field(None)
 
 class ExtractArchiveResponse(LanraragiResponse):
-    job: int = Field(...)
-    pages: List[str] = Field(...)
+    job: Optional[int] = Field(None)
+    pages: List[str] = Field([])
 
 class ClearNewArchiveFlagRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)

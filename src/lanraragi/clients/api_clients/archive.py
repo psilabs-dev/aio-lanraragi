@@ -151,8 +151,8 @@ class ArchiveApiClient(ApiClient):
         status, data = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
         if status == 200:
             response_j = json.loads(data)
-            job = response_j.get("job")
-            pages = response_j.get("pages")
+            job = response_j.get("job") if 'job' in response_j else None
+            pages = response_j.get("pages") if 'pages' in response_j else []
             return (ExtractArchiveResponse(job=job, pages=pages), None)
         return (None, build_err_response(data, status))
     

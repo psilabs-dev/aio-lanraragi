@@ -10,11 +10,13 @@ import logging
 from pathlib import Path
 import tempfile
 from typing import List, Tuple
+import aiohttp.client_exceptions
 import docker
 import numpy as np
 import pytest
 import pytest_asyncio
 import aiohttp
+from urllib.parse import urlparse, parse_qs
 from lanraragi.clients.client import LRRClient
 from aio_lanraragi_tests.lrr_docker import LRREnvironment
 from aio_lanraragi_tests.common import compute_upload_checksum
@@ -22,7 +24,8 @@ from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest, WriteArchiveResponse
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
-from lanraragi.models.archive import UploadArchiveRequest, UploadArchiveResponse
+from lanraragi.clients.utils import build_err_response
+from lanraragi.models.archive import ClearNewArchiveFlagRequest, ExtractArchiveRequest, GetArchiveMetadataRequest, GetArchiveThumbnailRequest, UpdateReadingProgressionRequest, UploadArchiveRequest, UploadArchiveResponse
 from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
 from lanraragi.models.category import AddArchiveToCategoryRequest, AddArchiveToCategoryResponse, CreateCategoryRequest, DeleteCategoryRequest, GetCategoryRequest, RemoveArchiveFromCategoryRequest, UpdateBookmarkLinkRequest, UpdateCategoryRequest
 
@@ -51,11 +54,42 @@ async def lanraragi():
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
-    client = LRRClient(lrr_host="http://localhost:3001", lrr_api_key="lanraragi")
+    client = LRRClient(
+        lrr_host="http://localhost:3001",
+        lrr_api_key="lanraragi",
+        timeout=60
+    )
     try:
         yield client
     finally:
         await client.close()
+
+async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
+    async with semaphore:
+        response, error = await client.archive_api.extract_archive(ExtractArchiveRequest(arcid=arcid, force=False))
+        assert not error, f"Failed to extract archive (status {error.status}): {error.error}"
+        pages = response.pages
+        tasks = []
+        async def load_page(page_api: str):
+            url = client.build_url(page_api)
+            url_parsed = urlparse(url)
+            params = parse_qs(url_parsed.query)
+            url = url.split("?")[0]
+            try:
+                status, content = await client.download_file(url, client.headers, params=params)
+            except asyncio.TimeoutError:
+                timeout_msg = f"Request timed out after {client.session.timeout.total}s"
+                logger.error(f"Failed to get page {page_api} (timeout): {timeout_msg}")
+                return (None, build_err_response(timeout_msg, 500))
+            if status == 200:
+                return (content, None)
+            return (None, build_err_response(content, status)) # TODO: this is wrong.
+        for page in pages[:3]:
+            tasks.append(asyncio.create_task(load_page(page)))
+        gathered: List[Tuple[bytes, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        for _, error in gathered:
+            assert not error, f"Failed to load page (status {error.status}): {error.error}"
+        return (LanraragiResponse(), None)
 
 async def upload_archive(client: LRRClient, save_path: Path, filename: str, semaphore: asyncio.Semaphore, checksum: str=None, title: str=None, tags: str=None) -> Tuple[UploadArchiveResponse, LanraragiErrorResponse]:
     async with semaphore:
@@ -169,6 +203,93 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     assert len(response.archives) == num_archives, "Number of archives in database backup does not equal number uploaded!"
     del response, error
     # <<<<< GET DATABASE BACKUP STAGE <<<<<
+
+@pytest.mark.asyncio
+async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+    """
+    Simulates a read archive operation.
+    """
+    generator = np.random.default_rng(42)
+    num_archives = 100
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lanraragi.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+
+    logger.debug("Established connection with test LRR server.")
+    # verify we are working with a new server.
+    response, error = await lanraragi.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+    assert len(response.data) == 0, "Server contains archives!"
+    del response, error
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    tag_generators = create_tag_generators(100, pmf)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        logger.debug(f"Creating {num_archives} archives to upload.")
+        write_responses = save_archives(num_archives, tmpdir, generator)
+        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+
+        # archive metadata
+        logger.debug("Uploading archives to server.")
+        tasks = []
+        for i, _response in enumerate(write_responses):
+            title = f"Archive {i}"
+            tags = ','.join(get_tag_assignments(tag_generators, generator))
+            checksum = compute_upload_checksum(_response.save_path)
+            tasks.append(asyncio.create_task(
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            ))
+        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        for response, error in gathered:
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+        del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> GET ALL ARCHIVES STAGE >>>>>
+    response, error = await lanraragi.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+    assert len(response.data) == num_archives, "Number of archives on server does not equal number uploaded!"
+    first_archive_id = response.data[0].arcid
+    # <<<<< GET ALL ARCHIVES STAGE <<<<<
+
+    # >>>>> GET BOOKMARK LINK STAGE >>>>>
+    # TODO: temporary way to just get the bookmark category id first for later.
+    response, error = await lanraragi.category_api.get_bookmark_link()
+    assert not error, f"Failed to get bookmark link (status {error.status}): {error.error}"
+    bookmark_cat_id = response.category_id
+    del response, error
+    # <<<<< GET BOOKMARK LINK STAGE <<<<<
+
+    # >>>>> SIMULATE READ ARCHIVE STAGE >>>>>
+    # make these api calls concurrently:
+    # DELETE /api/archives/:arcid/isnew
+    # GET /api/archives/:arcid/metadata
+    # GET /api/categories/bookmark_link
+    # GET /api/categories/:category_id (bookmark category)
+    # GET /api/archives/:arcid/files?force=false
+    # PUT /api/archives/:arcid/progress/1
+    # POST /api/archives/:arcid/files/thumbnails
+    # GET /api/archives/:arcid/page?path=p_01.png (first three pages)
+
+    tasks = []
+    tasks.append(asyncio.create_task(lanraragi.archive_api.clear_new_archive_flag(ClearNewArchiveFlagRequest(arcid=first_archive_id))))
+    tasks.append(asyncio.create_task(lanraragi.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=first_archive_id))))
+
+    # TODO: this needs to be get bookmark link => get category in one call
+    tasks.append(asyncio.create_task(lanraragi.category_api.get_bookmark_link()))
+    tasks.append(asyncio.create_task(lanraragi.category_api.get_category(GetCategoryRequest(category_id=bookmark_cat_id))))
+
+    tasks.append(asyncio.create_task(load_pages_from_archive(lanraragi, first_archive_id, semaphore)))
+    tasks.append(asyncio.create_task(lanraragi.archive_api.update_reading_progression(UpdateReadingProgressionRequest(arcid=first_archive_id, page=1))))
+    tasks.append(asyncio.create_task(lanraragi.archive_api.get_archive_thumbnail(GetArchiveThumbnailRequest(arcid=first_archive_id))))
+
+    results: List[Tuple[LanraragiResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+    for response, error in results:
+        assert not error, f"Failed to complete task (status {error.status}): {error.error}"
+    # <<<<< SIMULATE READ ARCHIVE STAGE <<<<<
 
 @pytest.mark.asyncio
 async def test_category(lanraragi: LRRClient):
