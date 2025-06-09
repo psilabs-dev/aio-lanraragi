@@ -57,7 +57,7 @@ async def lanraragi():
     client = LRRClient(
         lrr_host="http://localhost:3001",
         lrr_api_key="lanraragi",
-        timeout=60
+        timeout=10
     )
     try:
         yield client
