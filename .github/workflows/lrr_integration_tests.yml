@@ -42,7 +42,7 @@ jobs:
         run: |
           cd integration_tests
           export CI=true
-          pytest tests --log-cli-level=INFO
+          pytest tests --log-cli-level=INFO --git-url=https://github.com/difegue/LANraragi.git --git-branch=dev
         env:
           # Ensure Docker daemon is accessible to Python docker SDK
-          DOCKER_HOST: unix:///var/run/docker.sock 
+          DOCKER_HOST: unix:///var/run/docker.sock
