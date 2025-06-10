@@ -205,7 +205,6 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     # <<<<< GET DATABASE BACKUP STAGE <<<<<
 
 @pytest.mark.asyncio
-@pytest.mark.failing
 async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     """
     Simulates a read archive operation.
