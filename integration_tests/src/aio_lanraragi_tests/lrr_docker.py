@@ -57,9 +57,9 @@ class LRREnvironment:
         goes wrong during setup.
         """
         with contextlib.suppress(docker.errors.NotFound):
-            self.docker_client.containers.get(self.redis_container.id).stop()
+            self.docker_client.containers.get(self.redis_container.id).stop(timeout=3)
         with contextlib.suppress(docker.errors.NotFound):
-            self.docker_client.containers.get(self.lrr_container.id).stop()
+            self.docker_client.containers.get(self.lrr_container.id).stop(timeout=3)
         with contextlib.suppress(docker.errors.NotFound):
             self.docker_client.networks.get(self.network.id).remove()
         with contextlib.suppress(docker.errors.NotFound):

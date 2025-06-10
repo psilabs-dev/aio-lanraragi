@@ -27,7 +27,17 @@ from aio_lanraragi_tests.archive_generation.metadata import create_tag_generator
 from lanraragi.clients.utils import build_err_response
 from lanraragi.models.archive import ClearNewArchiveFlagRequest, ExtractArchiveRequest, GetArchiveMetadataRequest, GetArchiveThumbnailRequest, UpdateReadingProgressionRequest, UploadArchiveRequest, UploadArchiveResponse
 from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
-from lanraragi.models.category import AddArchiveToCategoryRequest, AddArchiveToCategoryResponse, CreateCategoryRequest, DeleteCategoryRequest, GetCategoryRequest, RemoveArchiveFromCategoryRequest, UpdateBookmarkLinkRequest, UpdateCategoryRequest
+from lanraragi.models.category import (
+    AddArchiveToCategoryRequest,
+    AddArchiveToCategoryResponse,
+    CreateCategoryRequest,
+    DeleteCategoryRequest,
+    GetCategoryRequest,
+    GetCategoryResponse,
+    RemoveArchiveFromCategoryRequest,
+    UpdateBookmarkLinkRequest,
+    UpdateCategoryRequest
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +100,15 @@ async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyn
         for _, error in gathered:
             assert not error, f"Failed to load page (status {error.status}): {error.error}"
         return (LanraragiResponse(), None)
+
+async def get_bookmark_category_detail(client: LRRClient, semaphore: asyncio.Semaphore) -> Tuple[GetCategoryResponse, LanraragiErrorResponse]:
+    async with semaphore:
+        response, error = await client.category_api.get_bookmark_link()
+        assert not error, f"Failed to get bookmark link (status {error.status}): {error.error}"
+        category_id = response.category_id
+        response, error = await client.category_api.get_category(GetCategoryRequest(category_id=category_id))
+        assert not error, f"Failed to get category (status {error.status}): {error.error}"
+        return (response, error)
 
 async def upload_archive(client: LRRClient, save_path: Path, filename: str, semaphore: asyncio.Semaphore, checksum: str=None, title: str=None, tags: str=None) -> Tuple[UploadArchiveResponse, LanraragiErrorResponse]:
     async with semaphore:
@@ -255,14 +274,6 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     first_archive_id = response.data[0].arcid
     # <<<<< GET ALL ARCHIVES STAGE <<<<<
 
-    # >>>>> GET BOOKMARK LINK STAGE >>>>>
-    # TODO: temporary way to just get the bookmark category id first for later.
-    response, error = await lanraragi.category_api.get_bookmark_link()
-    assert not error, f"Failed to get bookmark link (status {error.status}): {error.error}"
-    bookmark_cat_id = response.category_id
-    del response, error
-    # <<<<< GET BOOKMARK LINK STAGE <<<<<
-
     # >>>>> SIMULATE READ ARCHIVE STAGE >>>>>
     # make these api calls concurrently:
     # DELETE /api/archives/:arcid/isnew
@@ -277,11 +288,7 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     tasks = []
     tasks.append(asyncio.create_task(lanraragi.archive_api.clear_new_archive_flag(ClearNewArchiveFlagRequest(arcid=first_archive_id))))
     tasks.append(asyncio.create_task(lanraragi.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=first_archive_id))))
-
-    # TODO: this needs to be get bookmark link => get category in one call
-    tasks.append(asyncio.create_task(lanraragi.category_api.get_bookmark_link()))
-    tasks.append(asyncio.create_task(lanraragi.category_api.get_category(GetCategoryRequest(category_id=bookmark_cat_id))))
-
+    tasks.append(asyncio.create_task(get_bookmark_category_detail(lanraragi, semaphore)))
     tasks.append(asyncio.create_task(load_pages_from_archive(lanraragi, first_archive_id, semaphore)))
     tasks.append(asyncio.create_task(lanraragi.archive_api.update_reading_progression(UpdateReadingProgressionRequest(arcid=first_archive_id, page=1))))
     tasks.append(asyncio.create_task(lanraragi.archive_api.get_archive_thumbnail(GetArchiveThumbnailRequest(arcid=first_archive_id))))
