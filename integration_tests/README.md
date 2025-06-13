@@ -13,15 +13,22 @@ export CI=true
 pytest tests
 ```
 
-Start integration tests with a custom image.
+Start integration tests with a Docker image.
 ```sh
-pytest tests --image custom-lrr-image
+pytest tests --image difegue/lanraragi
 ```
 
 Start integration tests with that build and deploy a local LANraragi git repo.
 ```sh
-pytest tests --build /path/to/lanraragi/project
+pytest tests --git-url=https://github.com/difegue/LANraragi.git --git-branch=dev
 ```
+
+Start integration tests on a local path.
+```
+pytest tests --build /path/to/LANraragi/project
+```
+
+See [pytest](https://docs.pytest.org/en/stable/#) docs for more test-related options.
 
 ## Scope
 The scope of this library is limited to perform routine (i.e. not long-running by default) API integration tests within the "tests" directory. Each integration test must contain at least one LRR API call in an isolated LRR docker environment. The library tests will check the following points:
