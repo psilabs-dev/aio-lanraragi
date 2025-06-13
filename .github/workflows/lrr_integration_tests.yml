@@ -9,10 +9,19 @@ on:
     branches: 
       - main
       - 'dev-*/main'
+  schedule:
+    - cron: '0 0 * * 5' # Run integration tests on main branch every Friday at 00:00
+  workflow_call:  # Allow this workflow to be called by other workflows
 
 jobs:
   integration-tests:
-    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        pyver: ['3.12', '3.13']
+        os: [ubuntu-latest] # only linux currently supports docker nicely
+    
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     
     permissions:
@@ -23,10 +32,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         
-      - name: Set up Python
+      - name: Set up Python ${{ matrix.pyver }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          allow-prereleases: true
+          python-version: ${{ matrix.pyver }}
           
       - name: Install main package (aio-lanraragi)
         run: |
@@ -46,3 +56,17 @@ jobs:
         env:
           # Ensure Docker daemon is accessible to Python docker SDK
           DOCKER_HOST: unix:///var/run/docker.sock
+
+  check:
+    if: always()
+
+    needs:
+      - integration-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if integration tests passed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJson(needs) }}
+
+
