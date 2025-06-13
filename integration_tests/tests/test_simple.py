@@ -57,7 +57,7 @@ def session_setup_teardown(request: pytest.FixtureRequest):
 
 @pytest.fixture
 def semaphore():
-    yield asyncio.Semaphore(value=8)
+    yield asyncio.BoundedSemaphore(value=8)
 
 @pytest_asyncio.fixture
 async def lanraragi():
