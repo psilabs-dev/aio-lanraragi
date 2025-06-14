@@ -36,8 +36,30 @@ def _process_get_minion_job_detail_response(content: str) -> GetMinionJobDetailR
         error=result_j.get("error"),
         data=result_j.get("data"),
         errors=result_j.get("errors")
+    ) if result_j else None
+    return GetMinionJobDetailResponse(
+        id=id,
+        args=args,
+        attempts=attempts,
+        children=children,
+        created=created,
+        delayed=delayed,
+        expires=expires,
+        finished=finished,
+        lax=lax,
+        notes=notes,
+        parents=parents,
+        priority=priority,
+        queue=queue,
+        result=result,
+        retried=retried,
+        retries=retries,
+        started=started,
+        state=state,
+        task=task,
+        time=time,
+        worker=worker
     )
-    return GetMinionJobDetailResponse(id=id, args=args, attempts=attempts, children=children, created=created, delayed=delayed, expires=expires, finished=finished, lax=lax, notes=notes, parents=parents, priority=priority, queue=queue, result=result, retried=retried, retries=retries, started=started, state=state, task=task, time=time, worker=worker)
 
 __all__ = [
     "_process_get_minion_job_detail_response"

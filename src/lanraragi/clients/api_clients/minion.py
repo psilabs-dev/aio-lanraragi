@@ -4,7 +4,12 @@ from lanraragi.clients.api_clients.base import _ApiClient
 from lanraragi.clients.utils import _build_err_response
 from lanraragi.models.generics import _LRRClientResponse
 from lanraragi.clients.res_processors.minion import _process_get_minion_job_detail_response
-from lanraragi.models.minion import GetMinionJobDetailRequest, GetMinionJobDetailResponse, GetMinionJobStatusRequest, GetMinionJobStatusResponse
+from lanraragi.models.minion import (
+    GetMinionJobDetailRequest,
+    GetMinionJobDetailResponse,
+    GetMinionJobStatusRequest,
+    GetMinionJobStatusResponse,
+)
 
 
 class _MinionApiClient(_ApiClient):
@@ -14,7 +19,7 @@ class _MinionApiClient(_ApiClient):
         """
         GET /api/minion/:jobid
         """
-        url = self.api_context.build_url(f"/api/minion/{request.id}")
+        url = self.api_context.build_url(f"/api/minion/{request.job_id}")
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
         if status == 200:
             response_j = json.loads(content)
