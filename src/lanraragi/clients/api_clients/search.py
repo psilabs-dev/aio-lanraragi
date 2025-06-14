@@ -36,7 +36,10 @@ class SearchApiClient(ApiClient):
             ("groupby_tanks", request.groupby_tanks),
         ]:
             if value:
-                params[key] = value
+                if isinstance(value, bool):
+                    params[key] = str(value).lower()
+                else:
+                    params[key] = value
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
         if status == 200:
             return (process_search_archive_index_response(content), None)
@@ -59,7 +62,10 @@ class SearchApiClient(ApiClient):
             ("groupby_tanks", request.groupby_tanks),
         ]:
             if value:
-                params[key] = value
+                if isinstance(value, bool):
+                    params[key] = str(value).lower()
+                else:
+                    params[key] = value
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
         if status == 200:
             return (process_get_random_archives_response(content), None)

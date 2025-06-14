@@ -108,7 +108,7 @@ class ArchiveApiClient(ApiClient):
         if request.page:
             params["page"] = request.page
         if request.nofallback:
-            params["nofallback"] = request.nofallback
+            params["nofallback"] = str(request.nofallback).lower()
         status, data = await self.api_context.download_thumbnail(url, self.api_context.headers, params=params)
         if status in [200, 202]:
             return (process_get_archive_thumbnail_response(data, status), None)
@@ -147,7 +147,7 @@ class ArchiveApiClient(ApiClient):
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/files")
         params = {}
         if request.force:
-            params["force"] = request.force
+            params["force"] = str(request.force).lower()
         status, data = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
         if status == 200:
             response_j = json.loads(data)

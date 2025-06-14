@@ -25,7 +25,15 @@ from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, Wri
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
 from lanraragi.clients.utils import build_err_response
-from lanraragi.models.archive import ClearNewArchiveFlagRequest, ExtractArchiveRequest, GetArchiveMetadataRequest, GetArchiveThumbnailRequest, UpdateReadingProgressionRequest, UploadArchiveRequest, UploadArchiveResponse
+from lanraragi.models.archive import (
+    ClearNewArchiveFlagRequest,
+    ExtractArchiveRequest,
+    GetArchiveMetadataRequest,
+    GetArchiveThumbnailRequest,
+    UpdateReadingProgressionRequest,
+    UploadArchiveRequest,
+    UploadArchiveResponse,
+)
 from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
 from lanraragi.models.category import (
     AddArchiveToCategoryRequest,
@@ -37,6 +45,10 @@ from lanraragi.models.category import (
     RemoveArchiveFromCategoryRequest,
     UpdateBookmarkLinkRequest,
     UpdateCategoryRequest
+)
+from lanraragi.models.search import (
+    GetRandomArchivesRequest,
+    SearchArchiveIndexRequest
 )
 
 logger = logging.getLogger(__name__)
@@ -529,6 +541,79 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
     assert len(response.archives) == 0, "Number of archives in bookmark category does not equal 0!"
     del response, error
     # <<<<< GET CATEGORY STAGE <<<<<
+
+@pytest.mark.asyncio
+async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+    """
+    Tests the search API.
+    
+    1. upload 100 archives
+    2. search for 20 archives using the search API
+    3. search for 20 archives using random search API
+    4. search for 20 archives using random search API with newonly=true
+    5. search for 20 archives using random search API with untaggedonly=true (should return empty)
+    """
+    generator = np.random.default_rng(42)
+    num_archives = 100
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lanraragi.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+
+    logger.debug("Established connection with test LRR server.")
+    # verify we are working with a new server.
+    response, error = await lanraragi.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+    assert len(response.data) == 0, "Server contains archives!"
+    del response, error
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    tag_generators = create_tag_generators(100, pmf)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        logger.debug(f"Creating {num_archives} archives to upload.")
+        write_responses = save_archives(num_archives, tmpdir, generator)
+        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+
+        # archive metadata
+        logger.debug("Uploading archives to server.")
+        tasks = []
+        for i, _response in enumerate(write_responses):
+            title = f"Archive {i}"
+            tags = ','.join(get_tag_assignments(tag_generators, generator))
+            checksum = compute_upload_checksum(_response.save_path)
+            tasks.append(asyncio.create_task(
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            ))
+        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        for response, error in gathered:
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+        del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> SEARCH STAGE >>>>>
+    # TODO: current test design limits ability to test results of search (e.g. tag filtering), will need to unravel logic for better test transparency
+    response, error = await lanraragi.search_api.search_archive_index(SearchArchiveIndexRequest())
+    assert not error, f"Failed to search archive index (status {error.status}): {error.error}"
+    assert len(response.data) == 100
+    del response, error
+
+    response, error = await lanraragi.search_api.get_random_archives(GetRandomArchivesRequest(count=20))
+    assert not error, f"Failed to get random archives (status {error.status}): {error.error}"
+    assert len(response.data) == 20
+    del response, error
+
+    response, error = await lanraragi.search_api.get_random_archives(GetRandomArchivesRequest(count=20, newonly=True))
+    assert not error, f"Failed to get random archives (status {error.status}): {error.error}"
+    assert len(response.data) == 20
+    del response, error
+
+    response, error = await lanraragi.search_api.get_random_archives(GetRandomArchivesRequest(count=20, untaggedonly=True))
+    assert not error, f"Failed to get random archives (status {error.status}): {error.error}"
+    assert len(response.data) == 0
+    del response, error
+    # <<<<< SEARCH STAGE <<<<<
 
 @pytest.mark.asyncio
 async def test_concurrent_clients():
