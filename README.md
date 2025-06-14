@@ -15,7 +15,7 @@ import asyncio
 from lanraragi.clients.client import LRRClient
 
 async def main():
-    await with LRRClient("http://localhost:3000", lrr_api_key="lanraragi") as lrr:
+    async with LRRClient("http://localhost:3000", lrr_api_key="lanraragi") as lrr:
         response, err = await lrr.archive_api.get_all_archives()
         if err:
             raise Exception(f"Encountered error while getting all archives: {err.error}")
