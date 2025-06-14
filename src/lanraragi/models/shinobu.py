@@ -8,3 +8,8 @@ class GetShinobuStatusResponse(LanraragiResponse):
 
 class RestartShinobuResponse(LanraragiResponse):
     new_pid: int = Field(...)
+
+__all__ = [
+    "GetShinobuStatusResponse",
+    "RestartShinobuResponse",
+]

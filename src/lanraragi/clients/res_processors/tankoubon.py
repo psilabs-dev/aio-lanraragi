@@ -3,7 +3,7 @@ from typing import List
 from lanraragi.models.tankoubon import GetTankoubonResponse, TankoubonArchiveRecord, TankoubonRecord, GetAllTankoubonsResponse, TankoubonFullDataRecord
 
 
-def handle_get_all_tankoubons_response(content: str) -> GetAllTankoubonsResponse:
+def _handle_get_all_tankoubons_response(content: str) -> GetAllTankoubonsResponse:
     response_j = json.loads(content)
     records: List[TankoubonRecord] = []
     for record in response_j.get("result"):
@@ -21,7 +21,7 @@ def handle_get_all_tankoubons_response(content: str) -> GetAllTankoubonsResponse
     )
     return response
 
-def handle_get_tankoubon_response(content: str, is_full_data: bool) -> GetTankoubonResponse:
+def _handle_get_tankoubon_response(content: str, is_full_data: bool) -> GetTankoubonResponse:
     response_j = json.loads(content)
     result_j = response_j.get("result")
 
@@ -73,3 +73,8 @@ def handle_get_tankoubon_response(content: str, is_full_data: bool) -> GetTankou
             full_data=full_data_records
         )
     )
+
+__all__ = [
+    "_handle_get_all_tankoubons_response",
+    "_handle_get_tankoubon_response"
+]

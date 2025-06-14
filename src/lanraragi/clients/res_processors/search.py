@@ -1,9 +1,8 @@
-
 import json
 from typing import List
 from lanraragi.models.search import GetRandomArchivesResponse, GetRandomArchivesResponseRecord, SearchArchiveIndexResponse, SearchArchiveIndexResponseRecord
 
-def process_search_archive_index_response(content: str) -> SearchArchiveIndexResponse:
+def _process_search_archive_index_response(content: str) -> SearchArchiveIndexResponse:
     response_j = json.loads(content)
     data = response_j.get('data')
     draw = response_j.get('draw')
@@ -28,7 +27,7 @@ def process_search_archive_index_response(content: str) -> SearchArchiveIndexRes
     )
     return response
 
-def process_get_random_archives_response(content: str) -> GetRandomArchivesResponse:
+def _process_get_random_archives_response(content: str) -> GetRandomArchivesResponse:
     response_j = json.loads(content)
     data = response_j.get('data')
     draw = response_j.get('draw')
@@ -49,3 +48,8 @@ def process_get_random_archives_response(content: str) -> GetRandomArchivesRespo
         data=records, draw=draw, records_filtered=records_filtered, records_total=records_total
     )
     return response
+
+__all__ = [
+    "_process_search_archive_index_response",
+    "_process_get_random_archives_response"
+]

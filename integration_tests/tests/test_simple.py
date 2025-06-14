@@ -24,7 +24,7 @@ from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest, WriteArchiveResponse
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
-from lanraragi.clients.utils import build_err_response
+from lanraragi.clients.utils import _build_err_response
 from lanraragi.models.archive import (
     ClearNewArchiveFlagRequest,
     ExtractArchiveRequest,
@@ -103,10 +103,10 @@ async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyn
             except asyncio.TimeoutError:
                 timeout_msg = f"Request timed out after {client.session.timeout.total}s"
                 logger.error(f"Failed to get page {page_api} (timeout): {timeout_msg}")
-                return (None, build_err_response(timeout_msg, 500))
+                return (None, _build_err_response(timeout_msg, 500))
             if status == 200:
                 return (content, None)
-            return (None, build_err_response(content, status)) # TODO: this is wrong.
+            return (None, _build_err_response(content, status)) # TODO: this is wrong.
         for page in pages[:3]:
             tasks.append(asyncio.create_task(load_page(page)))
         gathered: List[Tuple[bytes, LanraragiErrorResponse]] = await asyncio.gather(*tasks)

@@ -132,3 +132,35 @@ class DeleteArchiveResponse(LanraragiResponse):
     filename: Optional[str] = Field(None)
 
 # <<<<< ARCHIVE <<<<<
+
+__all__ = [
+    "GetAllArchivesResponseRecord",
+    "GetAllArchivesResponse",
+    "GetUntaggedArchivesResponse",
+    "GetArchiveMetadataRequest",
+    "GetArchiveMetadataResponse",
+    "GetArchiveCategoriesRequest",
+    "GetArchiveCategoriesCatRecord",
+    "GetArchiveCategoriesResponse",
+    "GetArchiveTankoubonsRequest",
+    "GetArchiveTankoubonsResponse",
+    "GetArchiveThumbnailRequest",
+    "GetArchiveThumbnailResponse",
+    "QueueArchiveThumbnailExtractionRequest",
+    "QueueArchiveThumbnailExtractionResponse",
+    "DownloadArchiveRequest",
+    "DownloadArchiveResponse",
+    "ExtractArchiveRequest",
+    "ExtractArchiveResponse",
+    "ClearNewArchiveFlagRequest",
+    "ClearNewArchiveFlagResponse",
+    "UpdateReadingProgressionRequest",
+    "UpdateReadingProgressionResponse",
+    "UploadArchiveRequest",
+    "UploadArchiveResponse",
+    "UpdateArchiveThumbnailRequest",
+    "UpdateArchiveThumbnailResponse",
+    "UpdateArchiveMetadataRequest",
+    "DeleteArchiveRequest",
+    "DeleteArchiveResponse",
+]

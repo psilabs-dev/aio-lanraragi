@@ -12,7 +12,7 @@ A working understanding of Python's async framework is needed.
 Here is an example on getting all archives from LANraragi using `LRRClient`'s context management:
 ```python
 import asyncio
-from lanraragi.clients.client import LRRClient
+from lanraragi import LRRClient
 
 async def main():
     async with LRRClient("http://localhost:3000", lrr_api_key="lanraragi") as lrr:

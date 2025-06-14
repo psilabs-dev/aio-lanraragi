@@ -18,7 +18,7 @@ import aiohttp
 import aiohttp.client_exceptions
 from yarl import Query
 
-ApiContextManagerLike = TypeVar('ApiContextManagerLike', bound='ApiContextManager')
+_ApiContextManagerLike = TypeVar('_ApiContextManagerLike', bound='ApiContextManager')
 class ApiContextManager(contextlib.AbstractAsyncContextManager):
     """
     Base API context management layer for an async LANraragi API client. Provides the required utilities and abstractions
@@ -37,7 +37,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         self.logger = logger
         self.lrr_host = lrr_host
         self.lrr_api_key = lrr_api_key
-        self.headers = {"Authorization": build_auth_header(lrr_api_key)}
+        self.headers = {"Authorization": _build_auth_header(lrr_api_key)}
         self.session = session
         self.ssl = ssl
         self.timeout = timeout
@@ -76,7 +76,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         return f"{self.lrr_host}{api}"
 
     @override
-    async def __aenter__(self: ApiContextManagerLike) -> ApiContextManagerLike:
+    async def __aenter__(self: _ApiContextManagerLike) -> _ApiContextManagerLike:
         await self._get_session()
         return self
     
@@ -200,9 +200,13 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
                 await asyncio.sleep(2 ** retry_count)
                 continue
 
-def build_auth_header(lrr_api_key: str) -> str:
+def _build_auth_header(lrr_api_key: str) -> str:
     """
     Converts key to 'Bearer <base64(key)>' format.
     """
     bearer = base64.b64encode(lrr_api_key.encode(encoding='utf-8')).decode('utf-8')
     return f"Bearer {bearer}"
+
+__all__ = [
+    "ApiContextManager"
+]

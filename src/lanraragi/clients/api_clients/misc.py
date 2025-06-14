@@ -1,29 +1,27 @@
-
-
 import http
 import json
 
 import aiohttp
-from lanraragi.clients.api_clients.base import ApiClient
-from lanraragi.clients.utils import build_err_response
-from lanraragi.models.generics import LRRClientResponse
-from lanraragi.clients.res_processors.misc import handle_get_available_plugins_response, handle_use_plugin_response, process_get_server_info_response
+from lanraragi.clients.api_clients.base import _ApiClient
+from lanraragi.clients.utils import _build_err_response
+from lanraragi.models.generics import _LRRClientResponse
+from lanraragi.clients.res_processors.misc import _handle_get_available_plugins_response, _handle_use_plugin_response, _process_get_server_info_response
 from lanraragi.models.misc import CleanTempFolderResponse, GetAvailablePluginsRequest, GetAvailablePluginsResponse, GetOpdsCatalogRequest, GetOpdsCatalogResponse, GetServerInfoResponse, QueueUrlDownloadRequest, QueueUrlDownloadResponse, RegenerateThumbnailRequest, RegenerateThumbnailResponse, UsePluginAsyncRequest, UsePluginAsyncResponse, UsePluginRequest, UsePluginResponse
 
 
-class MiscApiClient(ApiClient):
+class _MiscApiClient(_ApiClient):
 
-    async def get_server_info(self) -> LRRClientResponse[GetServerInfoResponse]:
+    async def get_server_info(self) -> _LRRClientResponse[GetServerInfoResponse]:
         """
         GET /api/info
         """
         url = self.api_context.build_url("/api/info")
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
         if status == 200:
-            return (process_get_server_info_response(content), None)
-        return (None, build_err_response(content, status))
+            return (_process_get_server_info_response(content), None)
+        return (None, _build_err_response(content, status))
 
-    async def get_opds_catalog(self, request: GetOpdsCatalogRequest) -> LRRClientResponse[GetOpdsCatalogResponse]:
+    async def get_opds_catalog(self, request: GetOpdsCatalogRequest) -> _LRRClientResponse[GetOpdsCatalogResponse]:
         """
         - GET /api/opds
         - GET /api/opds/:id
@@ -40,19 +38,19 @@ class MiscApiClient(ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
         if status == 200:
             return (GetOpdsCatalogResponse(result=content), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
 
-    async def get_available_plugins(self, request: GetAvailablePluginsRequest) -> LRRClientResponse[GetAvailablePluginsResponse]:
+    async def get_available_plugins(self, request: GetAvailablePluginsRequest) -> _LRRClientResponse[GetAvailablePluginsResponse]:
         """
         GET /api/plugins/:type
         """
         url = self.api_context.build_url(f"/api/plugins/{request.type}")
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
         if status == 200:
-            return (handle_get_available_plugins_response(content), None)
-        return (None, build_err_response(content, status))
+            return (_handle_get_available_plugins_response(content), None)
+        return (None, _build_err_response(content, status))
 
-    async def use_plugin(self, request: UsePluginRequest) -> LRRClientResponse[UsePluginResponse]:
+    async def use_plugin(self, request: UsePluginRequest) -> _LRRClientResponse[UsePluginResponse]:
         """
         POST /api/plugins/use
         """
@@ -66,10 +64,10 @@ class MiscApiClient(ApiClient):
             form_data.add_field('arg', request.arg)
         status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers, data=form_data)
         if status == 200:
-            return (handle_use_plugin_response(content), None)
-        return (None, build_err_response(content, status))
+            return (_handle_use_plugin_response(content), None)
+        return (None, _build_err_response(content, status))
 
-    async def use_plugin_async(self, request: UsePluginAsyncRequest) -> LRRClientResponse[UsePluginAsyncResponse]:
+    async def use_plugin_async(self, request: UsePluginAsyncRequest) -> _LRRClientResponse[UsePluginAsyncResponse]:
         """
         POST /api/plugins/queue
         """
@@ -86,9 +84,9 @@ class MiscApiClient(ApiClient):
             response_j = json.loads(content)
             job = response_j.get("job")
             return (UsePluginAsyncResponse(job=job), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
 
-    async def clean_temp_folder(self) -> LRRClientResponse[CleanTempFolderResponse]:
+    async def clean_temp_folder(self) -> _LRRClientResponse[CleanTempFolderResponse]:
         """
         DELETE /api/tempfolder
         """
@@ -98,9 +96,9 @@ class MiscApiClient(ApiClient):
             response_j = json.loads(content)
             newsize = response_j.get("newsize")
             return (CleanTempFolderResponse(newsize=newsize), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
 
-    async def queue_url_download(self, request: QueueUrlDownloadRequest) -> LRRClientResponse[QueueUrlDownloadResponse]:
+    async def queue_url_download(self, request: QueueUrlDownloadRequest) -> _LRRClientResponse[QueueUrlDownloadResponse]:
         """
         POST /api/download_url
         """
@@ -115,9 +113,9 @@ class MiscApiClient(ApiClient):
             job = response_j.get("job")
             url = response_j.get("url")
             return (QueueUrlDownloadResponse(job=job, url=url), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
 
-    async def regenerate_thumbnails(self, request: RegenerateThumbnailRequest) -> LRRClientResponse[RegenerateThumbnailResponse]:
+    async def regenerate_thumbnails(self, request: RegenerateThumbnailRequest) -> _LRRClientResponse[RegenerateThumbnailResponse]:
         """
         POST /api/regen_thumbs
         """
@@ -129,5 +127,9 @@ class MiscApiClient(ApiClient):
             response_j = json.loads(content)
             job = response_j.get("job")
             return (RegenerateThumbnailResponse(job=job), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
     pass
+
+__all__ = [
+    "_MiscApiClient"
+]

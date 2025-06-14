@@ -1,16 +1,16 @@
 import http
 import json
-from lanraragi.clients.api_clients.base import ApiClient
-from lanraragi.clients.utils import build_err_response
-from lanraragi.models.generics import LRRClientResponse
-from lanraragi.clients.res_processors.database import process_get_database_backup_response, process_get_database_stats_response
+from lanraragi.clients.api_clients.base import _ApiClient
+from lanraragi.clients.utils import _build_err_response
+from lanraragi.models.generics import _LRRClientResponse
+from lanraragi.clients.res_processors.database import _process_get_database_backup_response, _process_get_database_stats_response
 from lanraragi.models.base import LanraragiResponse
 from lanraragi.models.database import CleanDatabaseResponse, GetDatabaseBackupResponse, GetDatabaseStatsRequest, GetDatabaseStatsResponse
 
 
-class DatabaseApiClient(ApiClient):
+class _DatabaseApiClient(_ApiClient):
     
-    async def get_database_stats(self, request: GetDatabaseStatsRequest) -> LRRClientResponse[GetDatabaseStatsResponse]:
+    async def get_database_stats(self, request: GetDatabaseStatsRequest) -> _LRRClientResponse[GetDatabaseStatsResponse]:
         """
         GET /api/database/stats
         """
@@ -19,10 +19,10 @@ class DatabaseApiClient(ApiClient):
         params["minweight"] = request.minweight
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
         if status == 200:
-            return (process_get_database_stats_response(content), None)
-        return (None, build_err_response(content, status))
+            return (_process_get_database_stats_response(content), None)
+        return (None, _build_err_response(content, status))
 
-    async def clean_database(self) -> LRRClientResponse[CleanDatabaseResponse]:
+    async def clean_database(self) -> _LRRClientResponse[CleanDatabaseResponse]:
         """
         POST /api/database/clean
         """
@@ -33,9 +33,9 @@ class DatabaseApiClient(ApiClient):
             deleted = response_j.get("deleted")
             unlinked = response_j.get("unlinked")
             return (CleanDatabaseResponse(deleted=deleted, unlinked=unlinked), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
 
-    async def drop_database(self) -> LRRClientResponse[LanraragiResponse]:
+    async def drop_database(self) -> _LRRClientResponse[LanraragiResponse]:
         """
         POST /api/database/drop
         """
@@ -43,19 +43,19 @@ class DatabaseApiClient(ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers)
         if status == 200:
             return (LanraragiResponse(), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
 
-    async def get_database_backup(self) -> LRRClientResponse[GetDatabaseBackupResponse]:
+    async def get_database_backup(self) -> _LRRClientResponse[GetDatabaseBackupResponse]:
         """
         GET /api/database/backup
         """
         url = self.api_context.build_url("/api/database/backup")
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
         if status == 200:
-            return (process_get_database_backup_response(content), None)
-        return (None, build_err_response(content, status))
+            return (_process_get_database_backup_response(content), None)
+        return (None, _build_err_response(content, status))
 
-    async def clear_all_new_flags(self) -> LRRClientResponse[LanraragiResponse]:
+    async def clear_all_new_flags(self) -> _LRRClientResponse[LanraragiResponse]:
         """
         DELETE /api/database/isnew
         """
@@ -63,4 +63,8 @@ class DatabaseApiClient(ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.api_context.headers)
         if status == 200:
             return (LanraragiResponse(), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
+
+__all__ = [
+    "_DatabaseApiClient"
+]

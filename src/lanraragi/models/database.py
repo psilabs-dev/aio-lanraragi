@@ -40,3 +40,14 @@ class GetDatabaseBackupResponse(LanraragiResponse):
     archives: List[GetDatabaseBackupArchiveRecord] = Field(...)
     categories: List[GetDatabaseBackupCategoryRecord] = Field(...)
     tankoubons: List[GetDatabaseBackupTankoubonRecord] = Field(...)
+
+__all__ = [
+    "GetDatabaseStatsRequest",
+    "GetDatabaseStatsResponseTag",
+    "GetDatabaseStatsResponse",
+    "CleanDatabaseResponse",
+    "GetDatabaseBackupArchiveRecord",
+    "GetDatabaseBackupCategoryRecord",
+    "GetDatabaseBackupTankoubonRecord",
+    "GetDatabaseBackupResponse",
+]

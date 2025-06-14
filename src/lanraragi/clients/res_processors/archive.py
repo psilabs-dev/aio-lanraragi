@@ -1,10 +1,9 @@
-
 import json
 from typing import List
 from lanraragi.models.archive import GetAllArchivesResponse, GetAllArchivesResponseRecord, GetArchiveCategoriesCatRecord, GetArchiveCategoriesResponse, GetArchiveMetadataResponse, GetArchiveThumbnailResponse
 
 
-def process_get_all_archives_response(content: str) -> GetAllArchivesResponse:
+def _process_get_all_archives_response(content: str) -> GetAllArchivesResponse:
     response_j = json.loads(content) # note: this is already a list.
     records: List[GetAllArchivesResponseRecord] = []
     for record in response_j:
@@ -24,7 +23,7 @@ def process_get_all_archives_response(content: str) -> GetAllArchivesResponse:
     )
     return response
 
-def process_get_archive_metadata_response(content: str) -> GetArchiveMetadataResponse:
+def _process_get_archive_metadata_response(content: str) -> GetArchiveMetadataResponse:
     response_j = json.loads(content)
     arcid = response_j.get("arcid")
     isnew = response_j.get("isnew")
@@ -38,7 +37,7 @@ def process_get_archive_metadata_response(content: str) -> GetArchiveMetadataRes
         arcid=arcid, isnew=isnew, pagecount=pagecount, progress=progress, tags=tags, lastreadtime=lastreadtime, title=title, filename=filename
     )
 
-def process_get_archive_categories_response(content: str) -> GetArchiveCategoriesResponse:
+def _process_get_archive_categories_response(content: str) -> GetArchiveCategoriesResponse:
     response_j = json.loads(content)
     categories: List[GetArchiveCategoriesCatRecord] = []
     for category in response_j:
@@ -51,7 +50,7 @@ def process_get_archive_categories_response(content: str) -> GetArchiveCategorie
     response = GetArchiveCategoriesResponse(categories=categories)
     return response
 
-def process_get_archive_thumbnail_response(content: str, status: int) -> GetArchiveThumbnailResponse:
+def _process_get_archive_thumbnail_response(content: str, status: int) -> GetArchiveThumbnailResponse:
     """
     Handle all successful status codes (200 or 202).
     """
@@ -61,3 +60,10 @@ def process_get_archive_thumbnail_response(content: str, status: int) -> GetArch
         response_j = json.loads(content)
         job = response_j.get("job")
         return GetArchiveThumbnailResponse(job=job, content=None, content_type=None)
+
+__all__ = [
+    "_process_get_all_archives_response",
+    "_process_get_archive_metadata_response",
+    "_process_get_archive_categories_response",
+    "_process_get_archive_thumbnail_response"
+]

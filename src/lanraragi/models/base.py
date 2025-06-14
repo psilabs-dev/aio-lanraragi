@@ -10,3 +10,9 @@ class LanraragiResponse(BaseModel):
 class LanraragiErrorResponse(LanraragiResponse):
     error: str = Field(..., description="Error message returned by the server.")
     status: int = Field(..., description="Status code returned by the server.")
+
+__all__ = [
+    "LanraragiRequest",
+    "LanraragiResponse",
+    "LanraragiErrorResponse",
+]
