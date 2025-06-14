@@ -27,7 +27,7 @@ class GetOpdsCatalogResponse(LanraragiResponse):
     result: str = Field(..., description="XML string")
 
 class GetAvailablePluginsRequest(LanraragiRequest):
-    type: Literal["login", "metadata", "script", "all"] = Field(...)
+    type: Literal["login", "metadata", "script", "download", "all"] = Field(...)
 
 class GetAvailablePluginsResponsePlugin(BaseModel):
     author: str = Field(...)
@@ -37,7 +37,7 @@ class GetAvailablePluginsResponsePlugin(BaseModel):
     namespace: str = Field(...)
     oneshot_arg: Optional[str] = Field(None)
     parameters: Optional[List[Dict[str, str]]] = Field(None)
-    type: Literal["login", "metadata", "script", "all"] = Field(...)
+    type: Literal["login", "metadata", "script", "download", "all"] = Field(...)
     version: str = Field(...)
 
 class GetAvailablePluginsResponse(LanraragiResponse):

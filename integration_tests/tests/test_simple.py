@@ -47,6 +47,11 @@ from lanraragi.models.category import (
     UpdateCategoryRequest
 )
 from lanraragi.models.database import GetDatabaseStatsRequest
+from lanraragi.models.misc import (
+    GetAvailablePluginsRequest,
+    GetOpdsCatalogRequest,
+    RegenerateThumbnailRequest
+)
 from lanraragi.models.search import (
     GetRandomArchivesRequest,
     SearchArchiveIndexRequest
@@ -848,6 +853,75 @@ async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore)
     assert not error, f"Failed to delete tankoubon (status {error.status}): {error.error}"
     del response, error
     # <<<<< DELETE TANKOUBON STAGE <<<<<
+
+@pytest.mark.asyncio
+async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+    """
+    Basic functional test of miscellaneous API.
+    """
+    generator = np.random.default_rng(42)
+    num_archives = 100
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lanraragi.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    logger.debug("Established connection with test LRR server.")
+    # <<<<< TEST CONNECTION STAGE <<<<<
+    
+    # >>>>> UPLOAD STAGE >>>>>
+    tag_generators = create_tag_generators(num_archives, pmf)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        logger.debug(f"Creating {num_archives} archives to upload.")
+        write_responses = save_archives(num_archives, tmpdir, generator)
+        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+
+        # archive metadata
+        logger.debug("Uploading archives to server.")
+        tasks = []
+        for i, _response in enumerate(write_responses):
+            title = f"Archive {i}"
+            tags = ','.join(get_tag_assignments(tag_generators, generator))
+            checksum = compute_upload_checksum(_response.save_path)
+            tasks.append(asyncio.create_task(
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            ))
+        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        for response, error in gathered:
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+        del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> GET ARCHIVE IDS STAGE >>>>>
+    response, error = await lanraragi.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+    archive_ids = [arc.arcid for arc in response.data]
+    del response, error
+    # <<<<< GET ARCHIVE IDS STAGE <<<<<
+
+    # >>>>> GET AVAILABLE PLUGINS STAGE >>>>>
+    response, error = await lanraragi.misc_api.get_available_plugins(GetAvailablePluginsRequest(type="all"))
+    assert not error, f"Failed to get available plugins (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< GET AVAILABLE PLUGINS STAGE <<<<<
+
+    # >>>>> GET OPDS CATALOG STAGE >>>>>
+    response, error = await lanraragi.misc_api.get_opds_catalog(GetOpdsCatalogRequest(arcid=archive_ids[0]))
+    assert not error, f"Failed to get opds catalog (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< GET OPDS CATALOG STAGE <<<<<
+
+    # >>>>> CLEAN TEMP FOLDER STAGE >>>>>
+    response, error = await lanraragi.misc_api.clean_temp_folder()
+    assert not error, f"Failed to clean temp folder (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< CLEAN TEMP FOLDER STAGE <<<<<
+
+    # >>>>> REGENERATE THUMBNAILS STAGE >>>>>
+    response, error = await lanraragi.misc_api.regenerate_thumbnails(RegenerateThumbnailRequest())
+    assert not error, f"Failed to regenerate thumbnails (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< REGENERATE THUMBNAILS STAGE <<<<<
 
 @pytest.mark.asyncio
 async def test_concurrent_clients():
