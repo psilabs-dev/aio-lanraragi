@@ -4,7 +4,7 @@ from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
 
 class GetMinionJobStatusRequest(LanraragiRequest):
-    id: str = Field(...)
+    job_id: int = Field(..., description="ID of the job.")
 
 class GetMinionJobStatusResponse(LanraragiResponse):
     state: str = Field(...)
@@ -13,7 +13,7 @@ class GetMinionJobStatusResponse(LanraragiResponse):
     notes: Optional[Dict[str, str]] = Field(None)
 
 class GetMinionJobDetailRequest(LanraragiRequest):
-    job_id: str = Field(..., description="ID of the job.")
+    job_id: int = Field(..., description="ID of the job.")
 
 class GetMinionJobDetailResponseResult(BaseModel):
     success: Optional[bool] = Field(None)
@@ -28,14 +28,14 @@ class GetMinionJobDetailResponseResult(BaseModel):
 
 class GetMinionJobDetailResponse(LanraragiResponse):
     id: int = Field(...)
-    args: List[str] = Field(default_factory=list)
+    args: List[Any] = Field(default_factory=list)
     attempts: int = Field(0)
     children: List[int] = Field(default_factory=list)
     created: str = Field(...)
     delayed: str = Field(...)
     expires: Optional[str] = Field(None)
     finished: Optional[str] = Field(None)
-    lax: int = Field(0)
+    lax: Optional[int] = Field(None)
     notes: Dict[str, Any] = Field(default_factory=dict)
     parents: List[int] = Field(default_factory=list)
     priority: int = Field(0)
@@ -46,7 +46,7 @@ class GetMinionJobDetailResponse(LanraragiResponse):
     started: Optional[str] = Field(None)
     state: str = Field(...)
     task: str = Field(...)
-    time: str = Field(...)
+    time: Optional[str] = Field(None)
     worker: int = Field(default=0)
 
 __all__ = [

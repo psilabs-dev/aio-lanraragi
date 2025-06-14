@@ -35,16 +35,8 @@ class GetRandomArchivesRequest(LanraragiRequest):
     untaggedonly: Optional[bool] = Field(None)
     groupby_tanks: bool = Field("true")
 
-class GetRandomArchivesResponseRecord(BaseModel):
-    arcid: str = Field(..., min_length=40, max_length=40)
-    isnew: bool = Field(...)
-    extension: str = Field(...)
-    tags: Optional[str] = Field(None)
-    lastreadtime: Optional[int] = Field(None)
-    title: str = Field(...)
-
 class GetRandomArchivesResponse(LanraragiResponse):
-    data: List[GetRandomArchivesResponseRecord] = Field(...)
+    data: List[SearchArchiveIndexResponseRecord] = Field(...)
     records_total: int = Field(...)
 
 # <<<<< SEARCH <<<<<
@@ -54,7 +46,5 @@ __all__ = [
     "SearchArchiveIndexResponseRecord",
     "SearchArchiveIndexResponse",
     "GetRandomArchivesRequest",
-    "GetRandomArchivesResponseRecord",
     "GetRandomArchivesResponse",
-    "GetRandomArchivesResponseRecord",
 ]
