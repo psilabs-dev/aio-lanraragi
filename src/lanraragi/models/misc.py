@@ -78,3 +78,21 @@ class RegenerateThumbnailRequest(LanraragiRequest):
 
 class RegenerateThumbnailResponse(LanraragiResponse):
     job: int = Field(...)
+
+__all__ = [
+    "GetServerInfoResponse",
+    "GetOpdsCatalogRequest",
+    "GetOpdsCatalogResponse",
+    "GetAvailablePluginsRequest",
+    "GetAvailablePluginsResponsePlugin",
+    "GetAvailablePluginsResponse",
+    "UsePluginRequest",
+    "UsePluginResponse",
+    "UsePluginAsyncRequest",
+    "UsePluginAsyncResponse",
+    "CleanTempFolderResponse",
+    "QueueUrlDownloadRequest",
+    "QueueUrlDownloadResponse",
+    "RegenerateThumbnailRequest",
+    "RegenerateThumbnailResponse",
+]

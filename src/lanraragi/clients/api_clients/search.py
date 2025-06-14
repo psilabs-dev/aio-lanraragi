@@ -1,11 +1,11 @@
 import http
 
-from lanraragi.clients.api_clients.base import ApiClient
-from lanraragi.clients.utils import build_err_response
-from lanraragi.models.generics import LRRClientResponse
+from lanraragi.clients.api_clients.base import _ApiClient
+from lanraragi.clients.utils import _build_err_response
+from lanraragi.models.generics import _LRRClientResponse
 from lanraragi.clients.res_processors.search import (
-    process_get_random_archives_response,
-    process_search_archive_index_response
+    _process_get_random_archives_response,
+    _process_search_archive_index_response
 )
 from lanraragi.models.base import (
     LanraragiResponse,
@@ -17,11 +17,11 @@ from lanraragi.models.search import (
     SearchArchiveIndexResponse, 
 )
 
-class SearchApiClient(ApiClient):
+class _SearchApiClient(_ApiClient):
 
     async def search_archive_index(
             self, request: SearchArchiveIndexRequest
-    ) -> LRRClientResponse[SearchArchiveIndexResponse]:
+    ) -> _LRRClientResponse[SearchArchiveIndexResponse]:
         """
         GET /api/search
         """
@@ -36,15 +36,18 @@ class SearchApiClient(ApiClient):
             ("groupby_tanks", request.groupby_tanks),
         ]:
             if value:
-                params[key] = value
+                if isinstance(value, bool):
+                    params[key] = str(value).lower()
+                else:
+                    params[key] = value
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
         if status == 200:
-            return (process_search_archive_index_response(content), None)
-        return (None, build_err_response(content, status))
+            return (_process_search_archive_index_response(content), None)
+        return (None, _build_err_response(content, status))
 
     async def get_random_archives(
             self, request: GetRandomArchivesRequest
-    ) -> LRRClientResponse[GetRandomArchivesResponse]:
+    ) -> _LRRClientResponse[GetRandomArchivesResponse]:
         """
         GET /api/search/random
         """
@@ -59,13 +62,16 @@ class SearchApiClient(ApiClient):
             ("groupby_tanks", request.groupby_tanks),
         ]:
             if value:
-                params[key] = value
+                if isinstance(value, bool):
+                    params[key] = str(value).lower()
+                else:
+                    params[key] = value
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
         if status == 200:
-            return (process_get_random_archives_response(content), None)
-        return (None, build_err_response(content, status))
+            return (_process_get_random_archives_response(content), None)
+        return (None, _build_err_response(content, status))
 
-    async def discard_search_cache(self) -> LRRClientResponse[LanraragiResponse]:
+    async def discard_search_cache(self) -> _LRRClientResponse[LanraragiResponse]:
         """
         DELETE /api/search/cache
         """
@@ -73,4 +79,8 @@ class SearchApiClient(ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.api_context.headers)
         if status == 200:
             return (LanraragiResponse(), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
+
+__all__ = [
+    "_SearchApiClient"
+]

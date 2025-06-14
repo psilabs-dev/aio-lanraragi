@@ -81,8 +81,8 @@ class ExtractArchiveRequest(LanraragiRequest):
     force: Optional[bool] = Field(None)
 
 class ExtractArchiveResponse(LanraragiResponse):
-    job: int = Field(...)
-    pages: List[str] = Field(...)
+    job: Optional[int] = Field(None)
+    pages: List[str] = Field([])
 
 class ClearNewArchiveFlagRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
@@ -132,3 +132,35 @@ class DeleteArchiveResponse(LanraragiResponse):
     filename: Optional[str] = Field(None)
 
 # <<<<< ARCHIVE <<<<<
+
+__all__ = [
+    "GetAllArchivesResponseRecord",
+    "GetAllArchivesResponse",
+    "GetUntaggedArchivesResponse",
+    "GetArchiveMetadataRequest",
+    "GetArchiveMetadataResponse",
+    "GetArchiveCategoriesRequest",
+    "GetArchiveCategoriesCatRecord",
+    "GetArchiveCategoriesResponse",
+    "GetArchiveTankoubonsRequest",
+    "GetArchiveTankoubonsResponse",
+    "GetArchiveThumbnailRequest",
+    "GetArchiveThumbnailResponse",
+    "QueueArchiveThumbnailExtractionRequest",
+    "QueueArchiveThumbnailExtractionResponse",
+    "DownloadArchiveRequest",
+    "DownloadArchiveResponse",
+    "ExtractArchiveRequest",
+    "ExtractArchiveResponse",
+    "ClearNewArchiveFlagRequest",
+    "ClearNewArchiveFlagResponse",
+    "UpdateReadingProgressionRequest",
+    "UpdateReadingProgressionResponse",
+    "UploadArchiveRequest",
+    "UploadArchiveResponse",
+    "UpdateArchiveThumbnailRequest",
+    "UpdateArchiveThumbnailResponse",
+    "UpdateArchiveMetadataRequest",
+    "DeleteArchiveRequest",
+    "DeleteArchiveResponse",
+]

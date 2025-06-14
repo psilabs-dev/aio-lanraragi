@@ -66,3 +66,22 @@ class AddArchiveToCategoryResponse(LanraragiResponse):
 class RemoveArchiveFromCategoryRequest(LanraragiRequest):
     category_id: str = Field(...)
     arcid: str = Field(..., min_length=40, max_length=40)
+
+__all__ = [
+    "GetAllCategoriesResponseRecord",
+    "GetAllCategoriesResponse",
+    "GetCategoryRequest",
+    "GetCategoryResponse",
+    "CreateCategoryRequest",
+    "CreateCategoryResponse",
+    "UpdateCategoryRequest",
+    "UpdateCategoryResponse",
+    "DeleteCategoryRequest",
+    "GetBookmarkLinkResponse",
+    "UpdateBookmarkLinkRequest",
+    "UpdateBookmarkLinkResponse",
+    "DisableBookmarkLinkResponse",
+    "AddArchiveToCategoryRequest",
+    "AddArchiveToCategoryResponse",
+    "RemoveArchiveFromCategoryRequest",
+]

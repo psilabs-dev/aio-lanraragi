@@ -67,3 +67,21 @@ class DeleteTankoubonRequest(LanraragiRequest):
 
 class DeleteTankoubonResponse(LanraragiResponse):
     success_message: Optional[str] = Field(None)
+
+__all__ = [
+    "TankoubonRecord",
+    "TankoubonArchiveRecord",
+    "TankoubonFullDataRecord",
+    "GetAllTankoubonsRequest",
+    "GetAllTankoubonsResponse",
+    "GetTankoubonRequest",
+    "GetTankoubonResponse",
+    "CreateTankoubonRequest",
+    "CreateTankoubonResponse",
+    "AddArchiveToTankoubonRequest",
+    "AddArchiveToTankoubonResponse",
+    "RemoveArchiveFromTankoubonRequest",
+    "RemoveArchiveFromTankoubonResponse",
+    "DeleteTankoubonRequest",
+    "DeleteTankoubonResponse",
+]

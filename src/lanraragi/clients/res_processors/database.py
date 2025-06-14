@@ -9,9 +9,8 @@ from lanraragi.models.database import (
     GetDatabaseStatsResponseTag
 )
 
-def process_get_database_stats_response(content: str) -> GetDatabaseStatsResponse:
-    response_j = json.loads(content)
-    data = response_j.get("data")
+def _process_get_database_stats_response(content: str) -> GetDatabaseStatsResponse:
+    data = json.loads(content) # note: this is a list of tags, not a dictionary
     tags: List[GetDatabaseStatsResponseTag] = []
     for tag in data:
         namespace = tag.get("namespace")
@@ -23,7 +22,7 @@ def process_get_database_stats_response(content: str) -> GetDatabaseStatsRespons
     )
     return response
 
-def process_get_database_backup_response(content: str) -> GetDatabaseBackupResponse:
+def _process_get_database_backup_response(content: str) -> GetDatabaseBackupResponse:
     response_j = json.loads(content)
     archive_records: List[GetDatabaseBackupArchiveRecord] = []
     if "archives" in response_j:
@@ -54,3 +53,8 @@ def process_get_database_backup_response(content: str) -> GetDatabaseBackupRespo
                 archives=tank_record.get("archives")
             ))
     return GetDatabaseBackupResponse(archives=archive_records, categories=category_records, tankoubons=tankoubon_records)
+
+__all__ = [
+    "_process_get_database_stats_response",
+    "_process_get_database_backup_response"
+]

@@ -1,18 +1,16 @@
-
-
 import http
 import json
 from typing import List
 
 import aiohttp
-from lanraragi.clients.api_clients.base import ApiClient
-from lanraragi.clients.utils import build_err_response
-from lanraragi.models.generics import LRRClientResponse
+from lanraragi.clients.api_clients.base import _ApiClient
+from lanraragi.clients.utils import _build_err_response
+from lanraragi.models.generics import _LRRClientResponse
 from lanraragi.clients.res_processors.archive import (
-    process_get_all_archives_response,
-    process_get_archive_categories_response,
-    process_get_archive_metadata_response,
-    process_get_archive_thumbnail_response
+    _process_get_all_archives_response,
+    _process_get_archive_categories_response,
+    _process_get_archive_metadata_response,
+    _process_get_archive_thumbnail_response
 )
 from lanraragi.models.archive import (
     GetArchiveMetadataResponse,
@@ -45,19 +43,19 @@ from lanraragi.models.archive import (
 )
 from lanraragi.models.base import LanraragiResponse
 
-class ArchiveApiClient(ApiClient):
+class _ArchiveApiClient(_ApiClient):
 
-    async def get_all_archives(self) -> LRRClientResponse[GetAllArchivesResponse]:
+    async def get_all_archives(self) -> _LRRClientResponse[GetAllArchivesResponse]:
         """
         GET /api/archives
         """
         url = self.api_context.build_url("/api/archives")
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
         if status == 200:
-            return (process_get_all_archives_response(content), None)
-        return (None, build_err_response(content, status))
+            return (_process_get_all_archives_response(content), None)
+        return (None, _build_err_response(content, status))
     
-    async def get_untagged_archives(self) -> LRRClientResponse[GetUntaggedArchivesResponse]:
+    async def get_untagged_archives(self) -> _LRRClientResponse[GetUntaggedArchivesResponse]:
         """
         GET /api/archives/untagged
         """
@@ -65,29 +63,29 @@ class ArchiveApiClient(ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
         if status == 200:
             return (GetUntaggedArchivesResponse(data=json.loads(content)), None) # the content data should just be a list of string.
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
     
-    async def get_archive_metadata(self, request: GetArchiveMetadataRequest) -> LRRClientResponse[GetArchiveMetadataResponse]:
+    async def get_archive_metadata(self, request: GetArchiveMetadataRequest) -> _LRRClientResponse[GetArchiveMetadataResponse]:
         """
         GET /api/archives/:id/metadata
         """
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/metadata")
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
         if status == 200:
-            return (process_get_archive_metadata_response(content), None)
-        return (None, build_err_response(content, status))
+            return (_process_get_archive_metadata_response(content), None)
+        return (None, _build_err_response(content, status))
 
-    async def get_archive_categories(self, request: GetArchiveCategoriesRequest) -> LRRClientResponse[GetArchiveCategoriesResponse]:
+    async def get_archive_categories(self, request: GetArchiveCategoriesRequest) -> _LRRClientResponse[GetArchiveCategoriesResponse]:
         """
         GET /api/archives/:id/categories
         """
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/categories")
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
         if status == 200:
-            return (process_get_archive_categories_response(content), None)
-        return (None, build_err_response(content, status))
+            return (_process_get_archive_categories_response(content), None)
+        return (None, _build_err_response(content, status))
     
-    async def get_archive_tankoubons(self, request: GetArchiveTankoubonsRequest) -> LRRClientResponse[GetArchiveTankoubonsResponse]:
+    async def get_archive_tankoubons(self, request: GetArchiveTankoubonsRequest) -> _LRRClientResponse[GetArchiveTankoubonsResponse]:
         """
         GET /api/archives/:id/tankoubons
         """
@@ -97,9 +95,9 @@ class ArchiveApiClient(ApiClient):
             response_j = json.loads(content)
             tankoubons: List[str] = response_j.get("tankoubons")
             return (GetArchiveTankoubonsResponse(tankoubons=tankoubons), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
     
-    async def get_archive_thumbnail(self, request: GetArchiveThumbnailRequest) -> LRRClientResponse[GetArchiveThumbnailResponse]:
+    async def get_archive_thumbnail(self, request: GetArchiveThumbnailRequest) -> _LRRClientResponse[GetArchiveThumbnailResponse]:
         """
         GET /api/archives/:id/thumbnail
         """
@@ -108,13 +106,13 @@ class ArchiveApiClient(ApiClient):
         if request.page:
             params["page"] = request.page
         if request.nofallback:
-            params["nofallback"] = request.nofallback
+            params["nofallback"] = str(request.nofallback).lower()
         status, data = await self.api_context.download_thumbnail(url, self.api_context.headers, params=params)
         if status in [200, 202]:
-            return (process_get_archive_thumbnail_response(data, status), None)
-        return (None, build_err_response(data, status))
+            return (_process_get_archive_thumbnail_response(data, status), None)
+        return (None, _build_err_response(data, status))
     
-    async def queue_archive_thumbnail_extraction(self, request: QueueArchiveThumbnailExtractionRequest) -> LRRClientResponse[QueueArchiveThumbnailExtractionResponse]:
+    async def queue_archive_thumbnail_extraction(self, request: QueueArchiveThumbnailExtractionRequest) -> _LRRClientResponse[QueueArchiveThumbnailExtractionResponse]:
         """
         POST /api/archives/:id/files/thumbnails
         """
@@ -128,9 +126,9 @@ class ArchiveApiClient(ApiClient):
             job = response_j.get("job")
             message = response_j.get("message")
             return (QueueArchiveThumbnailExtractionResponse(job=job, message=message), None)
-        return (None, build_err_response(data, status))
+        return (None, _build_err_response(data, status))
 
-    async def download_archive(self, request: DownloadArchiveRequest) -> LRRClientResponse[DownloadArchiveResponse]:
+    async def download_archive(self, request: DownloadArchiveRequest) -> _LRRClientResponse[DownloadArchiveResponse]:
         """
         GET  /api/archives/:id/download
         """
@@ -138,25 +136,25 @@ class ArchiveApiClient(ApiClient):
         status, data = await self.api_context.download_file(url, self.api_context.headers)
         if status == 200:
             return (DownloadArchiveResponse(data=data), None)
-        return (None, build_err_response(data, status))
+        return (None, _build_err_response(data, status))
     
-    async def extract_archive(self, request: ExtractArchiveRequest) -> LRRClientResponse[ExtractArchiveResponse]:
+    async def extract_archive(self, request: ExtractArchiveRequest) -> _LRRClientResponse[ExtractArchiveResponse]:
         """
         GET /api/archives/:id/files
         """
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/files")
         params = {}
         if request.force:
-            params["force"] = request.force
+            params["force"] = str(request.force).lower()
         status, data = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
         if status == 200:
             response_j = json.loads(data)
-            job = response_j.get("job")
-            pages = response_j.get("pages")
+            job = response_j.get("job") if 'job' in response_j else None
+            pages = response_j.get("pages") if 'pages' in response_j else []
             return (ExtractArchiveResponse(job=job, pages=pages), None)
-        return (None, build_err_response(data, status))
+        return (None, _build_err_response(data, status))
     
-    async def clear_new_archive_flag(self, request: ClearNewArchiveFlagRequest) -> LRRClientResponse[ClearNewArchiveFlagResponse]:
+    async def clear_new_archive_flag(self, request: ClearNewArchiveFlagRequest) -> _LRRClientResponse[ClearNewArchiveFlagResponse]:
         """
         DELETE /api/archives/:id/isnew
         """
@@ -164,9 +162,9 @@ class ArchiveApiClient(ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.api_context.headers)
         if status == 200:
             return (ClearNewArchiveFlagResponse(arcid=request.arcid), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
     
-    async def update_reading_progression(self, request: UpdateReadingProgressionRequest) -> LRRClientResponse[UpdateReadingProgressionResponse]:
+    async def update_reading_progression(self, request: UpdateReadingProgressionRequest) -> _LRRClientResponse[UpdateReadingProgressionResponse]:
         """
         PUT /api/archives/:id/progress/:page
         """
@@ -178,9 +176,9 @@ class ArchiveApiClient(ApiClient):
             page = response_j.get("page")
             lastreadtime = response_j.get("lastreadtime")
             return (UpdateReadingProgressionResponse(arcid=arcid, page=page, lastreadtime=lastreadtime), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
     
-    async def upload_archive(self, request: UploadArchiveRequest) -> LRRClientResponse[UploadArchiveResponse]:
+    async def upload_archive(self, request: UploadArchiveRequest) -> _LRRClientResponse[UploadArchiveResponse]:
         """
         PUT /api/archives/upload
         """
@@ -203,9 +201,9 @@ class ArchiveApiClient(ApiClient):
             arcid = response_j.get("id")
             filename = response_j.get("filename")
             return (UploadArchiveResponse(arcid=arcid, filename=filename), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
     
-    async def update_thumbnail(self, request: UpdateArchiveThumbnailRequest) -> LRRClientResponse[UpdateArchiveThumbnailResponse]:
+    async def update_thumbnail(self, request: UpdateArchiveThumbnailRequest) -> _LRRClientResponse[UpdateArchiveThumbnailResponse]:
         """
         PUT /api/archives/:id/thumbnail
         """
@@ -217,9 +215,9 @@ class ArchiveApiClient(ApiClient):
             response_j = json.loads(content)
             new_thumbnail = response_j.get("new_thumbnail")
             return (UpdateArchiveThumbnailResponse(new_thumbnail=new_thumbnail), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
     
-    async def update_archive_metadata(self, request: UpdateArchiveMetadataRequest) -> LRRClientResponse[LanraragiResponse]:
+    async def update_archive_metadata(self, request: UpdateArchiveMetadataRequest) -> _LRRClientResponse[LanraragiResponse]:
         """
         PUT /api/archives/:id/metadata
         """
@@ -234,9 +232,9 @@ class ArchiveApiClient(ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.api_context.headers, data=form_data)
         if status == 200:
             return (LanraragiResponse(), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
     
-    async def delete_archive(self, request: DeleteArchiveRequest) -> LRRClientResponse[DeleteArchiveResponse]:
+    async def delete_archive(self, request: DeleteArchiveRequest) -> _LRRClientResponse[DeleteArchiveResponse]:
         """
         DELETE /api/archives/:id
         """
@@ -246,4 +244,8 @@ class ArchiveApiClient(ApiClient):
             response_j = json.loads(content)
             filename = response_j.get("filename")
             return (DeleteArchiveResponse(arcid=request.arcid, filename=filename), None)
-        return (None, build_err_response(content, status))
+        return (None, _build_err_response(content, status))
+
+__all__ = [
+    "_ArchiveApiClient"
+]

@@ -48,3 +48,13 @@ class GetRandomArchivesResponse(LanraragiResponse):
     records_total: int = Field(...)
 
 # <<<<< SEARCH <<<<<
+
+__all__ = [
+    "SearchArchiveIndexRequest",
+    "SearchArchiveIndexResponseRecord",
+    "SearchArchiveIndexResponse",
+    "GetRandomArchivesRequest",
+    "GetRandomArchivesResponseRecord",
+    "GetRandomArchivesResponse",
+    "GetRandomArchivesResponseRecord",
+]

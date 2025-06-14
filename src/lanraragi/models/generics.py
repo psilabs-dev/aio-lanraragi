@@ -5,5 +5,9 @@ from typing import Optional, Tuple, TypeVar
 
 from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
 
-T = TypeVar('T', bound=LanraragiResponse)
-LRRClientResponse = Tuple[Optional[T], Optional[LanraragiErrorResponse]]
+__T = TypeVar('T', bound=LanraragiResponse)
+_LRRClientResponse = Tuple[Optional[__T], Optional[LanraragiErrorResponse]]
+
+__all__ = [
+    "_LRRClientResponse"
+]

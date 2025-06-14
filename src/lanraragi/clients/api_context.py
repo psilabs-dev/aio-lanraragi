@@ -18,7 +18,7 @@ import aiohttp
 import aiohttp.client_exceptions
 from yarl import Query
 
-ApiContextManagerLike = TypeVar('ApiContextManagerLike', bound='ApiContextManager')
+_ApiContextManagerLike = TypeVar('_ApiContextManagerLike', bound='ApiContextManager')
 class ApiContextManager(contextlib.AbstractAsyncContextManager):
     """
     Base API context management layer for an async LANraragi API client. Provides the required utilities and abstractions
@@ -29,16 +29,18 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
     def __init__(
             self,
             lrr_host: str, lrr_api_key: str,
-            session: Optional[aiohttp.ClientSession]=None, ssl: bool=True, logger: Optional[logging.Logger]=None
+            session: Optional[aiohttp.ClientSession]=None, ssl: bool=True, timeout: Optional[int] = None,
+            logger: Optional[logging.Logger]=None
     ):
         if not logger:
             logger = logging.getLogger(__name__)
         self.logger = logger
         self.lrr_host = lrr_host
         self.lrr_api_key = lrr_api_key
-        self.headers = {"Authorization": build_auth_header(lrr_api_key)}
+        self.headers = {"Authorization": _build_auth_header(lrr_api_key)}
         self.session = session
         self.ssl = ssl
+        self.timeout = timeout
         self._created_session = False
         self.initialize_api_groups()
 
@@ -47,10 +49,13 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if not self.session:
+            timeout: Optional[aiohttp.ClientTimeout] = None
+            if self.timeout:
+                timeout = aiohttp.ClientTimeout(total=self.timeout)
             if not self.ssl:
-                self.session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False))
+                self.session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False), timeout=timeout)
             else:
-                self.session = aiohttp.ClientSession()
+                self.session = aiohttp.ClientSession(timeout=timeout)
             self._created_session = True
         return self.session
     
@@ -71,7 +76,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         return f"{self.lrr_host}{api}"
 
     @override
-    async def __aenter__(self: ApiContextManagerLike) -> ApiContextManagerLike:
+    async def __aenter__(self: _ApiContextManagerLike) -> _ApiContextManagerLike:
         await self._get_session()
         return self
     
@@ -136,46 +141,72 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
                 continue
     
     async def download_thumbnail(
-            self, url: str, headers: Dict[str, str], params: Query=None
+            self, url: str, headers: Dict[str, str], params: Query=None, max_retries: int=0
     ) -> Tuple[int, Union[bytes, str]]:
         """
         Specific to downloading thumbnails from the LANraragi server. (/api/archives/:id/thumbnail)
         """
-        async with (await self._get_session()).get(url=url, headers=headers, params=params) as async_response:
-            if async_response.status == 200:
-                buffer = io.BytesIO()
-                while True:
-                    chunk = await async_response.content.read(1024)
-                    if not chunk:
-                        break
-                    buffer.write(chunk)
-                buffer.seek(0)
-                return (async_response.status, buffer.getvalue())
-            elif async_response.status == 202:
-                return (async_response.status, await async_response.text())
-            return (async_response.status, await async_response.text())
+        self.logger.debug(f"[GET][{url}]")
+        retry_count = 0
+        while True:
+            try:
+                async with (await self._get_session()).get(url=url, headers=headers, params=params) as async_response:
+                    if async_response.status == 200:
+                        buffer = io.BytesIO()
+                        while True:
+                            chunk = await async_response.content.read(1024)
+                            if not chunk:
+                                break
+                            buffer.write(chunk)
+                        buffer.seek(0)
+                        return (async_response.status, buffer.getvalue())
+                    elif async_response.status == 202:
+                        return (async_response.status, await async_response.text())
+                    return (async_response.status, await async_response.text())
+            except (aiohttp.client_exceptions.ClientConnectionError, aiohttp.client_exceptions.ClientOSError, aiohttp.client_exceptions.ClientConnectorError) as aiohttp_error:
+                if retry_count >= max_retries:
+                    raise aiohttp_error
+                retry_count += 1
+                self.logger.warning(f"[GET][{url}] encountered connection error ({aiohttp_error}); retrying in {2 ** retry_count} seconds...")
+                await asyncio.sleep(2 ** retry_count)
+                continue
 
     async def download_file(
-            self, url: str, headers: Dict[str, str], params: Query=None
+            self, url: str, headers: Dict[str, str], params: Query=None, max_retries: int=0
     ) -> Tuple[int, Union[bytes, str]]:
         """
         Specific to downloading files from the LANraragi server.
         """
-        async with (await self._get_session()).get(url=url, headers=headers, params=params) as async_response:
-            if async_response.status == 200:
-                buffer = io.BytesIO()
-                while True:
-                    chunk = await async_response.content.read(1024)
-                    if not chunk:
-                        break
-                    buffer.write(chunk)
-                buffer.seek(0)
-                return (async_response.status, buffer.getvalue())
-            return (async_response.status, await async_response.text())
+        self.logger.debug(f"[GET][{url}]")
+        retry_count = 0
+        while True:
+            try:
+                async with (await self._get_session()).get(url=url, headers=headers, params=params) as async_response:
+                    if async_response.status == 200:
+                        buffer = io.BytesIO()
+                        while True:
+                            chunk = await async_response.content.read(1024)
+                            if not chunk:
+                                break
+                            buffer.write(chunk)
+                        buffer.seek(0)
+                        return (async_response.status, buffer.getvalue())
+                    return (async_response.status, await async_response.text())
+            except (aiohttp.client_exceptions.ClientConnectionError, aiohttp.client_exceptions.ClientOSError, aiohttp.client_exceptions.ClientConnectorError) as aiohttp_error:
+                if retry_count >= max_retries:
+                    raise aiohttp_error
+                retry_count += 1
+                self.logger.warning(f"[GET][{url}] encountered connection error ({aiohttp_error}); retrying in {2 ** retry_count} seconds...")
+                await asyncio.sleep(2 ** retry_count)
+                continue
 
-def build_auth_header(lrr_api_key: str) -> str:
+def _build_auth_header(lrr_api_key: str) -> str:
     """
     Converts key to 'Bearer <base64(key)>' format.
     """
     bearer = base64.b64encode(lrr_api_key.encode(encoding='utf-8')).decode('utf-8')
     return f"Bearer {bearer}"
+
+__all__ = [
+    "ApiContextManager"
+]

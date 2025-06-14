@@ -12,10 +12,10 @@ A working understanding of Python's async framework is needed.
 Here is an example on getting all archives from LANraragi using `LRRClient`'s context management:
 ```python
 import asyncio
-from lanraragi.clients.client import LRRClient
+from lanraragi import LRRClient
 
 async def main():
-    await with LRRClient("http://localhost:3000", lrr_api_key="lanraragi") as lrr:
+    async with LRRClient("http://localhost:3000", lrr_api_key="lanraragi") as lrr:
         response, err = await lrr.archive_api.get_all_archives()
         if err:
             raise Exception(f"Encountered error while getting all archives: {err.error}")
@@ -37,6 +37,12 @@ async with LRRClient("http://localhost:3000", lrr_api_key="lanraragi") as lrr:
         tasks.append(asyncio.create_task(async_task(lrr, req, semaphore)))
     await asyncio.gather(*tasks)
 ```
+
+Since aiohttp is used under the hood, you may install optional libraries (namely, aiodns and brotli) for more optimization:
+```sh
+pip install "aiohttp[speedups]"
+```
+
 ## Development
 
 ```sh
@@ -52,7 +58,7 @@ The `ApiContextManager` is an asynchronous HTTP context manager and handle the H
 
 > If you don't want to use request/response DTOs, go with the API context manager.
 
-An `ApiClient` represents a logical client for a collection of related APIs. They handle the DTO layer. These are only to be used by the LRRClient.
+An `ApiClient` represents a logical client for a collection of related APIs. They handle the DTO and request/response marshalling layer. These are only to be used by the LRRClient.
 
 The `LRRClient` is a higher abstraction than `ApiContextManager` which also provides API clients for easy access in a context.
 

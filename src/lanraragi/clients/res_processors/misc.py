@@ -3,7 +3,7 @@ from typing import List
 from lanraragi.models.misc import GetAvailablePluginsResponse, GetAvailablePluginsResponsePlugin, GetServerInfoResponse, UsePluginResponse
 
 
-def process_get_server_info_response(content: str) -> GetServerInfoResponse:
+def _process_get_server_info_response(content: str) -> GetServerInfoResponse:
     response_j = json.loads(content)
     archives_per_page = response_j.get("archives_per_page")
     cache_last_cleared = response_j.get("cache_last_cleared")
@@ -35,7 +35,7 @@ def process_get_server_info_response(content: str) -> GetServerInfoResponse:
         version_name=version_name
     )
 
-def handle_get_available_plugins_response(content: str) -> GetAvailablePluginsResponse:
+def _handle_get_available_plugins_response(content: str) -> GetAvailablePluginsResponse:
     response_j = json.loads(content)
     plugins: List[GetAvailablePluginsResponsePlugin] = []
     for plugin in response_j:
@@ -62,8 +62,14 @@ def handle_get_available_plugins_response(content: str) -> GetAvailablePluginsRe
     response = GetAvailablePluginsResponse(plugins=plugins)
     return response
 
-def handle_use_plugin_response(content: str) -> UsePluginResponse:
+def _handle_use_plugin_response(content: str) -> UsePluginResponse:
     response_j = json.loads(content)
     data = response_j.get("data")
     type = response_j.get("type")
     return UsePluginResponse(data=data, type=type)
+
+__all__ = [
+    "_process_get_server_info_response",
+    "_handle_get_available_plugins_response",
+    "_handle_use_plugin_response"
+]

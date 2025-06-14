@@ -48,3 +48,11 @@ class GetMinionJobDetailResponse(LanraragiResponse):
     task: str = Field(...)
     time: str = Field(...)
     worker: int = Field(default=0)
+
+__all__ = [
+    "GetMinionJobStatusRequest",
+    "GetMinionJobStatusResponse",
+    "GetMinionJobDetailRequest",
+    "GetMinionJobDetailResponseResult",
+    "GetMinionJobDetailResponse",
+]
