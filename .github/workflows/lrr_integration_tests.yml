@@ -9,6 +9,9 @@ on:
     branches: 
       - main
       - 'dev-*/main'
+  schedule:
+    - cron: '0 0 * * 4' # Run integration tests on main branch every Thursday at 00:00
+  workflow_call:
 
 jobs:
   integration-tests:
@@ -46,3 +49,15 @@ jobs:
         env:
           # Ensure Docker daemon is accessible to Python docker SDK
           DOCKER_HOST: unix:///var/run/docker.sock
+  
+  check:
+    if: always()
+
+    needs:
+      - integration-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if integration tests passed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJson(needs) }}
