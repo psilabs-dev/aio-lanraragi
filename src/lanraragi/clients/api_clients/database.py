@@ -22,7 +22,7 @@ class DatabaseApiClient(ApiClient):
             return (process_get_database_stats_response(content), None)
         return (None, build_err_response(content, status))
 
-    async def clean_database(self) -> LRRClientResponse[LanraragiResponse]:
+    async def clean_database(self) -> LRRClientResponse[CleanDatabaseResponse]:
         """
         POST /api/database/clean
         """

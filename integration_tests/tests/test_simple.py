@@ -46,6 +46,7 @@ from lanraragi.models.category import (
     UpdateBookmarkLinkRequest,
     UpdateCategoryRequest
 )
+from lanraragi.models.database import GetDatabaseStatsRequest
 from lanraragi.models.search import (
     GetRandomArchivesRequest,
     SearchArchiveIndexRequest
@@ -545,7 +546,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
 @pytest.mark.asyncio
 async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     """
-    Tests the search API.
+    Very basic functional test of the search API.
     
     1. upload 100 archives
     2. search for 20 archives using the search API
@@ -569,7 +570,7 @@ async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UPLOAD STAGE >>>>>
-    tag_generators = create_tag_generators(100, pmf)
+    tag_generators = create_tag_generators(num_archives, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         logger.debug(f"Creating {num_archives} archives to upload.")
@@ -614,6 +615,127 @@ async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     assert len(response.data) == 0
     del response, error
     # <<<<< SEARCH STAGE <<<<<
+
+@pytest.mark.asyncio
+async def test_shinobu_api(lanraragi: LRRClient):
+    """
+    Very basic functional test of Shinobu API. Does not test concurrent API calls against shinobu.
+    """
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lanraragi.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    logger.debug("Established connection with test LRR server.")
+    # <<<<< TEST CONNECTION STAGE <<<<<
+    
+    # >>>>> GET SHINOBU STATUS STAGE >>>>>
+    response, error = await lanraragi.shinobu_api.get_shinobu_status()
+    assert not error, f"Failed to get shinobu status (status {error.status}): {error.error}"
+    assert response.is_alive, "Shinobu should be running!"
+    pid = response.pid
+    del response, error
+    # <<<<< GET SHINOBU STATUS STAGE <<<<<
+
+    # >>>>> RESTART SHINOBU STAGE >>>>>
+    # restarting shinobu does not guarantee that pid will change (though it is extremely unlikely), so we do it 3 times.
+    pid_has_changed = False
+    for _ in range(3):
+        response, error = await lanraragi.shinobu_api.restart_shinobu()
+        assert not error, f"Failed to restart shinobu (status {error.status}): {error.error}"
+        if response.new_pid == pid:
+            logger.warning(f"Shinobu PID {pid} did not change; retrying...")
+            continue
+        else:
+            pid_has_changed = True
+            break
+    del response, error
+    assert pid_has_changed, "Shinobu restarted 3 times but PID did not change???"
+    # <<<<< RESTART SHINOBU STAGE <<<<<
+
+    # >>>>> STOP SHINOBU STAGE >>>>>
+    response, error = await lanraragi.shinobu_api.stop_shinobu()
+    assert not error, f"Failed to stop shinobu (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< STOP SHINOBU STAGE <<<<<
+
+    # >>>>> GET SHINOBU STATUS STAGE >>>>>
+    response, error = await lanraragi.shinobu_api.get_shinobu_status()
+    assert not error, f"Failed to get shinobu status (status {error.status}): {error.error}"
+    assert not response.is_alive, "Shinobu should be stopped!"
+    del response, error
+    # <<<<< GET SHINOBU STATUS STAGE <<<<<
+
+@pytest.mark.asyncio
+async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+    """
+    Very basic functional test of the database API.
+    Does not test drop database or get backup.
+    """
+    generator = np.random.default_rng(42)
+    num_archives = 100
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lanraragi.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    logger.debug("Established connection with test LRR server.")
+    # <<<<< TEST CONNECTION STAGE <<<<<
+    
+    # >>>>> UPLOAD STAGE >>>>>
+    tag_generators = create_tag_generators(num_archives, pmf)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        logger.debug(f"Creating {num_archives} archives to upload.")
+        write_responses = save_archives(num_archives, tmpdir, generator)
+        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+
+        # archive metadata
+        logger.debug("Uploading archives to server.")
+        tasks = []
+        for i, _response in enumerate(write_responses):
+            title = f"Archive {i}"
+            tags = ','.join(get_tag_assignments(tag_generators, generator))
+            checksum = compute_upload_checksum(_response.save_path)
+            tasks.append(asyncio.create_task(
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            ))
+        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        for response, error in gathered:
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+        del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> GET STATISTICS STAGE >>>>>
+    response, error = await lanraragi.database_api.get_database_stats(GetDatabaseStatsRequest())
+    assert not error, f"Failed to get statistics (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< GET STATISTICS STAGE <<<<<
+
+    # >>>>> CLEAN DATABASE STAGE >>>>>
+    response, error = await lanraragi.database_api.clean_database()
+    assert not error, f"Failed to clean database (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< CLEAN DATABASE STAGE <<<<<
+
+@pytest.mark.asyncio
+async def test_drop_database(lanraragi: LRRClient):
+    """
+    Test drop database API by dropping database and verifying that client has no permissions.
+    """
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lanraragi.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    logger.debug("Established connection with test LRR server.")
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> DROP DATABASE STAGE >>>>>
+    response, error = await lanraragi.database_api.drop_database()
+    assert not error, f"Failed to drop database (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< DROP DATABASE STAGE <<<<<
+    
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lanraragi.shinobu_api.get_shinobu_status()
+    assert error and error.status == 401, f"Expected no permissions, got status {error.status}."
+    # <<<<< TEST CONNECTION STAGE <<<<<
 
 @pytest.mark.asyncio
 async def test_concurrent_clients():

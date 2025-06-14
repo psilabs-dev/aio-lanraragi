@@ -10,8 +10,7 @@ from lanraragi.models.database import (
 )
 
 def process_get_database_stats_response(content: str) -> GetDatabaseStatsResponse:
-    response_j = json.loads(content)
-    data = response_j.get("data")
+    data = json.loads(content) # note: this is a list of tags, not a dictionary
     tags: List[GetDatabaseStatsResponseTag] = []
     for tag in data:
         namespace = tag.get("namespace")

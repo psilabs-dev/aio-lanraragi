@@ -18,9 +18,13 @@ class ShinobuApiClient(ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
         if status == 200:
             response_j = json.loads(content)
-            isalive = response_j.get("isalive")
+            is_alive = response_j["is_alive"]
+            if isinstance(is_alive, int):
+                is_alive = is_alive == 1
+            else:
+                raise TypeError(f"is_alive is not a boolean: {is_alive}")
             pid = response_j.get("pid")
-            return (GetShinobuStatusResponse(isalive=isalive, pid=pid), None)
+            return (GetShinobuStatusResponse(is_alive=is_alive, pid=pid), None)
         return (None, build_err_response(content, status))
 
     async def stop_shinobu(self) -> LRRClientResponse[LanraragiResponse]:
@@ -41,6 +45,6 @@ class ShinobuApiClient(ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers)
         if status == 200:
             response_j = json.loads(content)
-            new_pid = response_j.get("new_pid")
+            new_pid = response_j["new_pid"]
             return (RestartShinobuResponse(new_pid=new_pid), None)
         return (None, build_err_response(content, status))
