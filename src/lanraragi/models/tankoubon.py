@@ -1,5 +1,3 @@
-
-
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
@@ -34,8 +32,8 @@ class GetAllTankoubonsResponse(LanraragiResponse):
 
 class GetTankoubonRequest(LanraragiRequest):
     tank_id: str = Field(..., description="The ID of the Tankoubon.")
-    include_full_data: bool = Field(..., description="If set in 1, it appends a full_data array with Archive objects.")
-    page: str = Field(..., description="The page of the list of Archives.")
+    include_full_data: Optional[str] = Field(None, description="If set in 1, it appends a full_data array with Archive objects.")
+    page: Optional[str] = Field(None, description="The page of the list of Archives.")
 
 class GetTankoubonResponse(LanraragiResponse):
     result: TankoubonRecord = Field(...) # can be TankoubonRecord or TankoubonFullDataRecord.
@@ -47,6 +45,19 @@ class CreateTankoubonRequest(LanraragiRequest):
 
 class CreateTankoubonResponse(LanraragiResponse):
     tank_id: str = Field(...)
+
+class TankoubonMetadata(BaseModel):
+    name: Optional[str] = Field(None, description="The name of the tankoubon")
+    summary: Optional[str] = Field(None, description="The summary of the tankoubon") 
+    tags: Optional[str] = Field(None, description="The tags of the tankoubon")
+
+class UpdateTankoubonRequest(LanraragiRequest):
+    tank_id: str = Field(...)
+    archives: Optional[List[str]] = Field(None)
+    metadata: Optional[TankoubonMetadata] = Field(None)
+
+class UpdateTankoubonResponse(LanraragiResponse):
+    success_message: Optional[str] = Field(None)
 
 class AddArchiveToTankoubonRequest(LanraragiRequest):
     tank_id: str = Field(...)
@@ -72,12 +83,15 @@ __all__ = [
     "TankoubonRecord",
     "TankoubonArchiveRecord",
     "TankoubonFullDataRecord",
+    "TankoubonMetadata",
     "GetAllTankoubonsRequest",
     "GetAllTankoubonsResponse",
     "GetTankoubonRequest",
     "GetTankoubonResponse",
     "CreateTankoubonRequest",
     "CreateTankoubonResponse",
+    "UpdateTankoubonRequest",
+    "UpdateTankoubonResponse",
     "AddArchiveToTankoubonRequest",
     "AddArchiveToTankoubonResponse",
     "RemoveArchiveFromTankoubonRequest",

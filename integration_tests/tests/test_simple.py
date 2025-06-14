@@ -51,6 +51,15 @@ from lanraragi.models.search import (
     GetRandomArchivesRequest,
     SearchArchiveIndexRequest
 )
+from lanraragi.models.tankoubon import (
+    AddArchiveToTankoubonRequest,
+    CreateTankoubonRequest,
+    DeleteTankoubonRequest,
+    GetTankoubonRequest,
+    RemoveArchiveFromTankoubonRequest,
+    TankoubonMetadata,
+    UpdateTankoubonRequest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -736,6 +745,109 @@ async def test_drop_database(lanraragi: LRRClient):
     response, error = await lanraragi.shinobu_api.get_shinobu_status()
     assert error and error.status == 401, f"Expected no permissions, got status {error.status}."
     # <<<<< TEST CONNECTION STAGE <<<<<
+
+@pytest.mark.asyncio
+async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+    """
+    Very basic functional test of the tankoubon API.
+    """
+    generator = np.random.default_rng(42)
+    num_archives = 100
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lanraragi.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    logger.debug("Established connection with test LRR server.")
+    # <<<<< TEST CONNECTION STAGE <<<<<
+    
+    # >>>>> UPLOAD STAGE >>>>>
+    tag_generators = create_tag_generators(num_archives, pmf)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        logger.debug(f"Creating {num_archives} archives to upload.")
+        write_responses = save_archives(num_archives, tmpdir, generator)
+        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+
+        # archive metadata
+        logger.debug("Uploading archives to server.")
+        tasks = []
+        for i, _response in enumerate(write_responses):
+            title = f"Archive {i}"
+            tags = ','.join(get_tag_assignments(tag_generators, generator))
+            checksum = compute_upload_checksum(_response.save_path)
+            tasks.append(asyncio.create_task(
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            ))
+        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        for response, error in gathered:
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+        del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> GET ARCHIVE IDS STAGE >>>>>
+    response, error = await lanraragi.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+    archive_ids = [arc.arcid for arc in response.data]
+    del response, error
+    # <<<<< GET ARCHIVE IDS STAGE <<<<<
+
+    # >>>>> CREATE TANKOUBON STAGE >>>>>
+    response, error = await lanraragi.tankoubon_api.create_tankoubon(CreateTankoubonRequest(name="Test Tankoubon"))
+    assert not error, f"Failed to create tankoubon (status {error.status}): {error.error}"
+    tankoubon_id = response.tank_id
+    del response, error
+    # <<<<< CREATE TANKOUBON STAGE <<<<<
+
+    # >>>>> ADD ARCHIVE TO TANKOUBON STAGE >>>>>
+    for i in range(20):
+        response, error = await lanraragi.tankoubon_api.add_archive_to_tankoubon(AddArchiveToTankoubonRequest(tank_id=tankoubon_id, arcid=archive_ids[i]))
+        assert not error, f"Failed to add archive to tankoubon (status {error.status}): {error.error}"
+        del response, error
+    # <<<<< ADD ARCHIVE TO TANKOUBON STAGE <<<<<
+
+    # >>>>> GET TANKOUBON STAGE >>>>>
+    response, error = await lanraragi.tankoubon_api.get_tankoubon(GetTankoubonRequest(tank_id=tankoubon_id))
+    assert not error, f"Failed to get tankoubon (status {error.status}): {error.error}"
+    assert set(response.result.archives) == set(archive_ids[:20])
+    del response, error
+    # <<<<< GET TANKOUBON STAGE <<<<<
+
+    # >>>>> REMOVE ARCHIVE FROM TANKOUBON STAGE >>>>>
+    for i in range(20):
+        response, error = await lanraragi.tankoubon_api.remove_archive_from_tankoubon(RemoveArchiveFromTankoubonRequest(tank_id=tankoubon_id, arcid=archive_ids[i]))
+        assert not error, f"Failed to remove archive from tankoubon (status {error.status}): {error.error}"
+        del response, error
+    # <<<<< REMOVE ARCHIVE FROM TANKOUBON STAGE <<<<<
+
+    # >>>>> GET TANKOUBON STAGE >>>>>
+    response, error = await lanraragi.tankoubon_api.get_tankoubon(GetTankoubonRequest(tank_id=tankoubon_id))
+    assert not error, f"Failed to get tankoubon (status {error.status}): {error.error}"
+    assert response.result.archives == []
+    del response, error
+    # <<<<< GET TANKOUBON STAGE <<<<<
+
+    # >>>>> UPDATE TANKOUBON STAGE >>>>>
+    response, error = await lanraragi.tankoubon_api.update_tankoubon(UpdateTankoubonRequest(
+        tank_id=tankoubon_id, archives=archive_ids[20:40],
+        metadata=TankoubonMetadata(name="Updated Tankoubon")
+    ))
+    assert not error, f"Failed to update tankoubon (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< UPDATE TANKOUBON STAGE <<<<<
+
+    # >>>>> GET TANKOUBON STAGE >>>>>
+    response, error = await lanraragi.tankoubon_api.get_tankoubon(GetTankoubonRequest(tank_id=tankoubon_id))
+    assert not error, f"Failed to get tankoubon (status {error.status}): {error.error}"
+    assert response.result.name == "Updated Tankoubon"
+    assert set(response.result.archives) == set(archive_ids[20:40])
+    del response, error
+    # <<<<< GET TANKOUBON STAGE <<<<<
+
+    # >>>>> DELETE TANKOUBON STAGE >>>>>
+    response, error = await lanraragi.tankoubon_api.delete_tankoubon(DeleteTankoubonRequest(tank_id=tankoubon_id))
+    assert not error, f"Failed to delete tankoubon (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< DELETE TANKOUBON STAGE <<<<<
 
 @pytest.mark.asyncio
 async def test_concurrent_clients():

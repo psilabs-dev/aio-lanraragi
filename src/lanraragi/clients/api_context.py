@@ -89,7 +89,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
 
     async def handle_request(
             self, request_type: http.HTTPMethod, url: str, 
-            headers: Dict[str, str], params: Query=None, data: Any=None,
+            headers: Dict[str, str], params: Query=None, data: Any=None, json_data: Any=None,
             max_retries: int=0
     ) -> Tuple[int, str]:
         """
@@ -111,24 +111,24 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
             try:
                 match request_type:
                     case http.HTTPMethod.GET:
-                        async with (await self._get_session()).get(url=url, headers=headers, params=params, data=data) as async_response:
+                        async with (await self._get_session()).get(url=url, headers=headers, params=params, data=data, json=json_data) as async_response:
                             if data:
                                 self.logger.warning("GET requests should not include a data field.")
                             return (async_response.status, await async_response.text())
                     case http.HTTPMethod.PUT:
                         if params:
                             self.logger.warning("PUT requests should not include query parameters.")
-                        async with (await self._get_session()).put(url=url, headers=headers, params=params, data=data) as async_response:
+                        async with (await self._get_session()).put(url=url, headers=headers, params=params, data=data, json=json_data) as async_response:
                             return (async_response.status, await async_response.text())
                     case http.HTTPMethod.POST:
                         if params:
                             self.logger.warning("POST requests should not include query parameters.")
-                        async with (await self._get_session()).post(url=url, headers=headers, params=params, data=data) as async_response:
+                        async with (await self._get_session()).post(url=url, headers=headers, params=params, data=data, json=json_data) as async_response:
                             return (async_response.status, await async_response.text())
                     case http.HTTPMethod.DELETE:
                         if params:
                             self.logger.warning("DELETE requests should not include query parameters.")
-                        async with (await self._get_session()).delete(url=url, headers=headers, params=params, data=data) as async_response:
+                        async with (await self._get_session()).delete(url=url, headers=headers, params=params, data=data, json=json_data) as async_response:
                             return (async_response.status, await async_response.text())
                     case _:
                         raise ValueError(f"Unsupported HTTP method: {request_type}")
