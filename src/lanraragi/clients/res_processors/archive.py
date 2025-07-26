@@ -40,7 +40,7 @@ def _process_get_archive_metadata_response(content: str) -> GetArchiveMetadataRe
 def _process_get_archive_categories_response(content: str) -> GetArchiveCategoriesResponse:
     response_j = json.loads(content)
     categories: List[GetArchiveCategoriesCatRecord] = []
-    for category in response_j:
+    for category in response_j.get("categories", []):
         archives = category.get("archives")
         id = category.get("id")
         name = category.get("name")

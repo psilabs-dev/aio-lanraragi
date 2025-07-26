@@ -32,7 +32,9 @@ from lanraragi.clients.utils import _build_err_response
 from lanraragi.models.archive import (
     ClearNewArchiveFlagRequest,
     ExtractArchiveRequest,
+    GetArchiveCategoriesRequest,
     GetArchiveMetadataRequest,
+    GetArchiveTankoubonsRequest,
     GetArchiveThumbnailRequest,
     UpdateReadingProgressionRequest,
     UploadArchiveRequest,
@@ -991,6 +993,123 @@ async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     assert not error, f"Failed to get minion job details (status {error.status}): {error.error}"
     del response, error
     # <<<<< GET MINION JOB DETAILS STAGE <<<<<
+
+def get_api_call_count(metrics, endpoint: str, method: str = "GET") -> int:
+    """Extract the count for a specific API endpoint from Prometheus metrics."""
+    for family in metrics:
+        if family.name == 'lanraragi_api_requests':
+            for sample in family.samples:
+                labels = sample.labels
+                if labels.get('endpoint') == endpoint and labels.get('method') == method:
+                    return int(sample.value)
+    return 0
+
+@pytest.mark.experimental
+@pytest.mark.asyncio
+async def test_metrics(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+    """
+    Test metrics collection for specific archive APIs.
+    For each API, make the API call then verify it was recorded in metrics.
+    """
+    generator = np.random.default_rng(42)
+    num_archives = 10
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lanraragi.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    logger.debug("Established connection with test LRR server.")
+    # <<<<< TEST CONNECTION STAGE <<<<<
+    
+    # >>>>> UPLOAD STAGE >>>>>
+    tag_generators = create_tag_generators(num_archives, pmf)
+    arcids = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        logger.debug(f"Creating {num_archives} archives to upload.")
+        write_responses = save_archives(num_archives, tmpdir, generator)
+        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+
+        # archive metadata
+        logger.debug("Uploading archives to server.")
+        tasks = []
+        for i, _response in enumerate(write_responses):
+            title = f"Archive {i}"
+            tags = ','.join(get_tag_assignments(tag_generators, generator))
+            checksum = compute_upload_checksum(_response.save_path)
+            tasks.append(asyncio.create_task(
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            ))
+        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        for response, error in gathered:
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+            arcids.append(response.arcid)
+        del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # Get an archive ID for testing APIs that require one
+    first_arcid = arcids[0] if arcids else None
+    assert first_arcid, "No archives uploaded, cannot test APIs that require arcid"
+
+    # >>>>> TEST API METRICS COLLECTION >>>>>
+    logger.debug("Testing metrics collection for archive APIs.")
+    
+    # get_all_archives
+    logger.debug("Testing get_all_archives metrics collection")
+    initial_response, error = await lanraragi.metrics_api.get_metrics()
+    assert not error, f"Failed to get initial metrics (status {error.status}): {error.error}"
+    initial_metrics_list = list(initial_response.metrics)
+    initial_count = get_api_call_count(initial_metrics_list, "/api/archives", "GET")
+    _, _ = await lanraragi.archive_api.get_all_archives()
+    response, error = await lanraragi.metrics_api.get_metrics()
+    assert not error, f"Failed to get metrics after get_all_archives (status {error.status}): {error.error}"
+    new_metrics_list = list(response.metrics)
+    new_count = get_api_call_count(new_metrics_list, "/api/archives", "GET")
+    assert new_count > initial_count, f"get_all_archives call not recorded in metrics: {initial_count} -> {new_count}"
+    
+    # get_untagged_archives
+    logger.debug("Testing get_untagged_archives metrics collection")
+    initial_response, error = await lanraragi.metrics_api.get_metrics()
+    assert not error, f"Failed to get initial metrics (status {error.status}): {error.error}"
+    initial_count = get_api_call_count(list(initial_response.metrics), "/api/archives/untagged", "GET")
+    _, _ = await lanraragi.archive_api.get_untagged_archives()
+    response, error = await lanraragi.metrics_api.get_metrics()
+    assert not error, f"Failed to get metrics after get_untagged_archives (status {error.status}): {error.error}"
+    new_count = get_api_call_count(list(response.metrics), "/api/archives/untagged", "GET")
+    assert new_count > initial_count, f"get_untagged_archives call not recorded in metrics: {initial_count} -> {new_count}"
+
+    # get_archive_categories
+    logger.debug("Testing get_archive_categories metrics collection")
+    initial_response, error = await lanraragi.metrics_api.get_metrics()
+    assert not error, f"Failed to get initial metrics (status {error.status}): {error.error}"
+    initial_count = get_api_call_count(list(initial_response.metrics), "/api/archives/:id/categories", "GET")
+    _, _ = await lanraragi.archive_api.get_archive_categories(GetArchiveCategoriesRequest(arcid=first_arcid))
+    response, error = await lanraragi.metrics_api.get_metrics()
+    assert not error, f"Failed to get metrics after get_archive_categories (status {error.status}): {error.error}"
+    new_count = get_api_call_count(list(response.metrics), "/api/archives/:id/categories", "GET")
+    assert new_count > initial_count, f"get_archive_categories call not recorded in metrics: {initial_count} -> {new_count}"
+    
+    # get_archive_tankoubons
+    logger.debug("Testing get_archive_tankoubons metrics collection")
+    initial_response, error = await lanraragi.metrics_api.get_metrics()
+    assert not error, f"Failed to get initial metrics (status {error.status}): {error.error}"
+    initial_count = get_api_call_count(list(initial_response.metrics), "/api/archives/:id/tankoubons", "GET")
+    _, _ = await lanraragi.archive_api.get_archive_tankoubons(GetArchiveTankoubonsRequest(arcid=first_arcid))
+    response, error = await lanraragi.metrics_api.get_metrics()
+    assert not error, f"Failed to get metrics after get_archive_tankoubons (status {error.status}): {error.error}"
+    new_count = get_api_call_count(list(response.metrics), "/api/archives/:id/tankoubons", "GET")
+    assert new_count > initial_count, f"get_archive_tankoubons call not recorded in metrics: {initial_count} -> {new_count}"
+    
+    # get_archive_thumbnail
+    logger.debug("Testing get_archive_thumbnail metrics collection")
+    initial_response, error = await lanraragi.metrics_api.get_metrics()
+    assert not error, f"Failed to get initial metrics (status {error.status}): {error.error}"
+    initial_count = get_api_call_count(list(initial_response.metrics), "/api/archives/:id/thumbnail", "GET")
+    _, _ = await lanraragi.archive_api.get_archive_thumbnail(GetArchiveThumbnailRequest(arcid=first_arcid))
+    response, error = await lanraragi.metrics_api.get_metrics()
+    assert not error, f"Failed to get metrics after get_archive_thumbnail (status {error.status}): {error.error}"
+    new_count = get_api_call_count(list(response.metrics), "/api/archives/:id/thumbnail", "GET")
+    assert new_count > initial_count, f"get_archive_thumbnail call not recorded in metrics: {initial_count} -> {new_count}"
+    # <<<<< TEST API METRICS COLLECTION <<<<<
 
 @pytest.mark.asyncio
 async def test_concurrent_clients():

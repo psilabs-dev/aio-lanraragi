@@ -85,6 +85,9 @@ class LRREnvironment:
     def enable_nofun_mode(self):
         return self.redis_container.exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG nofunmode 1\nEOF'])
 
+    def enable_metrics(self):
+        return self.redis_container.exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG enablemetrics 1\nEOF'])
+
     def disable_nofun_mode(self):
         return self.redis_container.exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG nofunmode 0\nEOF'])
     
@@ -148,13 +151,17 @@ class LRREnvironment:
             "lanraragi-integration-test", hostname="test-lanraragi", name="test-lanraragi", detach=True, network=DEFAULT_NETWORK_NAME, ports=lrr_ports, environment=lrr_environment, auto_remove=True
         )
 
-        # start containers
-        self.logger.info("Starting containers.")
+        # start redis
+        self.logger.info("Starting redis.")
         self.redis_container.start()
-        self.lrr_container.start()
+        resp = self.enable_metrics()
+        if resp.exit_code != 0:
+            self.reset_docker_test_env()
+            raise DockerTestException(f"Failed to enable metrics: {resp}")
 
-        # post startup
+        # start LRR
         # wait until LRR server is set up.
+        self.lrr_container.start()
         self.logger.info("Testing connection to LRR server.")
         retry_count = 0
         while True:
