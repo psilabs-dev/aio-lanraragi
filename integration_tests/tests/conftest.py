@@ -56,14 +56,11 @@ def pytest_configure(config: pytest.Config):
     )
 
 def pytest_collection_modifyitems(config: pytest.Config, items: List[pytest.Item]):
-    # Handle experimental tests
     if not config.getoption("--experimental"):
         skip_experimental = pytest.mark.skip(reason="need --experimental option enabled")
         for item in items:
             if 'experimental' in item.keywords:
                 item.add_marker(skip_experimental)
-    
-    # Handle failing tests independently
     if not config.getoption("--failing"):
         skip_failing = pytest.mark.skip(reason="need --failing option enabled")
         for item in items:
