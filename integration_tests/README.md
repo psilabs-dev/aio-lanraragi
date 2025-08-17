@@ -2,7 +2,7 @@
 
 This directory contains the API/integration testing package for "aio-lanraragi". It includes tools for setting up and tearing down LRR docker environments, and creating synthetic archive data.
 
-From the root directory:
+Install `aio-lanraragi` from the root directory, then:
 ```sh
 cd integration_tests && pip install .
 ```
