@@ -114,8 +114,11 @@ async def lanraragi():
 
 async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
     async with semaphore:
-        response, error = await client.archive_api.extract_archive(ExtractArchiveRequest(arcid=arcid, force=False))
-        assert not error, f"Failed to extract archive (status {error.status}): {error.error}"
+        # Use retry logic for extract_archive as it can encounter 423 errors
+        response, error = await retry_on_lock(lambda: client.archive_api.extract_archive(ExtractArchiveRequest(arcid=arcid, force=False)))
+        if error:
+            return (None, error)
+        
         pages = response.pages
         tasks = []
         async def load_page(page_api: str):
@@ -136,7 +139,8 @@ async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyn
             tasks.append(asyncio.create_task(load_page(page)))
         gathered: List[Tuple[bytes, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for _, error in gathered:
-            assert not error, f"Failed to load page (status {error.status}): {error.error}"
+            if error:
+                return (None, error)
         return (LanraragiResponse(), None)
 
 async def get_bookmark_category_detail(client: LRRClient, semaphore: asyncio.Semaphore) -> Tuple[GetCategoryResponse, LanraragiErrorResponse]:
@@ -180,6 +184,21 @@ async def remove_archive_from_category(client: LRRClient, category_id: str, arci
                 await asyncio.sleep(2 ** retry_count)
                 continue
             return response, error
+
+async def retry_on_lock(operation_func, max_retries: int = 10) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
+    """
+    Wrapper function that retries an operation if it encounters a 423 locked resource error.
+    """
+    retry_count = 0
+    while True:
+        response, error = await operation_func()
+        if error and error.status == 423: # locked resource
+            retry_count += 1
+            if retry_count > max_retries:
+                return response, error
+            await asyncio.sleep(2 ** retry_count)
+            continue
+        return response, error
 
 def pmf(t: float) -> float:
     return 2 ** (-t * 100)
@@ -324,12 +343,12 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     # GET /api/archives/:arcid/page?path=p_01.png (first three pages)
 
     tasks = []
-    tasks.append(asyncio.create_task(lanraragi.archive_api.clear_new_archive_flag(ClearNewArchiveFlagRequest(arcid=first_archive_id))))
-    tasks.append(asyncio.create_task(lanraragi.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=first_archive_id))))
+    tasks.append(asyncio.create_task(retry_on_lock(lambda: lanraragi.archive_api.clear_new_archive_flag(ClearNewArchiveFlagRequest(arcid=first_archive_id)))))
+    tasks.append(asyncio.create_task(retry_on_lock(lambda: lanraragi.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=first_archive_id)))))
     tasks.append(asyncio.create_task(get_bookmark_category_detail(lanraragi, semaphore)))
     tasks.append(asyncio.create_task(load_pages_from_archive(lanraragi, first_archive_id, semaphore)))
-    tasks.append(asyncio.create_task(lanraragi.archive_api.update_reading_progression(UpdateReadingProgressionRequest(arcid=first_archive_id, page=1))))
-    tasks.append(asyncio.create_task(lanraragi.archive_api.get_archive_thumbnail(GetArchiveThumbnailRequest(arcid=first_archive_id))))
+    tasks.append(asyncio.create_task(retry_on_lock(lambda: lanraragi.archive_api.update_reading_progression(UpdateReadingProgressionRequest(arcid=first_archive_id, page=1)))))
+    tasks.append(asyncio.create_task(retry_on_lock(lambda: lanraragi.archive_api.get_archive_thumbnail(GetArchiveThumbnailRequest(arcid=first_archive_id)))))
 
     results: List[Tuple[LanraragiResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
     for response, error in results:
