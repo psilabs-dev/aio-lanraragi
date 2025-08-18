@@ -27,6 +27,9 @@ The `aio-lanraragi` file structure is as follows:
         |- __init__.py
         |- conftest.py                              # Pytest configuration and fixtures
         |- test_simple.py                           # Basic integration tests
+        |- ui/
+            |- __init__.py
+            |- test_login.py                        # Login and authentication tests
     |- README.md
     |- pyproject.toml
 |- src/lanraragi/                                   # aio-lanraragi source code
@@ -67,10 +70,10 @@ The `aio-lanraragi` file structure is as follows:
 > All commands run in this section are within the `integration_tests` subdirectory.
 
 A primary purpose of `aio-lanraragi` is to perform integration tests against the LANraragi codebase,
-while also ensuring its API calling logic is correct.
+while also ensuring its API calling logic is correct. UI testing is performed with Playwright.
 
 ```
-usage: pytest tests [--build] [--image] [--git-url] [--git-branch] [--docker-api] [--experimental] [--failing]
+usage: pytest tests [--build] [--image] [--git-url] [--git-branch] [--docker-api] [--experimental] [--failing] [--ui]
 
 options:
   --build BUILD                 Path to docker build context for LANraragi. Overrides the --image flag.
