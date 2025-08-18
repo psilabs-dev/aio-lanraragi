@@ -4,7 +4,7 @@ This directory contains the API/integration testing package for "aio-lanraragi".
 
 Install `aio-lanraragi` from the root directory, then:
 ```sh
-cd integration_tests && pip install .
+cd integration_tests && pip install . && playwright install
 ```
 
 Run integration tests:
