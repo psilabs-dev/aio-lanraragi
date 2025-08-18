@@ -56,13 +56,20 @@ class LRREnvironment:
         Reset docker test environment (LRR and Redis containers, testing network) if something
         goes wrong during setup.
         """
-        with contextlib.suppress(docker.errors.NotFound):
-            self.docker_client.containers.get(self.redis_container.id).stop(timeout=3)
-        with contextlib.suppress(docker.errors.NotFound):
-            self.docker_client.containers.get(self.lrr_container.id).stop(timeout=3)
-        with contextlib.suppress(docker.errors.NotFound):
-            self.docker_client.networks.get(self.network.id).remove()
-        with contextlib.suppress(docker.errors.NotFound):
+        if self.redis_container:
+            with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+                container = self.docker_client.containers.get(self.redis_container.id)
+                container.stop(timeout=3)
+                container.remove(force=True)
+        if self.lrr_container:
+            with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+                container = self.docker_client.containers.get(self.lrr_container.id)
+                container.stop(timeout=3)
+                container.remove(force=True)
+        if hasattr(self, 'network') and self.network:
+            with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+                self.docker_client.networks.get(self.network.id).remove()
+        with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
             self.docker_client.images.get("lanraragi-integration-test").remove(force=True)
 
     def build_docker_image(self, build_path: Path):
