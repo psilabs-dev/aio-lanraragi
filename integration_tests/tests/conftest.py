@@ -54,6 +54,10 @@ def pytest_configure(config: pytest.Config):
         "markers",
         "failing: Tests that are known to fail will be skipped by default."
     )
+    config.addinivalue_line(
+        "markers",
+        "ui: UI tests using Playwright."
+    )
 
 def pytest_collection_modifyitems(config: pytest.Config, items: List[pytest.Item]):
     if not config.getoption("--experimental"):

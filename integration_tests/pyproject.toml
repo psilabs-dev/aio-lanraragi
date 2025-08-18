@@ -11,8 +11,10 @@ dependencies = [
     "git-python",
     "numpy",
     "pillow",
+    "playwright",
     "pytest",
     "pytest-asyncio",
+    "pytest-playwright",
 ]
 
 [project.urls]
