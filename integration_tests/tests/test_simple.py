@@ -452,7 +452,6 @@ async def test_category(lanraragi: LRRClient):
     # <<<<< UNLINK BOOKMARK <<<<<
 
 @pytest.mark.asyncio
-@pytest.mark.failing
 async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     """
     Creates 100 archives to upload to the LRR server, with an emphasis on testing category/archive addition/removal
