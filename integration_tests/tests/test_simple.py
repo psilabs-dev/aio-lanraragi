@@ -329,6 +329,19 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
     assert len(response.data) == num_archives, "Number of archives on server does not equal number uploaded!"
     first_archive_id = response.data[0].arcid
+
+    # >>>>> TEST THUMBNAIL STAGE >>>>>
+    response, error = await lanraragi.archive_api.get_archive_thumbnail(GetArchiveThumbnailRequest(arcid=first_archive_id, nofallback=True))
+    assert not error, f"Failed to get thumbnail with no_fallback=True (status {error.status}): {error.error}"
+    del response, error
+
+    response, error = await lanraragi.archive_api.get_archive_thumbnail(GetArchiveThumbnailRequest(arcid=first_archive_id))
+    assert not error, f"Failed to get thumbnail with default settings (status {error.status}): {error.error}"
+    assert response.content is not None, "Thumbnail content should not be None with default settings"
+    assert response.content_type is not None, "Expected content_type to be set in regular response"
+    del response, error
+    # <<<<< TEST THUMBNAIL STAGE <<<<<
+
     # <<<<< GET ALL ARCHIVES STAGE <<<<<
 
     # >>>>> SIMULATE READ ARCHIVE STAGE >>>>>
