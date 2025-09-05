@@ -90,6 +90,7 @@ def session_setup_teardown(request: pytest.FixtureRequest):
     docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
     environment = LRREnvironment(build_path, image, git_url, git_branch, docker_client, docker_api=docker_api)
     environment.setup()
+    request.session.lrr_environment = environment # Store environment in pytest session for access in hooks
     yield
     environment.teardown()
 

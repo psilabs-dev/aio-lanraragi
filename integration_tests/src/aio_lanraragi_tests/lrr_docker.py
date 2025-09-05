@@ -98,6 +98,26 @@ class LRREnvironment:
     def allow_uploads(self):
         return self.lrr_container.exec_run(["sh", "-c", 'chown -R koyomi: content'])
 
+    def get_lrr_logs(self, tail: int = 100) -> bytes:
+        """
+        Get the LANraragi container logs as bytes.
+        """
+        if self.lrr_container:
+            return self.lrr_container.logs(tail=tail)
+        else:
+            self.logger.warning("LANraragi container not available for log extraction")
+            return b"No LANraragi container available"
+
+    def get_redis_logs(self, tail: int = 100) -> bytes:
+        """
+        Get the Redis container logs.
+        """
+        if self.redis_container:
+            return self.redis_container.logs(tail=tail)
+        else:
+            self.logger.warning("Redis container not available for log extraction")
+            return b"No Redis container available"
+
     def setup(self):
         # prepare images
         if self.build_path:

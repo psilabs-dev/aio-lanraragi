@@ -1,6 +1,11 @@
 import logging
-from typing import List
+from typing import Any, List
 import pytest
+from _pytest.nodes import Item
+from _pytest.reports import TestReport
+from _pytest.runner import CallInfo
+
+from aio_lanraragi_tests.lrr_docker import LRREnvironment
 
 logger = logging.getLogger(__name__)
 
@@ -66,3 +71,29 @@ def pytest_collection_modifyitems(config: pytest.Config, items: List[pytest.Item
         for item in items:
             if 'failing' in item.keywords:
                 item.add_marker(skip_failing)
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item: Item, call: CallInfo[Any]):
+    """
+    Some logic to allow pytest to retrieve the LRR environment during a test failure.
+    Dumps LRR logs from environment before containers are cleaned up as error logs.
+
+    To see these logs, include `--log-cli-level=ERROR`.
+    """
+    outcome = yield
+    report: TestReport = outcome.get_result()
+    if report.when == "call" and report.failed:
+        logger.error(f"Test failed: {item.nodeid}")
+        try:
+            if hasattr(item.session, 'lrr_environment'):
+                environment: LRREnvironment = item.session.lrr_environment
+                lrr_logs = environment.get_lrr_logs()
+                if lrr_logs:
+                    log_text = lrr_logs.decode('utf-8', errors='replace')
+                    for line in log_text.split('\n'):
+                        if line.strip():
+                            environment.logger.error(f"LRR: {line}")
+            else:
+                logger.warning("LRR environment not available in session for failure debugging")
+        except Exception as e:
+            logger.error(f"Failed to dump failure info: {e}")
