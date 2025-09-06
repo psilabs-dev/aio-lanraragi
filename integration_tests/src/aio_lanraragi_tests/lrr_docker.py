@@ -146,24 +146,30 @@ class LRREnvironment:
             self.logger.warning("Redis container not available for log extraction")
             return b"No Redis container available"
 
-    def display_lrr_logs(self, tail: int=100):
+    def display_lrr_logs(self, tail: int=100, log_level: int=logging.ERROR):
+        """
+        Display LRR logs to (error) output, used for debugging.
+
+        Args:
+            tail: show up to how many lines from the last output
+            log_level: integer value level of log (see logging module)
+        """
         lrr_logs = self.get_lrr_logs(tail=tail)
         if lrr_logs:
             log_text = lrr_logs.decode('utf-8', errors='replace')
             for line in log_text.split('\n'):
                 if line.strip():
-                    self.logger.error(f"LRR: {line}")
+                    self.logger.log(log_level, f"LRR: {line}")
+                    # self.logger.error(f"LRR: {line}")
 
-    def setup(self, test_connection_max_retries: int=3):
+    def setup(self, test_connection_max_retries: int=4):
         """
         Main entrypoint to setting up a LRR docker environment. Pulls/builds required images,
         creates/recreates required volumes, containers, networks, and connects them together,
         as well as any other configuration.
 
-        `test_connection_max_retries`: int
-
-            Number of attempts to connect to the LRR server. Usually resolves after 2, unless
-            there are many files.
+        Args:
+            test_connection_max_retries: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
 
         # prepare images

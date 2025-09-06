@@ -83,16 +83,52 @@ def pytest_runtest_makereport(item: Item, call: CallInfo[Any]):
     outcome = yield
     report: TestReport = outcome.get_result()
     if report.when == "call" and report.failed:
-        logger.error(f"Test failed: {item.nodeid}")
+        logger.info(f"Test failed: {item.nodeid}")
+
+        # # TODO: don't delete this tutorial; will probably use this in the future. (9/6/25)
+        # # Log exception details from the report
+        # if report.longrepr:
+        #     logger.info(f"Exception details: {report.longrepr}")
+        
+        # # Access the raw exception from the call info if available
+        # if hasattr(call, 'excinfo') and call.excinfo:
+        #     excinfo = call.excinfo
+        #     exc_class = excinfo.type
+        #     exc_instance = excinfo.value
+            
+        #     logger.info(f"Exception class: {exc_class}")
+        #     logger.info(f"Exception type name: {exc_class.__name__}")
+        #     logger.info(f"Exception module: {exc_class.__module__}")
+        #     logger.info(f"Exception value: {exc_instance}")
+        #     logger.info(f"Exception message: {str(exc_instance)}")
+            
+        #     # Handle custom exceptions with error codes
+        #     if hasattr(exc_instance, 'error_code'):
+        #         logger.info(f"Custom error code: {exc_instance.error_code}")
+            
+        #     if hasattr(exc_instance, 'details'):
+        #         logger.info(f"Custom details: {exc_instance.details}")
+            
+        #     # Pattern matching for specific exception types
+        #     if exc_class == KeyError:
+        #         logger.info("Handling KeyError: Missing key in dictionary/mapping")
+        #     elif exc_class == ValueError:
+        #         logger.info("Handling ValueError: Invalid value provided")
+        #     elif exc_class.__name__ == 'AssertionError':
+        #         logger.info("Handling AssertionError: Test assertion failed")
+        #     elif exc_class.__module__ != 'builtins':
+        #         logger.info(f"Custom exception detected from module: {exc_class.__module__}")
+            
+        #     # Check if it's a subclass of specific exceptions
+        #     if issubclass(exc_class, ConnectionError):
+        #         logger.info("This is a connection-related error")
+        #     elif issubclass(exc_class, OSError):
+        #         logger.info("This is an OS-related error")
+        
         try:
             if hasattr(item.session, 'lrr_environment'):
                 environment: LRREnvironment = item.session.lrr_environment
-                lrr_logs = environment.get_lrr_logs()
-                if lrr_logs:
-                    log_text = lrr_logs.decode('utf-8', errors='replace')
-                    for line in log_text.split('\n'):
-                        if line.strip():
-                            environment.logger.error(f"LRR: {line}")
+                environment.display_lrr_logs()
             else:
                 logger.warning("LRR environment not available in session for failure debugging")
         except Exception as e:

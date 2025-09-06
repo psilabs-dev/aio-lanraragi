@@ -1087,13 +1087,13 @@ async def test_concurrent_clients():
     session = aiohttp.ClientSession()
     try:
         client1 = LRRClient(
-            lrr_host="http://localhost:3001", 
-            lrr_api_key="lanraragi", 
+            lrr_host="http://localhost:3001",
+            lrr_api_key="lanraragi",
             session=session
         )
         client2 = LRRClient(
-            lrr_host="http://localhost:3001", 
-            lrr_api_key="lanraragi", 
+            lrr_host="http://localhost:3001",
+            lrr_api_key="lanraragi",
             session=session
         )
         results = await asyncio.gather(
