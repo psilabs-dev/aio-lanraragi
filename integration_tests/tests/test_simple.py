@@ -31,6 +31,8 @@ from aio_lanraragi_tests.archive_generation.metadata import create_tag_generator
 from lanraragi.clients.utils import _build_err_response
 from lanraragi.models.archive import (
     ClearNewArchiveFlagRequest,
+    DeleteArchiveRequest,
+    DeleteArchiveResponse,
     ExtractArchiveRequest,
     GetArchiveMetadataRequest,
     GetArchiveThumbnailRequest,
@@ -161,6 +163,19 @@ async def upload_archive(client: LRRClient, save_path: Path, filename: str, sema
             request = UploadArchiveRequest(file=file, filename=filename, title=title, tags=tags, file_checksum=checksum)
         return await client.archive_api.upload_archive(request)
 
+async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[DeleteArchiveResponse, LanraragiErrorResponse]:
+    retry_count = 0
+    async with semaphore:
+        while True:
+            response, error = await client.archive_api.delete_archive(DeleteArchiveRequest(arcid=arcid))
+            if error and error.status == 423: # locked resource
+                retry_count += 1
+                if retry_count > 10:
+                    return response, error
+                await asyncio.sleep(2 ** retry_count)
+                continue
+            return response, error
+
 async def add_archive_to_category(client: LRRClient, category_id: str, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[AddArchiveToCategoryResponse, LanraragiErrorResponse]:
     retry_count = 0
     async with semaphore:
@@ -226,8 +241,11 @@ def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Gen
 @pytest.mark.asyncio
 async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     """
-    Creates 100 archives to upload to the LRR server, 
-    then verifies that this number of archives is correct.
+    Creates 100 archives to upload to the LRR server,
+    and verifies that this number of archives is correct.
+
+    Then deletes 50 archives (5 sequentially, followed by
+    45 concurrently). Verifies archive count is correct.
     """
     generator = np.random.default_rng(42)
     num_archives = 100
@@ -272,6 +290,10 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     logger.debug("Validating upload counts.")
     response, error = await lanraragi.archive_api.get_all_archives()
     assert not error, f"Failed to get archive data (status {error.status}): {error.error}"
+
+    # get this data for archive deletion.
+    arcs_delete_sync = response.data[:5]
+    arcs_delete_async = response.data[5:50]
     assert len(response.data) == num_archives, "Number of archives on server does not equal number uploaded!"
     # <<<<< VALIDATE UPLOAD COUNT STAGE <<<<<
 
@@ -281,6 +303,27 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     assert len(response.archives) == num_archives, "Number of archives in database backup does not equal number uploaded!"
     del response, error
     # <<<<< GET DATABASE BACKUP STAGE <<<<<
+
+    # >>>>> DELETE ARCHIVE SYNC STAGE >>>>>
+    for archive in arcs_delete_sync:
+        response, error = await lanraragi.archive_api.delete_archive(DeleteArchiveRequest(arcid=archive.arcid))
+        assert not error, f"Failed to delete archive {archive.arcid} with status {error.status} and error: {error.error}"
+    response, error = await lanraragi.archive_api.get_all_archives()
+    assert not error, f"Failed to get archive data (status {error.status}): {error.error}"
+    assert len(response.data) == 100-5, "Incorrect number of archives in server!"
+    # <<<<< DELETE ARCHIVE SYNC STAGE <<<<<
+
+    # >>>>> DELETE ARCHIVE ASYNC STAGE >>>>>
+    tasks = []
+    for archive in arcs_delete_async:
+        tasks.append(asyncio.create_task(delete_archive(lanraragi, archive.arcid, semaphore)))
+    gathered: List[Tuple[DeleteArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+    for response, error in gathered:
+        assert not error, f"Delete archive failed (status {error.status}): {error.error}"
+    response, error = await lanraragi.archive_api.get_all_archives()
+    assert not error, f"Failed to get archive data (status {error.status}): {error.error}"
+    assert len(response.data) == 100-50, "Incorrect number of archives in server!"
+    # <<<<< DELETE ARCHIVE ASYNC STAGE <<<<<
 
 @pytest.mark.asyncio
 async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
