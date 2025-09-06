@@ -34,6 +34,7 @@ from lanraragi.models.archive import (
     ExtractArchiveRequest,
     GetArchiveMetadataRequest,
     GetArchiveThumbnailRequest,
+    UpdateArchiveThumbnailRequest,
     UpdateReadingProgressionRequest,
     UploadArchiveRequest,
     UploadArchiveResponse,
@@ -342,6 +343,13 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     assert response.content_type is not None, "Expected content_type to be set in regular response"
     del response, error
     # <<<<< TEST THUMBNAIL STAGE <<<<<
+
+    # >>>>> UPDATE ARCHIVE THUMBNAIL STAGE >>>>>
+    response, error = await retry_on_lock(lambda: lanraragi.archive_api.update_thumbnail(UpdateArchiveThumbnailRequest(arcid=first_archive_id, page=2)))
+    assert not error, f"Failed to update thumbnail to page 2 (status {error.status}): {error.error}"
+    assert response.new_thumbnail, "Expected new_thumbnail field to be populated"
+    del response, error
+    # <<<<< UPDATE ARCHIVE THUMBNAIL STAGE <<<<<
 
     # <<<<< GET ALL ARCHIVES STAGE <<<<<
 
