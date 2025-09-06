@@ -36,6 +36,7 @@ class LRREnvironment:
     def __init__(
             self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient, 
             docker_api: docker.APIClient=None, logger: Optional[logging.Logger]=None,
+            init_with_api_key: bool=False, init_with_nofunmode: bool=False, init_with_allow_uploads: bool=False,
             lrr_port: int=3001
     ):
         self.build_path = build
@@ -50,6 +51,10 @@ class LRREnvironment:
             logger = logging.getLogger(__name__)
         self.logger = logger
         self.lrr_port = lrr_port
+
+        self.init_with_api_key = init_with_api_key
+        self.init_with_nofunmode = init_with_nofunmode
+        self.init_with_allow_uploads = init_with_allow_uploads
 
     def reset_docker_test_env(self):
         """
@@ -79,15 +84,18 @@ class LRREnvironment:
         if not dockerfile_path.exists():
             raise FileNotFoundError(f"Dockerfile {dockerfile_path} does not exist!")
         self.logger.info(f"Building LRR image; this can take a while ({dockerfile_path}).")
+        build_start = time.time()
         if self.docker_api:
             for lineb in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag='lanraragi-integration-test'):
                 if (data := json.loads(lineb.decode('utf-8').strip())) and (stream := data.get('stream')):
                     self.logger.info(stream.strip())
         else:
             self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag='lanraragi-integration-test')
+        build_time = time.time() - build_start
+        self.logger.info(f"LRR image build complete: time {build_time}s")
 
-    def add_api_key(self):
-        return self.redis_container.exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG apikey lanraragi\nEOF'])
+    def add_api_key(self, api_key: str):
+        return self.redis_container.exec_run(["bash", "-c", f'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG apikey {api_key}\nEOF'])
 
     def enable_nofun_mode(self):
         return self.redis_container.exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG nofunmode 1\nEOF'])
@@ -97,6 +105,24 @@ class LRREnvironment:
     
     def allow_uploads(self):
         return self.lrr_container.exec_run(["sh", "-c", 'chown -R koyomi: content'])
+
+    def start_lrr(self):
+        return self.lrr_container.start()
+    
+    def start_redis(self):
+        return self.redis_container.start()
+
+    def stop_lrr(self, timeout: int=10):
+        """
+        Stop the LRR container (timeout in s)
+        """
+        return self.lrr_container.stop(timeout=timeout)
+    
+    def stop_redis(self, timeout: int=10):
+        """
+        Stop the redis container (timeout in s)
+        """
+        return self.redis_container.stop(timeout=timeout)
 
     def get_lrr_logs(self, tail: int = 100) -> bytes:
         """
@@ -175,10 +201,9 @@ class LRREnvironment:
             "lanraragi-integration-test", hostname="test-lanraragi", name="test-lanraragi", detach=True, network=DEFAULT_NETWORK_NAME, ports=lrr_ports, environment=lrr_environment, auto_remove=True
         )
 
-        # start containers
-        self.logger.info("Starting containers.")
-        self.redis_container.start()
-        self.lrr_container.start()
+        # start database
+        self.logger.info("Starting database.")
+        self.start_redis()
 
         # post startup
         # wait until LRR server is set up.
@@ -204,19 +229,26 @@ class LRREnvironment:
                     raise DockerTestException("Failed to connect to the LRR server!", returncode=1)
 
         self.logger.debug("Running post-startup configuration.")
-        resp = self.add_api_key()
-        if resp.exit_code != 0:
-            self.reset_docker_test_env()
-            raise DockerTestException(f"Failed to add API key to server: {resp}")
-        resp = self.enable_nofun_mode()
-        if resp.exit_code != 0:
-            self.reset_docker_test_env()
-            raise DockerTestException(f"Failed to enable nofunmode: {resp}")
-        resp = self.allow_uploads()
-        if resp.exit_code != 0:
-            self.reset_docker_test_env()
-            raise DockerTestException(f"Failed to modify permissions for LRR contents: {resp}")
+        if self.init_with_api_key:
+            resp = self.add_api_key("lanraragi")
+            if resp.exit_code != 0:
+                self.reset_docker_test_env()
+                raise DockerTestException(f"Failed to add API key to server: {resp}")
+        
+        if self.init_with_nofunmode:
+            resp = self.enable_nofun_mode()
+            if resp.exit_code != 0:
+                self.reset_docker_test_env()
+                raise DockerTestException(f"Failed to enable nofunmode: {resp}")
+        
+        if self.init_with_allow_uploads:
+            resp = self.allow_uploads()
+            if resp.exit_code != 0:
+                self.reset_docker_test_env()
+                raise DockerTestException(f"Failed to modify permissions for LRR contents: {resp}")
 
+        # start lrr
+        self.start_lrr()
         self.logger.info("Environment setup complete, proceeding to testing...")
 
     def teardown(self):
