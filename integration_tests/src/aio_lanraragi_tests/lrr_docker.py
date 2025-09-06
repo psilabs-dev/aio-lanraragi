@@ -18,6 +18,8 @@ from git import Repo
 import requests
 
 class DockerTestException(Exception):
+    def __init__(self, message):
+        super().__init__(message)
     pass
 
 DEFAULT_REDIS_TAG = "redis:7.2.4"
@@ -124,7 +126,7 @@ class LRREnvironment:
         """
         return self.redis_container.stop(timeout=timeout)
 
-    def get_lrr_logs(self, tail: int = 100) -> bytes:
+    def get_lrr_logs(self, tail: int=100) -> bytes:
         """
         Get the LANraragi container logs as bytes.
         """
@@ -134,7 +136,7 @@ class LRREnvironment:
             self.logger.warning("LANraragi container not available for log extraction")
             return b"No LANraragi container available"
 
-    def get_redis_logs(self, tail: int = 100) -> bytes:
+    def get_redis_logs(self, tail: int=100) -> bytes:
         """
         Get the Redis container logs.
         """
@@ -144,7 +146,26 @@ class LRREnvironment:
             self.logger.warning("Redis container not available for log extraction")
             return b"No Redis container available"
 
-    def setup(self):
+    def display_lrr_logs(self, tail: int=100):
+        lrr_logs = self.get_lrr_logs(tail=tail)
+        if lrr_logs:
+            log_text = lrr_logs.decode('utf-8', errors='replace')
+            for line in log_text.split('\n'):
+                if line.strip():
+                    self.logger.error(f"LRR: {line}")
+
+    def setup(self, test_connection_max_retries: int=3):
+        """
+        Main entrypoint to setting up a LRR docker environment. Pulls/builds required images,
+        creates/recreates required volumes, containers, networks, and connects them together,
+        as well as any other configuration.
+
+        `test_connection_max_retries`: int
+
+            Number of attempts to connect to the LRR server. Usually resolves after 2, unless
+            there are many files.
+        """
+
         # prepare images
         if self.build_path:
             self.build_docker_image(self.build_path)
@@ -205,29 +226,6 @@ class LRREnvironment:
         self.logger.info("Starting database.")
         self.start_redis()
 
-        # post startup
-        # wait until LRR server is set up.
-        self.logger.info("Testing connection to LRR server.")
-        retry_count = 0
-        while True:
-            try:
-                resp = requests.get(f"http://127.0.0.1:{self.lrr_port}")
-                if resp.status_code != 200:
-                    self.reset_docker_test_env()
-                    raise DockerTestException(f"Response status code is not 200: {resp.status_code}", returncode=1)
-                else:
-                    break
-            except requests.exceptions.ConnectionError:
-                if retry_count < 8:
-                    time_to_sleep = 2 ** (retry_count + 1)
-                    self.logger.debug(f"Could not reach LRR server; retrying after {time_to_sleep}s.")
-                    retry_count += 1
-                    time.sleep(time_to_sleep)
-                    continue
-                else:
-                    self.reset_docker_test_env()
-                    raise DockerTestException("Failed to connect to the LRR server!", returncode=1)
-
         self.logger.debug("Running post-startup configuration.")
         if self.init_with_api_key:
             resp = self.add_api_key("lanraragi")
@@ -240,15 +238,40 @@ class LRREnvironment:
             if resp.exit_code != 0:
                 self.reset_docker_test_env()
                 raise DockerTestException(f"Failed to enable nofunmode: {resp}")
-        
+
+        # start lrr
+        self.start_lrr()
+
+        # post LRR startup
+        self.logger.info("Testing connection to LRR server.")
+        retry_count = 0
+        while True:
+            try:
+                resp = requests.get(f"http://127.0.0.1:{self.lrr_port}")
+                if resp.status_code != 200:
+                    self.reset_docker_test_env()
+                    raise DockerTestException(f"Response status code is not 200: {resp.status_code}")
+                else:
+                    break
+            except requests.exceptions.ConnectionError:
+                if retry_count < test_connection_max_retries:
+                    time_to_sleep = 2 ** (retry_count + 1)
+                    self.logger.warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
+                    retry_count += 1
+                    time.sleep(time_to_sleep)
+                    continue
+                else:
+                    self.logger.error("Failed to connect to LRR server! Dumping logs and shutting down server.")
+                    self.display_lrr_logs()
+                    self.reset_docker_test_env()
+                    raise DockerTestException("Failed to connect to the LRR server!")
+
         if self.init_with_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
                 self.reset_docker_test_env()
                 raise DockerTestException(f"Failed to modify permissions for LRR contents: {resp}")
 
-        # start lrr
-        self.start_lrr()
         self.logger.info("Environment setup complete, proceeding to testing...")
 
     def teardown(self):
