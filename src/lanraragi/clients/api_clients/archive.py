@@ -106,7 +106,7 @@ class _ArchiveApiClient(_ApiClient):
         if request.page:
             params["page"] = request.page
         if request.nofallback:
-            params["nofallback"] = str(request.nofallback).lower()
+            params["no_fallback"] = str(request.nofallback).lower()
         status, data = await self.api_context.download_thumbnail(url, self.api_context.headers, params=params)
         if status in [200, 202]:
             return (_process_get_archive_thumbnail_response(data, status), None)

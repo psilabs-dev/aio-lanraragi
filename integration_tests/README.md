@@ -24,8 +24,19 @@ pytest tests --git-url=https://github.com/difegue/LANraragi.git --git-branch=dev
 ```
 
 Start integration tests on a local path.
-```
+```sh
 pytest tests --build /path/to/LANraragi/project
+```
+
+To see LRR docker container logs accompanying a test failure, use the pytest flag `--log-cli-level=ERROR`:
+```sh
+pytest tests --log-cli-level=ERROR
+tests/test_simple.py::test_fail 
+# ------------------------------------------------------- live log call --------------------------------------------------------
+# ERROR    tests.conftest:conftest.py:84 Test failed: tests/test_simple.py::test_fail
+# ERROR    aio_lanraragi_tests.lrr_docker:conftest.py:96 LRR: s6-rc: info: service s6rc-oneshot-runner: starting
+# ERROR    aio_lanraragi_tests.lrr_docker:conftest.py:96 LRR: s6-rc: info: service s6rc-oneshot-runner successfully started
+# ERROR    aio_lanraragi_tests.lrr_docker:conftest.py:96 LRR: s6-rc: info: service fix-attrs: starting
 ```
 
 See [pytest](https://docs.pytest.org/en/stable/#) docs for more test-related options.

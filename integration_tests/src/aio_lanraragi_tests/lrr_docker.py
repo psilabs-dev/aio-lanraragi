@@ -18,6 +18,8 @@ from git import Repo
 import requests
 
 class DockerTestException(Exception):
+    def __init__(self, message):
+        super().__init__(message)
     pass
 
 DEFAULT_REDIS_TAG = "redis:7.2.4"
@@ -36,6 +38,7 @@ class LRREnvironment:
     def __init__(
             self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient, 
             docker_api: docker.APIClient=None, logger: Optional[logging.Logger]=None,
+            init_with_api_key: bool=False, init_with_nofunmode: bool=False, init_with_allow_uploads: bool=False,
             lrr_port: int=3001
     ):
         self.build_path = build
@@ -50,6 +53,10 @@ class LRREnvironment:
             logger = logging.getLogger(__name__)
         self.logger = logger
         self.lrr_port = lrr_port
+
+        self.init_with_api_key = init_with_api_key
+        self.init_with_nofunmode = init_with_nofunmode
+        self.init_with_allow_uploads = init_with_allow_uploads
 
     def reset_docker_test_env(self):
         """
@@ -79,15 +86,18 @@ class LRREnvironment:
         if not dockerfile_path.exists():
             raise FileNotFoundError(f"Dockerfile {dockerfile_path} does not exist!")
         self.logger.info(f"Building LRR image; this can take a while ({dockerfile_path}).")
+        build_start = time.time()
         if self.docker_api:
             for lineb in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag='lanraragi-integration-test'):
                 if (data := json.loads(lineb.decode('utf-8').strip())) and (stream := data.get('stream')):
                     self.logger.info(stream.strip())
         else:
             self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag='lanraragi-integration-test')
+        build_time = time.time() - build_start
+        self.logger.info(f"LRR image build complete: time {build_time}s")
 
-    def add_api_key(self):
-        return self.redis_container.exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG apikey lanraragi\nEOF'])
+    def add_api_key(self, api_key: str):
+        return self.redis_container.exec_run(["bash", "-c", f'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG apikey {api_key}\nEOF'])
 
     def enable_nofun_mode(self):
         return self.redis_container.exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG nofunmode 1\nEOF'])
@@ -98,7 +108,70 @@ class LRREnvironment:
     def allow_uploads(self):
         return self.lrr_container.exec_run(["sh", "-c", 'chown -R koyomi: content'])
 
-    def setup(self):
+    def start_lrr(self):
+        return self.lrr_container.start()
+    
+    def start_redis(self):
+        return self.redis_container.start()
+
+    def stop_lrr(self, timeout: int=10):
+        """
+        Stop the LRR container (timeout in s)
+        """
+        return self.lrr_container.stop(timeout=timeout)
+    
+    def stop_redis(self, timeout: int=10):
+        """
+        Stop the redis container (timeout in s)
+        """
+        return self.redis_container.stop(timeout=timeout)
+
+    def get_lrr_logs(self, tail: int=100) -> bytes:
+        """
+        Get the LANraragi container logs as bytes.
+        """
+        if self.lrr_container:
+            return self.lrr_container.logs(tail=tail)
+        else:
+            self.logger.warning("LANraragi container not available for log extraction")
+            return b"No LANraragi container available"
+
+    def get_redis_logs(self, tail: int=100) -> bytes:
+        """
+        Get the Redis container logs.
+        """
+        if self.redis_container:
+            return self.redis_container.logs(tail=tail)
+        else:
+            self.logger.warning("Redis container not available for log extraction")
+            return b"No Redis container available"
+
+    def display_lrr_logs(self, tail: int=100, log_level: int=logging.ERROR):
+        """
+        Display LRR logs to (error) output, used for debugging.
+
+        Args:
+            tail: show up to how many lines from the last output
+            log_level: integer value level of log (see logging module)
+        """
+        lrr_logs = self.get_lrr_logs(tail=tail)
+        if lrr_logs:
+            log_text = lrr_logs.decode('utf-8', errors='replace')
+            for line in log_text.split('\n'):
+                if line.strip():
+                    self.logger.log(log_level, f"LRR: {line}")
+                    # self.logger.error(f"LRR: {line}")
+
+    def setup(self, test_connection_max_retries: int=4):
+        """
+        Main entrypoint to setting up a LRR docker environment. Pulls/builds required images,
+        creates/recreates required volumes, containers, networks, and connects them together,
+        as well as any other configuration.
+
+        Args:
+            test_connection_max_retries: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
+        """
+
         # prepare images
         if self.build_path:
             self.build_docker_image(self.build_path)
@@ -155,13 +228,27 @@ class LRREnvironment:
             "lanraragi-integration-test", hostname="test-lanraragi", name="test-lanraragi", detach=True, network=DEFAULT_NETWORK_NAME, ports=lrr_ports, environment=lrr_environment, auto_remove=True
         )
 
-        # start containers
-        self.logger.info("Starting containers.")
-        self.redis_container.start()
-        self.lrr_container.start()
+        # start database
+        self.logger.info("Starting database.")
+        self.start_redis()
 
-        # post startup
-        # wait until LRR server is set up.
+        self.logger.debug("Running post-startup configuration.")
+        if self.init_with_api_key:
+            resp = self.add_api_key("lanraragi")
+            if resp.exit_code != 0:
+                self.reset_docker_test_env()
+                raise DockerTestException(f"Failed to add API key to server: {resp}")
+        
+        if self.init_with_nofunmode:
+            resp = self.enable_nofun_mode()
+            if resp.exit_code != 0:
+                self.reset_docker_test_env()
+                raise DockerTestException(f"Failed to enable nofunmode: {resp}")
+
+        # start lrr
+        self.start_lrr()
+
+        # post LRR startup
         self.logger.info("Testing connection to LRR server.")
         retry_count = 0
         while True:
@@ -169,33 +256,27 @@ class LRREnvironment:
                 resp = requests.get(f"http://127.0.0.1:{self.lrr_port}")
                 if resp.status_code != 200:
                     self.reset_docker_test_env()
-                    raise DockerTestException(f"Response status code is not 200: {resp.status_code}", returncode=1)
+                    raise DockerTestException(f"Response status code is not 200: {resp.status_code}")
                 else:
                     break
             except requests.exceptions.ConnectionError:
-                if retry_count < 8:
+                if retry_count < test_connection_max_retries:
                     time_to_sleep = 2 ** (retry_count + 1)
-                    self.logger.debug(f"Could not reach LRR server; retrying after {time_to_sleep}s.")
+                    self.logger.warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
                     retry_count += 1
                     time.sleep(time_to_sleep)
                     continue
                 else:
+                    self.logger.error("Failed to connect to LRR server! Dumping logs and shutting down server.")
+                    self.display_lrr_logs()
                     self.reset_docker_test_env()
-                    raise DockerTestException("Failed to connect to the LRR server!", returncode=1)
+                    raise DockerTestException("Failed to connect to the LRR server!")
 
-        self.logger.debug("Running post-startup configuration.")
-        resp = self.add_api_key()
-        if resp.exit_code != 0:
-            self.reset_docker_test_env()
-            raise DockerTestException(f"Failed to add API key to server: {resp}")
-        resp = self.enable_nofun_mode()
-        if resp.exit_code != 0:
-            self.reset_docker_test_env()
-            raise DockerTestException(f"Failed to enable nofunmode: {resp}")
-        resp = self.allow_uploads()
-        if resp.exit_code != 0:
-            self.reset_docker_test_env()
-            raise DockerTestException(f"Failed to modify permissions for LRR contents: {resp}")
+        if self.init_with_allow_uploads:
+            resp = self.allow_uploads()
+            if resp.exit_code != 0:
+                self.reset_docker_test_env()
+                raise DockerTestException(f"Failed to modify permissions for LRR contents: {resp}")
 
         self.logger.info("Environment setup complete, proceeding to testing...")
 
