@@ -118,6 +118,15 @@ jobs:
           pip install ".[dev]"
           cd integration_tests
           pip install .
+
+      - name: Set PowerShell ExecutionPolicy to Bypass (process)
+        shell: pwsh
+        run: |
+          Write-Host "ExecutionPolicy before:"
+          Get-ExecutionPolicy -List
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          Write-Host "ExecutionPolicy after:"
+          Get-ExecutionPolicy -List
           
       - name: Run Windows integration tests
         run: |
