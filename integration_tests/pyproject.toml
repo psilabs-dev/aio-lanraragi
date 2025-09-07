@@ -13,6 +13,8 @@ dependencies = [
     "pillow",
     "pytest",
     "pytest-asyncio",
+    "redis",
+    "requests",
 ]
 
 [project.urls]

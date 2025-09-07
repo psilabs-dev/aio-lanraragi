@@ -83,7 +83,7 @@ from lanraragi.models.tankoubon import (
 
 logger = logging.getLogger(__name__)
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def docker_environment(request: pytest.FixtureRequest):
     build_path: str = request.config.getoption("--build")
     image: str = request.config.getoption("--image")

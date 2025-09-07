@@ -37,7 +37,10 @@ def pytest_addoption(parser: pytest.Parser):
 
     git-branch : `str`
         Optional branch name of the corresponding git repository.
-    
+
+    msi-path : str`
+        Path to the Windows MSI installer.
+
     experimental : `bool = False`
         Run experimental tests. For example, to test a set of LANraragi APIs in
         active development, but are yet merged upstream.
@@ -47,6 +50,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--git-url", action="store", default=None, help="Link to a LANraragi git repository (e.g. fork or branch).")
     parser.addoption("--git-branch", action="store", default=None, help="Branch to checkout; if not supplied, uses the main branch.")
     parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
+    parser.addoption("--msi-path", action="store", default=None, help="Path to the Windows MSI installer.")
     parser.addoption("--experimental", action="store_true", default=False, help="Run experimental tests.")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
 
