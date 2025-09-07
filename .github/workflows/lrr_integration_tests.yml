@@ -125,6 +125,51 @@ jobs:
           $env:LANraragi_MSI_PATH = "../../LANraragi/tools/build/windows/Karen/Setup/bin/LANraragi.msi"
           $env:LANraragi_KAREN_PATH = "../../LANraragi/tools/build/windows/Karen/Karen/bin/win-x64/publish/Karen.exe"
           pytest tests/test_simple_windows.py -x -v --log-cli-level=INFO --msi-path="../../LANraragi/tools/build/windows/Karen/Setup/bin/LANraragi.msi"
+
+      - name: Try start LANraragi directly (on failure)
+        if: failure()
+        shell: pwsh
+        run: |
+          $run = "$env:APPDATA\LANraragi\lanraragi\run.ps1"
+          if (Test-Path $run) {
+            Write-Host "Running $run for 20 seconds to generate logs..."
+            Start-Process pwsh -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File",$run -WindowStyle Hidden
+            Start-Sleep -Seconds 20
+            Get-Process -Name "perl","redis-server","Karen" -ErrorAction SilentlyContinue | % { try { $_.Kill() } catch {} }
+          } else {
+            Write-Host "run.ps1 not found at $run"
+          }
+
+      - name: Locate diagnostics directory (on failure)
+        if: failure()
+        id: find_artifacts
+        shell: pwsh
+        run: |
+          $dir = Get-ChildItem -Directory -Path $env:TEMP -Filter 'lrr_artifacts_*' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($null -ne $dir) {
+            "dir=$($dir.FullName)" >> $env:GITHUB_OUTPUT
+            Write-Host "Found diagnostics at $($dir.FullName)"
+          } else {
+            "dir=" >> $env:GITHUB_OUTPUT
+            Write-Host "No diagnostics directory found"
+          }
+
+      - name: Upload LANraragi diagnostics (on failure)
+        if: failure() && steps.find_artifacts.outputs.dir != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-lrr-diagnostics
+          path: ${{ steps.find_artifacts.outputs.dir }}\**
+          if-no-files-found: warn
+
+      - name: Upload LANraragi logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-lrr-logs
+          path: |
+            $env:APPDATA\LANraragi\lanraragi\log\*.log
+          if-no-files-found: warn
           
       - name: Upload MSI artifact for debugging
         if: always()
