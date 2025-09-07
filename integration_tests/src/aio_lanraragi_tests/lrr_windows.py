@@ -87,21 +87,33 @@ class LRRWindowsEnvironment:
         """
         Install the LANraragi MSI package.
         """
-        if not self.msi_path.exists():
-            raise FileNotFoundError(f"MSI file not found: {self.msi_path}")
+        msi_abspath = self.msi_path.resolve()
+        LOGGER.info(f"Checking MSI file at: {msi_abspath}")
+        
+        if not msi_abspath.exists():
+            parent_dir = msi_abspath.parent
+            if parent_dir.exists():
+                files_in_dir = list(parent_dir.iterdir())
+                LOGGER.error(f"MSI file not found. Files in {parent_dir}: {files_in_dir}")
+            else:
+                LOGGER.error(f"MSI parent directory does not exist: {parent_dir}")
+            raise FileNotFoundError(f"MSI file not found: {msi_abspath}")
+        msi_size = msi_abspath.stat().st_size
+        LOGGER.info(f"MSI file size: {msi_size} bytes")
+        if msi_size < 1024 * 1024:
+            LOGGER.warning(f"MSI file seems unusually small: {msi_size} bytes")
         if self._check_existing_installation():
             LOGGER.info("LANraragi already installed, skipping MSI installation")
             self.is_installed = True
             return
             
-        LOGGER.info(f"Installing LANraragi MSI from {self.msi_path}")
+        LOGGER.info(f"Installing LANraragi MSI from {msi_abspath}")
         
         log_file = Path(tempfile.gettempdir()) / f"lanraragi_install_{uuid.uuid4().hex[:8]}.log"
         
         cmd = [
-            "msiexec", "/i", str(self.msi_path), 
+            "msiexec", "/i", str(msi_abspath), 
             "/quiet", "/norestart", "/qn",
-            "REINSTALL=ALL", "REINSTALLMODE=vomus",
             "/l*v", str(log_file)
         ]
         

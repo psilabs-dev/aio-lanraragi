@@ -124,7 +124,7 @@ jobs:
           cd aio-lanraragi/integration_tests
           $env:LANraragi_MSI_PATH = "../../LANraragi/tools/build/windows/Karen/Setup/bin/LANraragi.msi"
           $env:LANraragi_KAREN_PATH = "../../LANraragi/tools/build/windows/Karen/Karen/bin/win-x64/publish/Karen.exe"
-          pytest tests/test_simple_windows.py -v --log-cli-level=INFO --msi-path="../../LANraragi/tools/build/windows/Karen/Setup/bin/LANraragi.msi"
+          pytest tests/test_simple_windows.py -x -v --log-cli-level=INFO --msi-path="../../LANraragi/tools/build/windows/Karen/Setup/bin/LANraragi.msi"
           
       - name: Upload MSI artifact for debugging
         if: always()
