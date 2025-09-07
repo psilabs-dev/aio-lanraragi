@@ -1,5 +1,5 @@
 """
-Collection of all simple API testing pipelines for the LANraragi server.
+Collection of all simple API testing pipelines for the LANraragi server in a Docker environment.
 
 For each testing pipeline, a new network, server and database are allocated and reclaimed.
 This provides every test with an isolated environment.
@@ -7,6 +7,7 @@ This provides every test with an isolated environment.
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 import tempfile
 from typing import List, Tuple
@@ -82,8 +83,8 @@ from lanraragi.models.tankoubon import (
 
 logger = logging.getLogger(__name__)
 
-@pytest.fixture(autouse=True)
-def session_setup_teardown(request: pytest.FixtureRequest):
+@pytest.fixture
+def docker_environment(request: pytest.FixtureRequest):
     build_path: str = request.config.getoption("--build")
     image: str = request.config.getoption("--image")
     git_url: str = request.config.getoption("--git-url")
@@ -242,6 +243,7 @@ def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Gen
     return responses
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="Test requires POSIX-compliant OS")
 async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     """
     Creates 100 archives to upload to the LRR server,
@@ -329,6 +331,7 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     # <<<<< DELETE ARCHIVE ASYNC STAGE <<<<<
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="Test requires POSIX-compliant OS")
 async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     """
     Simulates a read archive operation.
@@ -424,6 +427,7 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     # <<<<< SIMULATE READ ARCHIVE STAGE <<<<<
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="Test requires POSIX-compliant OS")
 async def test_category(lanraragi: LRRClient):
     """
     Runs sanity tests against the category and bookmark link API.
@@ -520,6 +524,7 @@ async def test_category(lanraragi: LRRClient):
     # <<<<< UNLINK BOOKMARK <<<<<
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="Test requires POSIX-compliant OS")
 async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     """
     Creates 100 archives to upload to the LRR server, with an emphasis on testing category/archive addition/removal
@@ -655,6 +660,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
     # <<<<< GET CATEGORY STAGE <<<<<
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="Test requires POSIX-compliant OS")
 async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     """
     Very basic functional test of the search API.
@@ -728,6 +734,7 @@ async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     # <<<<< SEARCH STAGE <<<<<
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="Test requires POSIX-compliant OS")
 async def test_shinobu_api(lanraragi: LRRClient):
     """
     Very basic functional test of Shinobu API. Does not test concurrent API calls against shinobu.
@@ -776,6 +783,7 @@ async def test_shinobu_api(lanraragi: LRRClient):
     # <<<<< GET SHINOBU STATUS STAGE <<<<<
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="Test requires POSIX-compliant OS")
 async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     """
     Very basic functional test of the database API.
@@ -827,6 +835,7 @@ async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     # <<<<< CLEAN DATABASE STAGE <<<<<
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="Test requires POSIX-compliant OS")
 async def test_drop_database(lanraragi: LRRClient):
     """
     Test drop database API by dropping database and verifying that client has no permissions.
@@ -849,6 +858,7 @@ async def test_drop_database(lanraragi: LRRClient):
     # <<<<< TEST CONNECTION STAGE <<<<<
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="Test requires POSIX-compliant OS")
 async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     """
     Very basic functional test of the tankoubon API.
@@ -952,6 +962,7 @@ async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore)
     # <<<<< DELETE TANKOUBON STAGE <<<<<
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="Test requires POSIX-compliant OS")
 async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     """
     Basic functional test of miscellaneous API.
@@ -1021,6 +1032,7 @@ async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     # <<<<< REGENERATE THUMBNAILS STAGE <<<<<
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="Test requires POSIX-compliant OS")
 async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     """
     Very basic functional test of the minion API.
@@ -1079,6 +1091,7 @@ async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     # <<<<< GET MINION JOB DETAILS STAGE <<<<<
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="Test requires POSIX-compliant OS")
 async def test_concurrent_clients():
     """
     Example test that shows how to use multiple client instances
