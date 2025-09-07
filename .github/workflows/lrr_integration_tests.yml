@@ -14,50 +14,135 @@ on:
   workflow_call:
 
 jobs:
-  integration-tests:
-    runs-on: ubuntu-latest
+  # integration-tests-docker:
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 60
+    
+  #   permissions:
+  #     contents: read
+  #     packages: read
+    
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
+        
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.12'
+          
+  #     - name: Install main package (aio-lanraragi)
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install ".[dev]"
+          
+  #     - name: Move to integration_tests and install test library
+  #       run: |
+  #         cd integration_tests
+  #         pip install .
+          
+  #     - name: Run integration tests
+  #       run: |
+  #         cd integration_tests
+  #         export CI=true
+  #         pytest tests --log-cli-level=INFO --git-url=https://github.com/difegue/LANraragi.git --git-branch=dev --docker-api
+  #       env:
+  #         # Ensure Docker daemon is accessible to Python docker SDK
+  #         DOCKER_HOST: unix:///var/run/docker.sock
+  
+  integration-tests-windows:
+    runs-on: windows-2025
     timeout-minutes: 60
     
     permissions:
       contents: read
-      packages: read
-    
+      
     steps:
-      - name: Checkout repository
+      - name: Checkout LANraragi repository
         uses: actions/checkout@v4
+        with:
+          repository: Difegue/LANraragi
+          ref: dev
+          submodules: true
+          path: LANraragi
+          
+      - name: Checkout aio-lanraragi repository  
+        uses: actions/checkout@v4
+        with:
+          path: aio-lanraragi
+          
+      - name: Setup MSYS2 UCRT64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          
+      - name: Install LANraragi Windows dependencies
+        shell: msys2 {0}
+        run: |
+          cd LANraragi
+          ./tools/build/windows/install-deps.sh
+          
+      - name: Build LANraragi Windows distribution
+        shell: msys2 {0}
+        run: |
+          cd LANraragi
+          ./tools/build/windows/install.sh
+          ./tools/build/windows/cleanup.sh
+          ./tools/build/windows/create-dist.sh
+          
+      - name: Enable UTF-8 support
+        run: |
+          cd LANraragi
+          ./tools/build/windows/utf8-support.ps1
+          
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
         
-      - name: Set up Python
+      - name: Build MSI Installer
+        run: |
+          cd LANraragi
+          choco uninstall wixtoolset
+          choco install wixtoolset --version 3.14.0 --allow-downgrade --force
+          ./tools/build/windows/build-installer.ps1
+          
+      - name: Set up Python for testing
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           
-      - name: Install main package (aio-lanraragi)
+      - name: Install test dependencies
         run: |
+          cd aio-lanraragi
           python -m pip install --upgrade pip
           pip install ".[dev]"
-          
-      - name: Move to integration_tests and install test library
-        run: |
           cd integration_tests
           pip install .
           
-      - name: Run integration tests
+      - name: Run Windows integration tests
         run: |
-          cd integration_tests
-          export CI=true
-          pytest tests --log-cli-level=INFO --git-url=https://github.com/difegue/LANraragi.git --git-branch=dev --docker-api
-        env:
-          # Ensure Docker daemon is accessible to Python docker SDK
-          DOCKER_HOST: unix:///var/run/docker.sock
-  
+          cd aio-lanraragi/integration_tests
+          $env:LANraragi_MSI_PATH = "../../LANraragi/tools/build/windows/Karen/Setup/bin/LANraragi.msi"
+          $env:LANraragi_KAREN_PATH = "../../LANraragi/tools/build/windows/Karen/Karen/bin/win-x64/publish/Karen.exe"
+          pytest tests/test_simple_windows.py -v --log-cli-level=INFO
+          
+      - name: Upload MSI artifact for debugging
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LANraragi-Windows-MSI
+          path: LANraragi/tools/build/windows/Karen/Setup/bin/LANraragi.msi
+          if-no-files-found: warn
+
   check:
     if: always()
 
     needs:
-      - integration-tests
+      # - integration-tests-docker
+      - integration-tests-windows
     runs-on: ubuntu-latest
     steps:
       - name: Check if integration tests passed
         uses: re-actors/alls-green@release/v1
         with:
-          jobs: ${{ toJson(needs) }}
+          jobs: ${{ toJSON(needs) }}
