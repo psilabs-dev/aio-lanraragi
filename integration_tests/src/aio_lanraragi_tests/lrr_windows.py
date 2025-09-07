@@ -58,6 +58,13 @@ class LRRWindowsEnvironment:
         # Configuration
         self.api_key = "lanraragi"
         self.port = 3001
+        
+        # Logs
+        self.msi_log_file = None
+        self.karen_stdout_log = None
+        self.karen_stderr_log = None
+        self._karen_stdout_handle = None
+        self._karen_stderr_handle = None
 
     def _run_command(self, cmd: list, check: bool = True, capture_output: bool = True) -> subprocess.CompletedProcess:
         """
@@ -110,6 +117,7 @@ class LRRWindowsEnvironment:
         LOGGER.info(f"Installing LANraragi MSI from {msi_abspath}")
         
         log_file = Path(tempfile.gettempdir()) / f"lanraragi_install_{uuid.uuid4().hex[:8]}.log"
+        self.msi_log_file = log_file
         
         cmd = [
             "msiexec", "/i", str(msi_abspath), 
@@ -213,10 +221,22 @@ class LRRWindowsEnvironment:
             "LRR_THUMB_DIRECTORY": str(self.thumb_dir),
             "LRR_NETWORK": f"http://localhost:{self.port}"
         })
+        # Redirect stdout/stderr to files to avoid pipe blocking and capture logs
+        try:
+            self.karen_stdout_log = self.temp_dir / "karen_stdout.log"
+            self.karen_stderr_log = self.temp_dir / "karen_stderr.log"
+            self._karen_stdout_handle = open(self.karen_stdout_log, 'w', encoding='utf-8', errors='ignore')
+            self._karen_stderr_handle = open(self.karen_stderr_log, 'w', encoding='utf-8', errors='ignore')
+            stdout_target = self._karen_stdout_handle
+            stderr_target = self._karen_stderr_handle
+        except Exception as e:
+            LOGGER.warning(f"Failed to open Karen stdout/stderr log files: {e}. Falling back to default pipes.")
+            stdout_target = subprocess.PIPE
+            stderr_target = subprocess.PIPE
         self.karen_process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=stdout_target,
+            stderr=stderr_target,
             text=True,
             cwd=self.install_dir,
             env=env
@@ -224,8 +244,16 @@ class LRRWindowsEnvironment:
         time.sleep(10)  # Give more time for Karen to start LANraragi
         
         if self.karen_process.poll() is not None:
-            stdout, stderr = self.karen_process.communicate()
-            raise RuntimeError(f"Karen process failed to start. Stdout: {stdout}, Stderr: {stderr}")
+            stdout = ''
+            stderr = ''
+            try:
+                if isinstance(self.karen_stdout_log, Path) and self.karen_stdout_log and self.karen_stdout_log.exists():
+                    stdout = self.karen_stdout_log.read_text(encoding='utf-8', errors='ignore')
+                if isinstance(self.karen_stderr_log, Path) and self.karen_stderr_log and self.karen_stderr_log.exists():
+                    stderr = self.karen_stderr_log.read_text(encoding='utf-8', errors='ignore')
+            except Exception:
+                pass
+            raise RuntimeError(f"Karen process failed to start. Stdout: {stdout}\nStderr: {stderr}")
             
         self.is_running = True
         LOGGER.info("Karen process started successfully")
@@ -247,6 +275,14 @@ class LRRWindowsEnvironment:
                 LOGGER.warning("Karen process didn't terminate gracefully, killing it")
                 self.karen_process.kill()
                 self.karen_process.wait()
+        # Close log file handles if open
+        try:
+            if self._karen_stdout_handle:
+                self._karen_stdout_handle.close()
+            if self._karen_stderr_handle:
+                self._karen_stderr_handle.close()
+        except Exception as e:
+            LOGGER.debug(f"Error closing Karen log file handles: {e}")
 
         processes_to_kill = ["perl.exe", "redis-server.exe", "Karen.exe"]
         for proc_name in processes_to_kill:
@@ -270,7 +306,7 @@ class LRRWindowsEnvironment:
             LOGGER.error(f"Failed to connect to Redis: {e}")
             self.redis_client = None
 
-    def _wait_for_server(self, max_retries: int = 30):
+    def _wait_for_server(self, max_retries: int = 4):
         """Wait for LANraragi server to be ready."""
         url = f"http://localhost:{self.port}"
         
@@ -285,6 +321,11 @@ class LRRWindowsEnvironment:
                 LOGGER.debug(f"Server not ready yet (attempt {i+1}): {e}")
                 time.sleep(2)
                 
+        # Dump logs to help diagnose why the server didn't come up
+        try:
+            self.display_lrr_logs(500, logging.ERROR)
+        except Exception as log_err:
+            LOGGER.error(f"Failed to display LANraragi logs: {log_err}")
         raise RuntimeError(f"LANraragi server not ready after {max_retries} attempts")
 
     def add_api_key(self, api_key: str):
@@ -371,6 +412,11 @@ class LRRWindowsEnvironment:
             
         except Exception as e:
             LOGGER.error(f"Failed to setup Windows environment: {e}")
+            # Try to dump as much diagnostic info as possible before teardown removes files
+            try:
+                self._dump_failure_diagnostics()
+            except Exception as diag_err:
+                LOGGER.error(f"Failed to dump diagnostics: {diag_err}")
             try:
                 self.teardown()
             except Exception as cleanup_error:
@@ -402,3 +448,129 @@ class LRRWindowsEnvironment:
             
         except Exception as e:
             LOGGER.error(f"Error during teardown: {e}")
+
+    def _dump_failure_diagnostics(self):
+        """
+        Dump helpful diagnostics to the logger for CI debugging:
+        - Tail of LANraragi logs
+        - Tail of plugins log if present
+        - Tail of MSI installation log
+        - Basic install directory listing
+        """
+        try:
+            LOGGER.error("Collecting diagnostics after setup failure...")
+            # Prepare artifact directory in a stable temp location
+            artifacts_dir = Path(tempfile.gettempdir()) / f"lrr_artifacts_{uuid.uuid4().hex[:8]}"
+            try:
+                artifacts_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                LOGGER.error(f"Unable to create artifacts directory: {e}")
+                artifacts_dir = None
+            # LANraragi logs
+            try:
+                self.display_lrr_logs(500, logging.ERROR)
+                if artifacts_dir:
+                    try:
+                        lrr_log_path = self.lanraragi_dir / "log" / "lanraragi.log"
+                        if lrr_log_path.exists():
+                            import shutil
+                            shutil.copy2(lrr_log_path, artifacts_dir / "lanraragi.log")
+                    except Exception as e:
+                        LOGGER.error(f"Unable to copy LANraragi log to artifacts: {e}")
+            except Exception as e:
+                LOGGER.error(f"Unable to read LANraragi log: {e}")
+
+            # Plugins log
+            try:
+                plugins_log = self.lanraragi_dir / "log" / "plugins.log"
+                if plugins_log.exists():
+                    with open(plugins_log, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.readlines()
+                        tail = ''.join(content[-200:])
+                        LOGGER.error(f"LANraragi plugins.log (last 200 lines):\n{tail}")
+                else:
+                    LOGGER.error(f"Plugins log not found at: {plugins_log}")
+            except Exception as e:
+                LOGGER.error(f"Unable to read plugins log: {e}")
+
+            # MSI install log
+            try:
+                if self.msi_log_file and Path(self.msi_log_file).exists():
+                    with open(self.msi_log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()
+                        head = ''.join(lines[:50])
+                        tail = ''.join(lines[-200:])
+                        LOGGER.error(f"MSI install log head (first 50 lines):\n{head}")
+                        LOGGER.error(f"MSI install log tail (last 200 lines):\n{tail}")
+                    if artifacts_dir:
+                        try:
+                            import shutil
+                            shutil.copy2(self.msi_log_file, artifacts_dir / "msi_install.log")
+                        except Exception as e:
+                            LOGGER.error(f"Unable to copy MSI install log to artifacts: {e}")
+                else:
+                    LOGGER.error(f"MSI log file not found: {self.msi_log_file}")
+            except Exception as e:
+                LOGGER.error(f"Unable to read MSI install log: {e}")
+
+            # Karen stdout/stderr logs
+            try:
+                if self.karen_stdout_log and Path(self.karen_stdout_log).exists():
+                    stdout_tail = ''.join(Path(self.karen_stdout_log).read_text(encoding='utf-8', errors='ignore').splitlines(keepends=True)[-200:])
+                    LOGGER.error(f"Karen stdout (last 200 lines):\n{stdout_tail}")
+                    if artifacts_dir:
+                        try:
+                            import shutil
+                            shutil.copy2(self.karen_stdout_log, artifacts_dir / "karen_stdout.log")
+                        except Exception as e:
+                            LOGGER.error(f"Unable to copy Karen stdout to artifacts: {e}")
+                else:
+                    LOGGER.error(f"Karen stdout log not found: {self.karen_stdout_log}")
+                if self.karen_stderr_log and Path(self.karen_stderr_log).exists():
+                    stderr_tail = ''.join(Path(self.karen_stderr_log).read_text(encoding='utf-8', errors='ignore').splitlines(keepends=True)[-200:])
+                    LOGGER.error(f"Karen stderr (last 200 lines):\n{stderr_tail}")
+                    if artifacts_dir:
+                        try:
+                            import shutil
+                            shutil.copy2(self.karen_stderr_log, artifacts_dir / "karen_stderr.log")
+                        except Exception as e:
+                            LOGGER.error(f"Unable to copy Karen stderr to artifacts: {e}")
+                else:
+                    LOGGER.error(f"Karen stderr log not found: {self.karen_stderr_log}")
+            except Exception as e:
+                LOGGER.error(f"Unable to read Karen stdout/stderr logs: {e}")
+
+            # Basic directory listing
+            try:
+                if self.lanraragi_dir.exists():
+                    entries = []
+                    for root, dirs, files in os.walk(self.lanraragi_dir):
+                        depth = len(Path(root).parts) - len(self.lanraragi_dir.parts)
+                        if depth > 3:
+                            # Do not recurse too deep
+                            continue
+                        for name in files:
+                            entries.append(str(Path(root) / name))
+                        for name in dirs:
+                            entries.append(str(Path(root) / name) + os.sep)
+                    LOGGER.error("Install directory listing (limited depth):\n" + "\n".join(entries[:500]))
+                    # Copy logs directory if present
+                    try:
+                        logs_dir = self.lanraragi_dir / "log"
+                        if artifacts_dir and logs_dir.exists():
+                            import shutil
+                            dest_logs = artifacts_dir / "lanraragi_logs"
+                            shutil.copytree(logs_dir, dest_logs, dirs_exist_ok=True)
+                    except Exception as e:
+                        LOGGER.error(f"Unable to copy LANraragi log directory: {e}")
+                else:
+                    LOGGER.error(f"LANraragi directory does not exist: {self.lanraragi_dir}")
+            except Exception as e:
+                LOGGER.error(f"Unable to list install directory: {e}")
+
+            # Final note: where artifacts were saved
+            if artifacts_dir:
+                LOGGER.error(f"Diagnostics artifacts saved to: {artifacts_dir}")
+
+        except Exception as outer:
+            LOGGER.error(f"Diagnostics collection failed: {outer}")
