@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 import tempfile
 import time
-from typing import Optional
+from typing import Optional, override
 import docker
 import docker.errors
 import docker.models
@@ -16,6 +16,8 @@ import docker.models.containers
 import docker.models.networks
 from git import Repo
 import requests
+
+from aio_lanraragi_tests.lrr_environment_base import AbstractLRREnvironment
 
 class DockerTestException(Exception):
     def __init__(self, message):
@@ -28,7 +30,7 @@ DEFAULT_NETWORK_NAME = "lanraragi-integration-test-network"
 
 LOGGER = logging.getLogger(__name__)
 
-class LRREnvironment:
+class LRRDockerEnvironment(AbstractLRREnvironment):
 
     """
     Set up a containerized LANraragi environment with Docker.
@@ -162,6 +164,7 @@ class LRREnvironment:
                     self.logger.log(log_level, f"LRR: {line}")
                     # self.logger.error(f"LRR: {line}")
 
+    @override
     def setup(self, test_connection_max_retries: int=4):
         """
         Main entrypoint to setting up a LRR docker environment. Pulls/builds required images,
@@ -280,6 +283,7 @@ class LRREnvironment:
 
         self.logger.info("Environment setup complete, proceeding to testing...")
 
+    @override
     def teardown(self):
         self.reset_docker_test_env()
         self.logger.info("Cleanup complete.")

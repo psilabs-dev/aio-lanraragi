@@ -8,9 +8,10 @@ This provides every test with an isolated environment.
 import asyncio
 import logging
 from pathlib import Path
+import sys
 import tempfile
 from typing import List, Tuple
-import aiohttp.client_exceptions
+from aio_lanraragi_tests.lrr_environment_base import AbstractLRREnvironment
 import docker
 import numpy as np
 import pytest
@@ -18,7 +19,7 @@ import pytest_asyncio
 import aiohttp
 from urllib.parse import urlparse, parse_qs
 from lanraragi.clients.client import LRRClient
-from aio_lanraragi_tests.lrr_docker import LRREnvironment
+from aio_lanraragi_tests.lrr_docker import LRRDockerEnvironment
 from aio_lanraragi_tests.common import compute_upload_checksum
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import (
@@ -84,17 +85,31 @@ logger = logging.getLogger(__name__)
 
 @pytest.fixture(autouse=True)
 def session_setup_teardown(request: pytest.FixtureRequest):
-    build_path: str = request.config.getoption("--build")
-    image: str = request.config.getoption("--image")
-    git_url: str = request.config.getoption("--git-url")
-    git_branch: str = request.config.getoption("--git-branch")
-    use_docker_api: bool = request.config.getoption("--docker-api")
-    docker_client = docker.from_env()
-    docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
-    environment = LRREnvironment(
-        build_path, image, git_url, git_branch, docker_client, docker_api=docker_api,
-        init_with_allow_uploads=True, init_with_api_key=True, init_with_nofunmode=True
-    )
+
+    environment: AbstractLRREnvironment = None
+
+    # check operating system.
+    match sys.platform:
+        case 'win32':
+            # TODO: this would be where we run integration tests for native windows.
+            raise NotImplementedError("Testing environment for LRR in Windows is not implemented.")
+        case 'darwin' | 'linux':
+            # TODO: we're assuming macos is used as a development environment with docker installed,
+            # not a testing environment; for macos github runners, we would be using them
+            # to run homebrew integration tests.
+
+            build_path: str = request.config.getoption("--build")
+            image: str = request.config.getoption("--image")
+            git_url: str = request.config.getoption("--git-url")
+            git_branch: str = request.config.getoption("--git-branch")
+            use_docker_api: bool = request.config.getoption("--docker-api")
+            docker_client = docker.from_env()
+            docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
+            environment = LRRDockerEnvironment(
+                build_path, image, git_url, git_branch, docker_client, docker_api=docker_api,
+                init_with_allow_uploads=True, init_with_api_key=True, init_with_nofunmode=True
+            )
+
     environment.setup()
     request.session.lrr_environment = environment # Store environment in pytest session for access in hooks
     yield

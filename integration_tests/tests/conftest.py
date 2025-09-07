@@ -1,11 +1,12 @@
 import logging
 from typing import Any, List
+from aio_lanraragi_tests.lrr_environment_base import AbstractLRREnvironment
 import pytest
 from _pytest.nodes import Item
 from _pytest.reports import TestReport
 from _pytest.runner import CallInfo
 
-from aio_lanraragi_tests.lrr_docker import LRREnvironment
+from aio_lanraragi_tests.lrr_docker import LRRDockerEnvironment
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,7 @@ def pytest_runtest_makereport(item: Item, call: CallInfo[Any]):
         
         try:
             if hasattr(item.session, 'lrr_environment'):
-                environment: LRREnvironment = item.session.lrr_environment
+                environment: AbstractLRREnvironment = item.session.lrr_environment
                 environment.display_lrr_logs()
             else:
                 logger.warning("LRR environment not available in session for failure debugging")
