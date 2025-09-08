@@ -79,7 +79,11 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         self.get_logger().info("Checking if ports are available.")
         if not is_port_available(self.lrr_port):
-            raise DeploymentException(f"Port {self.lrr_port} is occupied.")
+            # Best-effort cleanup in case a previous test left a lingering process
+            self.get_logger().warning(f"Port {self.lrr_port} is occupied; attempting to free it.")
+            self._ensure_port_free(self.lrr_port, service_name="LRR", timeout=15)
+            if not is_port_available(self.lrr_port):
+                raise DeploymentException(f"Port {self.lrr_port} is occupied.")
         if not is_port_available(self.redis_port):
             raise DeploymentException(f"Redis port {self.redis_port} is occupied.")
         self.get_logger().info("Creating required directories...")
@@ -138,23 +142,29 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def stop_lrr(self, timeout: int = 10):
         pid = self._get_lrr_pid()
-        if not pid:
-            self.get_logger().warning("No LRR PID found, skipping shutdown.")
-            return
-
-        output = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"])
-        if output.returncode != 0:
-            self.get_logger().error(f"LRR PID {pid} shutdown failed with exit code {output.returncode}")
+        if pid:
+            output = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"])
+            if output.returncode != 0:
+                self.get_logger().error(f"LRR PID {pid} shutdown failed with exit code {output.returncode}")
+            else:
+                self.get_logger().info(f"LRR PID {pid} shutdown output: {output.stdout}")
         else:
-            self.get_logger().info(f"LRR PID {pid} shutdown output: {output.stdout}")
+            self.get_logger().warning("No LRR PID found; attempting to free port and kill matching processes.")
+            # Try killing the process that owns the port, if any
+            owner_pid = self._get_port_owner_pid(self.lrr_port)
+            if owner_pid:
+                subprocess.run(["taskkill", "/PID", str(owner_pid), "/F", "/T"])  # best-effort
+            # As a last resort, kill perl.exe started from our win-dist runtime
+            self._kill_lrr_perl_processes_by_path()
+
+        # Wait for port to be freed and for owning PID to disappear
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self._get_lrr_pid() is None and is_port_available(self.lrr_port):
-                self.get_logger().info(f"LRR PID {pid} shutdown complete.")
+                self.get_logger().info("LRR shutdown complete.")
                 return
-
             time.sleep(0.2)
-        raise DeploymentException(f"LRR PID {pid} is still running after {timeout}s, forcing shutdown.")
+        raise DeploymentException(f"LRR is still running or port {self.lrr_port} still occupied after {timeout}s.")
 
     @override
     def stop_redis(self, timeout: int = 10):
@@ -257,23 +267,11 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         # Windows run script starts server in daemon mode,
         # which don't create server.pid. We will get
         # the PID by the process that owns the listening port.
-        cmd = f"Get-NetTCPConnection -LocalPort {self.lrr_port} | Select-Object -First 1 -ExpandProperty OwningProcess"
-        result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", cmd],
-            capture_output=True, text=True
-        )
-        pid = result.stdout.strip()
-        return int(pid) if pid.isdigit() else None
+        return self._get_port_owner_pid(self.lrr_port)
 
     def _get_redis_pid(self) -> Optional[int]:
         # see _get_lrr_pid for explanation
-        cmd = f"Get-NetTCPConnection -LocalPort {self.redis_port} | Select-Object -First 1 -ExpandProperty OwningProcess"
-        result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", cmd],
-            capture_output=True, text=True
-        )
-        pid = result.stdout.strip()
-        return int(pid) if pid.isdigit() else None
+        return self._get_port_owner_pid(self.redis_port)
 
     def _test_lrr_connection(self, test_connection_max_retries: int=4):
         retry_count = 0
@@ -313,3 +311,50 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self._test_lrr_connection(test_connection_max_retries)
         self._test_redis_connection()
         self.get_logger().info("Restart complete.")
+
+    def _get_port_owner_pid(self, port: int) -> Optional[int]:
+        cmd = f"Get-NetTCPConnection -LocalPort {port} | Select-Object -First 1 -ExpandProperty OwningProcess"
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", cmd],
+            capture_output=True, text=True
+        )
+        pid = result.stdout.strip()
+        return int(pid) if pid.isdigit() else None
+
+    def _kill_lrr_perl_processes_by_path(self):
+        """
+        Kill perl.exe processes started from the win-dist runtime path for this runfile directory.
+        This is a best-effort cleanup if PID detection by port fails.
+        """
+        perl_path = str((self.runfile.parent / "runtime" / "bin" / "perl.exe").absolute())
+        ps = (
+            "Get-CimInstance Win32_Process -Filter \"Name = 'perl.exe'\" | "
+            f"Where-Object {{ $_.ExecutablePath -ieq '{perl_path}' }} | "
+            "Select-Object -ExpandProperty ProcessId"
+        )
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True
+        )
+        pids = [p.strip() for p in result.stdout.splitlines() if p.strip().isdigit()]
+        for p in pids:
+            subprocess.run(["taskkill", "/PID", p, "/F", "/T"])  # best-effort
+
+    def _ensure_port_free(self, port: int, service_name: str, timeout: int = 15):
+        """
+        Ensure the given port is free by attempting to kill the owning process tree and waiting.
+        """
+        if is_port_available(port):
+            return
+        owner_pid = self._get_port_owner_pid(port)
+        if owner_pid:
+            subprocess.run(["taskkill", "/PID", str(owner_pid), "/F", "/T"])  # best-effort
+        if port == self.lrr_port and not is_port_available(port):
+            # Try killing perl.exe from our dist path as a last resort
+            self._kill_lrr_perl_processes_by_path()
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if is_port_available(port):
+                return
+            time.sleep(0.2)
+        self.get_logger().warning(f"{service_name} port {port} still occupied after best-effort cleanup.")
