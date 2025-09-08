@@ -34,11 +34,11 @@ def pytest_addoption(parser: pytest.Parser):
         but allows you to see build outputs.
 
     git-url : `str`
-        URL of LANraragi git repository to build an image from.
+        URL of LANraragi git repository to build a Docker image from.
 
     git-branch : `str`
         Optional branch name of the corresponding git repository.
-    
+
     experimental : `bool = False`
         Run experimental tests. For example, to test a set of LANraragi APIs in
         active development, but are yet merged upstream.
