@@ -18,6 +18,9 @@ KILL_TIMEOUT = 10
 
 
 class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
+    """
+    Set up a LANraragi environment on Windows. Requires a runfile to be provided.
+    """
 
     def __init__(
         self, runfile: str, testing_workspace: str,
@@ -86,42 +89,30 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         
         # post LRR startup
         self.get_logger().info("Setup script execution complete; testing connection to LRR server.")
-        retry_count = 0
-        while True:
-            try:
-                resp = requests.get(f"http://127.0.0.1:{self.lrr_port}")
-                if resp.status_code != 200:
-                    self.teardown()
-                    raise DeploymentException(f"Response status code is not 200: {resp.status_code}")
-                else:
-                    break
-            except requests.exceptions.ConnectionError:
-                if retry_count < test_connection_max_retries:
-                    time_to_sleep = 2 ** (retry_count + 1)
-                    self.get_logger().warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
-                    retry_count += 1
-                    time.sleep(time_to_sleep)
-                    continue
-                else:
-                    self.get_logger().error("Failed to connect to LRR server! Dumping logs and shutting down server.")
-                    self.display_lrr_logs()
-                    self.teardown()
-                    raise DeploymentException("Failed to connect to the LRR server!")
+        self._test_lrr_connection(test_connection_max_retries)
 
         # connect to redis
-        self.get_logger().info("Connecting to Redis...")
-        self.redis = redis.Redis(host="127.0.0.1", port=self.redis_port, decode_responses=True)
-        self.redis.ping()
-        self.logger.info("Redis connection established.")
-
+        self._test_redis_connection()
+        restart_required = False
         if self.init_with_api_key:
             self.get_logger().info("Adding API key to Redis...")
             self.add_api_key("test")
+            restart_required = True
         if self.init_with_nofunmode:
             self.get_logger().info("Enabling NoFun mode...")
             self.enable_nofun_mode()
+            restart_required = True
         if self.init_with_allow_uploads:
             self.get_logger().info("LRR services on Windows allow uploads by default. No action needed")
+
+        if restart_required:
+            self.get_logger().info("Restart require detected; restarting LRR and Redis...")
+            self.stop_lrr()
+            self.stop_redis()
+            self._execute_lrr_runfile()
+            self._test_lrr_connection(test_connection_max_retries)
+            self._test_redis_connection()
+            self.get_logger().info("Restart complete.")
 
         self.get_logger().debug("Collecting PID info...")
         self.redis_pid = self._get_redis_pid()
@@ -302,3 +293,33 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         )
         pid = result.stdout.strip()
         return int(pid) if pid.isdigit() else None
+
+    def _test_lrr_connection(self, test_connection_max_retries: int=4):
+        retry_count = 0
+        while True:
+            try:
+                resp = requests.get(f"http://127.0.0.1:{self.lrr_port}")
+                if resp.status_code != 200:
+                    self.teardown()
+                    raise DeploymentException(f"Response status code is not 200: {resp.status_code}")
+                else:
+                    break
+            except requests.exceptions.ConnectionError:
+                if retry_count < test_connection_max_retries:
+                    time_to_sleep = 2 ** (retry_count + 1)
+                    self.get_logger().warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
+                    retry_count += 1
+                    time.sleep(time_to_sleep)
+                    continue
+                else:
+                    self.get_logger().error("Failed to connect to LRR server! Dumping logs and shutting down server.")
+                    self.display_lrr_logs()
+                    self.teardown()
+                    raise DeploymentException("Failed to connect to the LRR server!")
+
+    def _test_redis_connection(self):
+        self.get_logger().info("Connecting to Redis...")
+        if not self.redis:
+            self.redis = redis.Redis(host="127.0.0.1", port=self.redis_port, decode_responses=True)
+        self.redis.ping()
+        self.get_logger().info("Redis connection established.")
