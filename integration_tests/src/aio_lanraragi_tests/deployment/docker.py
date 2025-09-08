@@ -19,6 +19,7 @@ import requests
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
+from aio_lanraragi_tests.common import DEFAULT_API_KEY
 
 DEFAULT_REDIS_TAG = "redis:7.2.4"
 DEFAULT_LANRARAGI_TAG = "difegue/lanraragi"
@@ -230,7 +231,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         self.get_logger().debug("Running post-startup configuration.")
         if self.init_with_api_key:
-            resp = self.add_api_key("lanraragi")
+            resp = self.add_api_key(DEFAULT_API_KEY)
             if resp.exit_code != 0:
                 self.reset_docker_test_env()
                 raise DeploymentException(f"Failed to add API key to server: {resp}")

@@ -74,7 +74,7 @@ from lanraragi.models.tankoubon import (
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
-from aio_lanraragi_tests.common import compute_upload_checksum
+from aio_lanraragi_tests.common import compute_upload_checksum, DEFAULT_API_KEY
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import (
     CreatePageRequest,
@@ -134,7 +134,7 @@ async def lanraragi():
     """
     client = LRRClient(
         lrr_host="http://localhost:3001",
-        lrr_api_key="lanraragi",
+        lrr_api_key=DEFAULT_API_KEY,
         timeout=10
     )
     try:

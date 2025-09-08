@@ -12,6 +12,7 @@ import requests
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.common import is_port_available
 from aio_lanraragi_tests.exceptions import DeploymentException
+from aio_lanraragi_tests.common import DEFAULT_API_KEY
 
 LOGGER = logging.getLogger(__name__)
 KILL_TIMEOUT = 10
@@ -96,7 +97,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         restart_required = False
         if self.init_with_api_key:
             self.get_logger().info("Adding API key to Redis...")
-            self.add_api_key("test")
+            self.add_api_key(DEFAULT_API_KEY)
             restart_required = True
         if self.init_with_nofunmode:
             self.get_logger().info("Enabling NoFun mode...")
