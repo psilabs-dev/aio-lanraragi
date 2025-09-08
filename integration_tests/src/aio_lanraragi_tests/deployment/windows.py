@@ -107,13 +107,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.get_logger().info("LRR services on Windows allow uploads by default. No action needed")
 
         if restart_required:
-            self.get_logger().info("Restart require detected; restarting LRR and Redis...")
-            self.stop_lrr()
-            self.stop_redis()
-            self._execute_lrr_runfile()
-            self._test_lrr_connection(test_connection_max_retries)
-            self._test_redis_connection()
-            self.get_logger().info("Restart complete.")
+            self._restart_deployment(test_connection_max_retries)
 
         self.get_logger().debug("Collecting PID info...")
         self.redis_pid = self._get_redis_pid()
@@ -126,22 +120,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Forceful shutdown of LRR and Redis and remove the content path, preparing it for another test.
         """
-        if self.lrr_pid and self._is_running(self.lrr_pid):
-            script = [
-                "taskkill", "/PID", str(self.lrr_pid), "/F",
-            ]
-            self.get_logger().info("Shutting down LRR with script: " + subprocess.list2cmdline(script))
-            subprocess.run(script)
-            self.get_logger().info("LRR shutdown complete.")
-        self.lrr_pid = None
-        if self.redis_pid and self._is_running(self.redis_pid):
-            script = [
-                "taskkill", "/PID", str(self.redis_pid), "/F",
-            ]
-            self.get_logger().info("Shutting down Redis with script: " + subprocess.list2cmdline(script))
-            subprocess.run(script)
-            self.get_logger().info("Redis shutdown complete.")
-        self.redis_pid = None
+        self.stop_lrr()
+        self.stop_redis()
 
         if self.content_path.exists():
             self.get_logger().info(f"Removing content path: {self.content_path}")
@@ -324,3 +304,12 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.redis = redis.Redis(host="127.0.0.1", port=self.redis_port, decode_responses=True)
         self.redis.ping()
         self.get_logger().info("Redis connection established.")
+
+    def _restart_deployment(self, test_connection_max_retries: int=4):
+        self.get_logger().info("Restart require detected; restarting LRR and Redis...")
+        self.stop_lrr()
+        self.stop_redis()
+        self._execute_lrr_runfile()
+        self._test_lrr_connection(test_connection_max_retries)
+        self._test_redis_connection()
+        self.get_logger().info("Restart complete.")
