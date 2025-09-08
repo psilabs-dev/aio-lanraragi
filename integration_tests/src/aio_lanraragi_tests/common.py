@@ -1,4 +1,5 @@
 import hashlib
+import socket
 import io
 from pathlib import Path
 from typing import List, Optional, overload, Union
@@ -45,6 +46,8 @@ IMAGE_SIGNATURES = [signature.replace(' ', '').lower() for signature in __IMAGE_
 
 ALLOWED_LRR_EXTENSIONS = {"zip", "rar", "targz", "lzma", "7z", "xz", "cbz", "cbr", "pdf"}
 NULL_ARCHIVE_ID = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+DEFAULT_API_KEY = "lanraragi"
 
 @overload
 def compute_upload_checksum(br: io.IOBase) -> str:
@@ -141,3 +144,14 @@ def is_valid_signature_hex(signature: str, allowed_signatures: List[str]=ALLOWED
         if signature.startswith(allowed_signature):
             is_allowed_mime = True
     return is_allowed_mime
+
+def is_port_available(port: int):
+    """
+    Checks to see if the port on localhost is available.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False

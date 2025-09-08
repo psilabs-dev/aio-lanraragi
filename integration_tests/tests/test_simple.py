@@ -1,8 +1,7 @@
 """
 Collection of all simple API testing pipelines for the LANraragi server.
 
-For each testing pipeline, a new network, server and database are allocated and reclaimed.
-This provides every test with an isolated environment.
+For each testing pipeline, a corresponding LRR environment is set up and torn down.
 """
 
 import asyncio
@@ -11,24 +10,14 @@ from pathlib import Path
 import sys
 import tempfile
 from typing import List, Tuple
-from aio_lanraragi_tests.lrr_environment_base import AbstractLRREnvironment
 import docker
 import numpy as np
 import pytest
 import pytest_asyncio
 import aiohttp
 from urllib.parse import urlparse, parse_qs
+
 from lanraragi.clients.client import LRRClient
-from aio_lanraragi_tests.lrr_docker import LRRDockerEnvironment
-from aio_lanraragi_tests.common import compute_upload_checksum
-from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
-from aio_lanraragi_tests.archive_generation.models import (
-    CreatePageRequest,
-    WriteArchiveRequest,
-    WriteArchiveResponse,
-)
-from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
-from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
 from lanraragi.clients.utils import _build_err_response
 from lanraragi.models.archive import (
     ClearNewArchiveFlagRequest,
@@ -81,18 +70,37 @@ from lanraragi.models.tankoubon import (
     UpdateTankoubonRequest,
 )
 
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
+from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
+from aio_lanraragi_tests.common import compute_upload_checksum, DEFAULT_API_KEY
+from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
+from aio_lanraragi_tests.archive_generation.models import (
+    CreatePageRequest,
+    WriteArchiveRequest,
+    WriteArchiveResponse,
+)
+from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
+from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
+
 logger = logging.getLogger(__name__)
 
 @pytest.fixture(autouse=True)
 def session_setup_teardown(request: pytest.FixtureRequest):
 
-    environment: AbstractLRREnvironment = None
+    # TODO: this should be refactored.
+    environment: AbstractLRRDeploymentContext = None
 
     # check operating system.
     match sys.platform:
         case 'win32':
-            # TODO: this would be where we run integration tests for native windows.
-            raise NotImplementedError("Testing environment for LRR in Windows is not implemented.")
+            runfile_path: str = request.config.getoption("--windows-runfile")
+            windows_content_path: str = request.config.getoption("--windows-content-path")
+            environment = WindowsLRRDeploymentContext(
+                runfile_path, windows_content_path,
+                init_with_allow_uploads=True, init_with_api_key=True, init_with_nofunmode=True
+            )
+
         case 'darwin' | 'linux':
             # TODO: we're assuming macos is used as a development environment with docker installed,
             # not a testing environment; for macos github runners, we would be using them
@@ -105,7 +113,7 @@ def session_setup_teardown(request: pytest.FixtureRequest):
             use_docker_api: bool = request.config.getoption("--docker-api")
             docker_client = docker.from_env()
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
-            environment = LRRDockerEnvironment(
+            environment = DockerLRRDeploymentContext(
                 build_path, image, git_url, git_branch, docker_client, docker_api=docker_api,
                 init_with_allow_uploads=True, init_with_api_key=True, init_with_nofunmode=True
             )
@@ -126,7 +134,7 @@ async def lanraragi():
     """
     client = LRRClient(
         lrr_host="http://localhost:3001",
-        lrr_api_key="lanraragi",
+        lrr_api_key=DEFAULT_API_KEY,
         timeout=10
     )
     try:

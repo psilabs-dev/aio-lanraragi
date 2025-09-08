@@ -14,7 +14,9 @@ on:
   workflow_call:
 
 jobs:
-  integration-tests:
+
+  integration-tests-ubuntu:
+    name: Integration Tests (Ubuntu)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     
@@ -50,11 +52,87 @@ jobs:
           # Ensure Docker daemon is accessible to Python docker SDK
           DOCKER_HOST: unix:///var/run/docker.sock
   
+  # windows integration tests
+  # refer to https://github.com/Difegue/LANraragi/blob/dev/.github/workflows/push-continous-delivery.yml
+  integration-tests-windows:
+    name: Integration Tests (Windows)
+    runs-on: windows-2025
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+      packages: read
+      
+    steps:
+      - name: Checkout LANraragi repository
+        uses: actions/checkout@v4
+        with:
+          repository: difegue/LANraragi
+          ref: dev
+          submodules: true
+          path: LANraragi
+
+      - name: Setup MSYS2 UCRT64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+
+      - name: Install deps
+        shell: msys2 {0}
+        working-directory: LANraragi
+        run: |
+          ./tools/build/windows/install-deps.sh
+
+      - name: Build
+        shell: msys2 {0}
+        working-directory: LANraragi
+        run: |
+          ./tools/build/windows/install.sh
+          ./tools/build/windows/cleanup.sh
+          ./tools/build/windows/create-dist.sh
+
+      - name: Enable UTF-8
+        working-directory: LANraragi
+        run: |
+          ./tools/build/windows/utf8-support.ps1
+
+      - name: Checkout aio-lanraragi
+        uses: actions/checkout@v4
+        with:
+          path: aio-lanraragi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install main package (aio-lanraragi)
+        working-directory: aio-lanraragi
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      - name: Install test library
+        working-directory: aio-lanraragi/integration_tests
+        run: |
+          pip install .
+
+      - name: Run integration tests
+        working-directory: aio-lanraragi/integration_tests
+        run: |
+          $env:CI='true'
+          pytest tests `
+          --log-cli-level=INFO `
+          --windows-runfile "$env:GITHUB_WORKSPACE\\LANraragi\\win-dist\\run.ps1" `
+          --windows-content-path "$env:GITHUB_WORKSPACE\\lanraragi_tests"
+
   check:
     if: always()
 
     needs:
-      - integration-tests
+      - integration-tests-ubuntu
+      - integration-tests-windows
     runs-on: ubuntu-latest
     steps:
       - name: Check if integration tests passed
