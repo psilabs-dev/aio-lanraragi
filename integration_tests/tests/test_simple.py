@@ -1,8 +1,7 @@
 """
 Collection of all simple API testing pipelines for the LANraragi server.
 
-For each testing pipeline, a new network, server and database are allocated and reclaimed.
-This provides every test with an isolated environment.
+For each testing pipeline, a corresponding LRR environment is set up and torn down.
 """
 
 import asyncio
@@ -89,15 +88,16 @@ logger = logging.getLogger(__name__)
 @pytest.fixture(autouse=True)
 def session_setup_teardown(request: pytest.FixtureRequest):
 
+    # TODO: this should be refactored.
     environment: AbstractLRRDeploymentContext = None
 
     # check operating system.
     match sys.platform:
         case 'win32':
             runfile_path: str = request.config.getoption("--windows-runfile")
-            testing_workspace: str = request.config.getoption("--windows-workspace")
+            windows_content_path: str = request.config.getoption("--windows-content-path")
             environment = WindowsLRRDeploymentContext(
-                runfile_path, testing_workspace,
+                runfile_path, windows_content_path,
                 init_with_allow_uploads=True, init_with_api_key=True, init_with_nofunmode=True
             )
 

@@ -15,7 +15,6 @@ from aio_lanraragi_tests.exceptions import DeploymentException
 from aio_lanraragi_tests.common import DEFAULT_API_KEY
 
 LOGGER = logging.getLogger(__name__)
-KILL_TIMEOUT = 10
 
 
 class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
@@ -24,7 +23,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     """
 
     def __init__(
-        self, runfile: str, testing_workspace: str,
+        self, runfile: str, content_path: str,
         logger: Optional[logging.Logger]=None,
         init_with_api_key: bool=False, init_with_nofunmode: bool=False, init_with_allow_uploads: bool=False,
         lrr_port: int=3001
@@ -41,7 +40,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.init_with_allow_uploads = init_with_allow_uploads
 
         self.network = f"http://127.0.0.1:{lrr_port}"
-        self.content_path = Path(testing_workspace).absolute()
+        self.content_path = Path(content_path).absolute()
         self.thumb_path = self.content_path / "thumb"
         # log and pid files are written under the dist directory where run.ps1 is executed
         self.logsdir = self.runfile.parent / "log"

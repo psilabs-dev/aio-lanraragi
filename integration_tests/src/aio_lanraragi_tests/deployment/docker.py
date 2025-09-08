@@ -61,44 +61,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def get_logger(self) -> logging.Logger:
         return self.logger
 
-    def reset_docker_test_env(self):
-        """
-        Reset docker test environment (LRR and Redis containers, testing network) if something
-        goes wrong during setup.
-        """
-        if self.redis_container:
-            with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
-                container = self.docker_client.containers.get(self.redis_container.id)
-                container.stop(timeout=3)
-                container.remove(force=True)
-        if self.lrr_container:
-            with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
-                container = self.docker_client.containers.get(self.lrr_container.id)
-                container.stop(timeout=3)
-                container.remove(force=True)
-        if hasattr(self, 'network') and self.network:
-            with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
-                self.docker_client.networks.get(self.network.id).remove()
-        with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
-            self.docker_client.images.get("lanraragi-integration-test").remove(force=True)
-
-    def build_docker_image(self, build_path: Path):
-        if not Path(build_path).exists():
-            raise FileNotFoundError(f"Build path {build_path} does not exist!")
-        dockerfile_path = Path(build_path) / "tools" / "build" / "docker" / "Dockerfile"
-        if not dockerfile_path.exists():
-            raise FileNotFoundError(f"Dockerfile {dockerfile_path} does not exist!")
-        self.get_logger().info(f"Building LRR image; this can take a while ({dockerfile_path}).")
-        build_start = time.time()
-        if self.docker_api:
-            for lineb in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag='lanraragi-integration-test'):
-                if (data := json.loads(lineb.decode('utf-8').strip())) and (stream := data.get('stream')):
-                    self.get_logger().info(stream.strip())
-        else:
-            self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag='lanraragi-integration-test')
-        build_time = time.time() - build_start
-        self.get_logger().info(f"LRR image build complete: time {build_time}s")
-
     @override
     def add_api_key(self, api_key: str):
         return self.redis_container.exec_run(["bash", "-c", f'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG apikey {api_key}\nEOF'])
@@ -171,7 +133,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         # prepare images
         if self.build_path:
-            self.build_docker_image(self.build_path)
+            self._build_docker_image(self.build_path)
         elif self.git_url:
             self.get_logger().info(f"Cloning from {self.git_url}...")
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -179,7 +141,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 repo = Repo.clone_from(self.git_url, repo_dir)
                 if self.git_branch: # throws git.exc.GitCommandError if branch does not exist.
                     repo.git.checkout(self.git_branch)
-                self.build_docker_image(repo.working_dir)
+                self._build_docker_image(repo.working_dir)
         else:
             image = DEFAULT_LANRARAGI_TAG
             if self.image:
@@ -233,13 +195,13 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.init_with_api_key:
             resp = self.add_api_key(DEFAULT_API_KEY)
             if resp.exit_code != 0:
-                self.reset_docker_test_env()
+                self._reset_docker_test_env()
                 raise DeploymentException(f"Failed to add API key to server: {resp}")
         
         if self.init_with_nofunmode:
             resp = self.enable_nofun_mode()
             if resp.exit_code != 0:
-                self.reset_docker_test_env()
+                self._reset_docker_test_env()
                 raise DeploymentException(f"Failed to enable nofunmode: {resp}")
 
         # start lrr
@@ -252,7 +214,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             try:
                 resp = requests.get(f"http://127.0.0.1:{self.lrr_port}")
                 if resp.status_code != 200:
-                    self.reset_docker_test_env()
+                    self._reset_docker_test_env()
                     raise DeploymentException(f"Response status code is not 200: {resp.status_code}")
                 else:
                     break
@@ -266,18 +228,57 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 else:
                     self.get_logger().error("Failed to connect to LRR server! Dumping logs and shutting down server.")
                     self.display_lrr_logs()
-                    self.reset_docker_test_env()
+                    self._reset_docker_test_env()
                     raise DeploymentException("Failed to connect to the LRR server!")
 
         if self.init_with_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
-                self.reset_docker_test_env()
+                self._reset_docker_test_env()
                 raise DeploymentException(f"Failed to modify permissions for LRR contents: {resp}")
 
         self.get_logger().info("Environment setup complete, proceeding to testing...")
 
     @override
     def teardown(self):
-        self.reset_docker_test_env()
+        self._reset_docker_test_env()
         self.get_logger().info("Cleanup complete.")
+
+
+    def _reset_docker_test_env(self):
+        """
+        Reset docker test environment (LRR and Redis containers, testing network) if something
+        goes wrong during setup.
+        """
+        if self.redis_container:
+            with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+                container = self.docker_client.containers.get(self.redis_container.id)
+                container.stop(timeout=3)
+                container.remove(force=True)
+        if self.lrr_container:
+            with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+                container = self.docker_client.containers.get(self.lrr_container.id)
+                container.stop(timeout=3)
+                container.remove(force=True)
+        if hasattr(self, 'network') and self.network:
+            with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+                self.docker_client.networks.get(self.network.id).remove()
+        with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+            self.docker_client.images.get("lanraragi-integration-test").remove(force=True)
+
+    def _build_docker_image(self, build_path: Path):
+        if not Path(build_path).exists():
+            raise FileNotFoundError(f"Build path {build_path} does not exist!")
+        dockerfile_path = Path(build_path) / "tools" / "build" / "docker" / "Dockerfile"
+        if not dockerfile_path.exists():
+            raise FileNotFoundError(f"Dockerfile {dockerfile_path} does not exist!")
+        self.get_logger().info(f"Building LRR image; this can take a while ({dockerfile_path}).")
+        build_start = time.time()
+        if self.docker_api:
+            for lineb in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag='lanraragi-integration-test'):
+                if (data := json.loads(lineb.decode('utf-8').strip())) and (stream := data.get('stream')):
+                    self.get_logger().info(stream.strip())
+        else:
+            self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag='lanraragi-integration-test')
+        build_time = time.time() - build_start
+        self.get_logger().info(f"LRR image build complete: time {build_time}s")

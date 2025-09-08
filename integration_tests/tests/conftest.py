@@ -19,16 +19,16 @@ def pytest_addoption(parser: pytest.Parser):
     New containers/networks will be created on each session. If an exception or invalid
     event occurred, an attempt will be made to clean up all test objects.
 
-    If running on a Windows machine, the `--windows-runfile` and `--windows-workspace`
+    If running on a Windows machine, the `--windows-runfile` and `--windows-content-path`
     flags must be provided. Docker integration testing is not supported on Windows.
 
     Parameters
     ----------
-    build_path : `str`
-        Path to LANraragi project root directory. Overrides the `--image` flag.
-    
+    build-path : `str`
+        Docker image build path to LANraragi project root directory. Overrides the `--image` flag.
+
     image : `str`
-        Tag of LANraragi image to use. Defaults to "difegue/lanraragi".
+        Docker image tag to use for LANraragi image. Defaults to "difegue/lanraragi".
 
     docker-api : `bool = False`
         Use Docker API client. Requires privileged access to the Docker daemon, 
@@ -43,12 +43,16 @@ def pytest_addoption(parser: pytest.Parser):
     windows-runfile : `str`
         Path to the runfile to use for the LRR environment on Windows.
 
-    windows-workspace : `str`
-        Path to the workspace to use for the LRR environment on Windows.
+    windows-content-path : `str`
+        Path to the content path to use for the LRR environment on Windows.
+        All data is stored under this path.
 
     experimental : `bool = False`
         Run experimental tests. For example, to test a set of LANraragi APIs in
         active development, but are yet merged upstream.
+
+    failing : `bool = False`
+        Run tests that are known to fail.
     """
     parser.addoption("--build", action="store", default=None, help="Path to docker build context for LANraragi.")
     parser.addoption("--image", action="store", default=DEFAULT_LANRARAGI_TAG, help="LANraragi image to use.")
@@ -56,7 +60,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--git-branch", action="store", default=None, help="Branch to checkout; if not supplied, uses the main branch.")
     parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
     parser.addoption("--windows-runfile", action="store", default=None, help="Path to the runfile to use for the LRR environment on Windows.")
-    parser.addoption("--windows-workspace", action="store", default=None, help="Path to the workspace to use for the LRR environment on Windows.")
+    parser.addoption("--windows-content-path", action="store", default=None, help="Path to the content path to use for the LRR environment on Windows.")
     parser.addoption("--experimental", action="store_true", default=False, help="Run experimental tests.")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
 
