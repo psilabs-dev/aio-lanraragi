@@ -88,6 +88,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.get_logger().warning(f"LRR port {self.lrr_port} is occupied; attempting to free it.")
             self._ensure_port_free(self.lrr_port, service_name="LRR", timeout=15)
             if not is_port_available(self.lrr_port):
+                # What now.
                 raise DeploymentException(f"Port {self.lrr_port} is occupied.")
         if not is_port_available(self.redis_port):
             raise DeploymentException(f"Redis port {self.redis_port} is occupied.")
@@ -145,7 +146,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         raise NotImplementedError
 
     @override
-    def stop_lrr(self, timeout: int = 10):
+    def stop_lrr(self, timeout: int = 60):
         """
         Stop the LRR server.
 
@@ -177,10 +178,28 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self._get_lrr_pid() is None and is_port_available(self.lrr_port):
-                self.get_logger().info("LRR shutdown complete.")
-                return
+                self.get_logger().info("LRR shutdown complete...?")
+                # could be a hoax, let's check again
+                time.sleep(1.0)
+                if self._get_lrr_pid() is None and is_port_available(self.lrr_port):
+                    self.get_logger().info("LRR shutdown complete.")
+                    return
+                else:
+                    self.get_logger().warning(f"Nope, ANOTHER process seems to be owning LRR port {self.lrr_port} now.")
+                    continue
+            new_owner = self._get_port_owner_pid(self.lrr_port)
+            if new_owner:
+                self.get_logger().info(f"Yet another process seems to be owning LRR port {self.lrr_port}; killing...")
+                subprocess.run(["taskkill", "/PID", str(new_owner), "/F", "/T"])
             time.sleep(0.2)
+
+        self._ensure_port_free(self.lrr_port, service_name="LRR", timeout=60)
+        if is_port_available(self.lrr_port):
+            self.get_logger().info("LRR shutdown complete after extended wait.")
+        else:
+            self.get_logger().warning(f"Wow! LRR port {self.lrr_port} STILL. WON'T. LET. GO.")
         raise DeploymentException(f"LRR is still running or port {self.lrr_port} still occupied after {timeout}s.")
+
     @override
     def stop_redis(self, timeout: int = 10):
         pid = self._get_redis_pid()
@@ -374,7 +393,13 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         deadline = time.time() + timeout
         while time.time() < deadline:
             if is_port_available(port):
-                self.get_logger().info(f"{service_name} port {port} is now free.")
-                return
+                self.get_logger().info(f"{service_name} port {port} is now free...?")
+                time.sleep(1.0)
+                if is_port_available(port):
+                    self.get_logger().info(f"{service_name} port {port} is now free.")
+                    return
+                else:
+                    self.get_logger().warning(f"Oh you sneaky snake... ANOTHER process seems to be owning {service_name} port {port} now.")
+                    continue
             time.sleep(0.2)
-        self.get_logger().warning(f"{service_name} port {port} still occupied after best-effort cleanup.")
+        raise DeploymentException(f"{service_name} port {port} is still occupied after {timeout}s.")
