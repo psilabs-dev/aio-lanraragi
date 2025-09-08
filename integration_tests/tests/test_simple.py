@@ -71,9 +71,9 @@ from lanraragi.models.tankoubon import (
     UpdateTankoubonRequest,
 )
 
-from aio_lanraragi_tests.lrr_environment_base import AbstractLRREnvironment
-from aio_lanraragi_tests.lrr_windows import LRRWindowsEnvironment
-from aio_lanraragi_tests.lrr_docker import LRRDockerEnvironment
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
+from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 from aio_lanraragi_tests.common import compute_upload_checksum
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import (
@@ -89,16 +89,16 @@ logger = logging.getLogger(__name__)
 @pytest.fixture(autouse=True)
 def session_setup_teardown(request: pytest.FixtureRequest):
 
-    environment: AbstractLRREnvironment = None
+    environment: AbstractLRRDeploymentContext = None
 
     # check operating system.
     match sys.platform:
         case 'win32':
             runfile_path: str = request.config.getoption("--windows-runfile")
             testing_workspace: str = request.config.getoption("--windows-workspace")
-            environment = LRRWindowsEnvironment(
+            environment = WindowsLRRDeploymentContext(
                 runfile_path, testing_workspace,
-                init_with_allow_uploads=True
+                init_with_allow_uploads=True, init_with_api_key=True, init_with_nofunmode=True
             )
 
         case 'darwin' | 'linux':
@@ -113,7 +113,7 @@ def session_setup_teardown(request: pytest.FixtureRequest):
             use_docker_api: bool = request.config.getoption("--docker-api")
             docker_client = docker.from_env()
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
-            environment = LRRDockerEnvironment(
+            environment = DockerLRRDeploymentContext(
                 build_path, image, git_url, git_branch, docker_client, docker_api=docker_api,
                 init_with_allow_uploads=True, init_with_api_key=True, init_with_nofunmode=True
             )

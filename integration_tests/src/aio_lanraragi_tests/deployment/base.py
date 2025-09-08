@@ -2,7 +2,7 @@ import abc
 import logging
 
 
-class AbstractLRREnvironment(abc.ABC):
+class AbstractLRRDeploymentContext(abc.ABC):
 
     @abc.abstractmethod
     def get_logger(self) -> logging.Logger:

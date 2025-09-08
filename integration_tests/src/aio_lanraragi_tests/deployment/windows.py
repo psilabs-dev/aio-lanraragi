@@ -7,19 +7,17 @@ import subprocess
 import threading
 import time
 from typing import Optional, override
-from aio_lanraragi_tests.lrr_environment_base import AbstractLRREnvironment
-from aio_lanraragi_tests.utils import is_port_available
 import requests
+
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.common import is_port_available
+from aio_lanraragi_tests.exceptions import DeploymentException
 
 LOGGER = logging.getLogger(__name__)
 KILL_TIMEOUT = 10
 
-class WindowsTestException(Exception):
-    def __init__(self, message):
-        super().__init__(message)
-    pass
 
-class LRRWindowsEnvironment(AbstractLRREnvironment):
+class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     def __init__(
         self, runfile: str, testing_workspace: str,
@@ -57,17 +55,17 @@ class LRRWindowsEnvironment(AbstractLRREnvironment):
     @override
     def add_api_key(self, api_key: str):
         self.redis.select(2)
-        self.redis.set("apikey", api_key)
+        self.redis.hset("LRR_CONFIG", "apikey", api_key)
 
     @override
     def enable_nofun_mode(self):
         self.redis.select(2)
-        self.redis.set("nofunmode", "1")
+        self.redis.hset("LRR_CONFIG", "nofunmode", "1")
 
     @override
     def disable_nofun_mode(self):
         self.redis.select(2)
-        self.redis.set("nofunmode", "0")
+        self.redis.hset("LRR_CONFIG", "nofunmode", "0")
 
     @override
     def setup(self, test_connection_max_retries: int = 4):
@@ -77,17 +75,148 @@ class LRRWindowsEnvironment(AbstractLRREnvironment):
 
         self.get_logger().info("Checking if ports are available.")
         if not is_port_available(self.lrr_port):
-            raise WindowsTestException(f"Port {self.lrr_port} is occupied.")
+            raise DeploymentException(f"Port {self.lrr_port} is occupied.")
         if not is_port_available(self.redis_port):
-            raise WindowsTestException(f"Redis port {self.redis_port} is occupied.")
+            raise DeploymentException(f"Redis port {self.redis_port} is occupied.")
+        self.get_logger().info("Creating required directories...")
+        self.content_path.mkdir(parents=True, exist_ok=True)
+        self.thumb_path.mkdir(parents=True, exist_ok=True)
+
+        self._execute_lrr_runfile()
+        
+        # post LRR startup
+        self.get_logger().info("Setup script execution complete; testing connection to LRR server.")
+        retry_count = 0
+        while True:
+            try:
+                resp = requests.get(f"http://127.0.0.1:{self.lrr_port}")
+                if resp.status_code != 200:
+                    self.teardown()
+                    raise DeploymentException(f"Response status code is not 200: {resp.status_code}")
+                else:
+                    break
+            except requests.exceptions.ConnectionError:
+                if retry_count < test_connection_max_retries:
+                    time_to_sleep = 2 ** (retry_count + 1)
+                    self.get_logger().warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
+                    retry_count += 1
+                    time.sleep(time_to_sleep)
+                    continue
+                else:
+                    self.get_logger().error("Failed to connect to LRR server! Dumping logs and shutting down server.")
+                    self.display_lrr_logs()
+                    self.teardown()
+                    raise DeploymentException("Failed to connect to the LRR server!")
+
+        # connect to redis
+        self.get_logger().info("Connecting to Redis...")
+        self.redis = redis.Redis(host="127.0.0.1", port=self.redis_port, decode_responses=True)
+        self.redis.ping()
+        self.logger.info("Redis connection established.")
+
+        if self.init_with_api_key:
+            self.get_logger().info("Adding API key to Redis...")
+            self.add_api_key("test")
+        if self.init_with_nofunmode:
+            self.get_logger().info("Enabling NoFun mode...")
+            self.enable_nofun_mode()
+        if self.init_with_allow_uploads:
+            self.get_logger().info("LRR services on Windows allow uploads by default. No action needed")
+
+        self.get_logger().debug("Collecting PID info...")
+        self.redis_pid = self._get_redis_pid()
+        self.lrr_pid = self._get_lrr_pid()
+
+        self.get_logger().info(f"Completed setup of LANraragi. LRR PID = {self.lrr_pid}; Redis PID = {self.redis_pid}.")
+
+    @override
+    def teardown(self):
+        """
+        Forceful shutdown of LRR and Redis and remove the content path, preparing it for another test.
+        """
+        if self.lrr_pid and self._is_running(self.lrr_pid):
+            script = [
+                "taskkill", "/PID", str(self.lrr_pid), "/F",
+            ]
+            self.get_logger().info("Shutting down LRR with script: " + subprocess.list2cmdline(script))
+            subprocess.run(script)
+            self.get_logger().info("LRR shutdown complete.")
+        self.lrr_pid = None
+        if self.redis_pid and self._is_running(self.redis_pid):
+            script = [
+                "taskkill", "/PID", str(self.redis_pid), "/F",
+            ]
+            self.get_logger().info("Shutting down Redis with script: " + subprocess.list2cmdline(script))
+            subprocess.run(script)
+            self.get_logger().info("Redis shutdown complete.")
+        self.redis_pid = None
 
         if self.content_path.exists():
-            self.get_logger().info("Remove existing installation of LANraragi...")
+            self.get_logger().info(f"Removing content path: {self.content_path}")
             shutil.rmtree(self.content_path)
 
-        self.get_logger().info("Creating required directories...")
-        self.content_path.mkdir()
-        self.thumb_path.mkdir()
+    @override
+    def start_lrr(self):
+        raise NotImplementedError
+
+    @override
+    def start_redis(self):
+        raise NotImplementedError
+
+    @override
+    def stop_lrr(self, timeout: int = 10):
+        pid = self._get_lrr_pid()
+        if not pid:
+            self.get_logger().warning("No LRR PID found, skipping shutdown.")
+            return
+
+        output = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"])
+        if output.returncode != 0:
+            self.get_logger().error(f"LRR PID {pid} shutdown failed with exit code {output.returncode}")
+        else:
+            self.get_logger().info(f"LRR PID {pid} shutdown output: {output.stdout}")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._get_lrr_pid() is None and is_port_available(self.lrr_port):
+                self.get_logger().info(f"LRR PID {pid} shutdown complete.")
+                return
+
+            time.sleep(0.2)
+        raise DeploymentException(f"LRR PID {pid} is still running after {timeout}s, forcing shutdown.")
+
+    @override
+    def stop_redis(self, timeout: int = 10):
+        pid = self._get_redis_pid()
+        if not pid:
+            self.get_logger().warning("No Redis PID found, skipping shutdown.")
+            return
+
+        output = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"])
+        if output.returncode != 0:
+            self.get_logger().error(f"Redis PID {pid} shutdown failed with exit code {output.returncode}")
+        else:
+            self.get_logger().info(f"Redis PID {pid} shutdown output: {output.stdout}")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._get_redis_pid() is None and is_port_available(self.redis_port):
+                self.get_logger().info(f"Redis PID {pid} shutdown complete.")
+                return
+
+            time.sleep(0.2)
+        raise DeploymentException(f"Redis PID {pid} is still running after {timeout}s, forcing shutdown.")
+
+    @override
+    def get_lrr_logs(self, tail: int=100) -> bytes:
+        if self.lrr_logs_path.exists():
+            with open(self.lrr_logs_path, 'rb') as rb:
+                lines = rb.readlines()
+                return b''.join(lines[-tail:])
+        return b"No LRR logs available."
+
+    def _execute_lrr_runfile(self):
+        runfile = self.runfile.absolute()
+        if not runfile.exists():
+            raise FileNotFoundError(f"Runfile {runfile} not found.")
 
         self.get_logger().debug("Building script.")
         script = [
@@ -140,127 +269,6 @@ class LRRWindowsEnvironment(AbstractLRREnvironment):
                 cmd=script,
                 output=output
             )
-        
-        # post LRR startup
-        self.get_logger().info("Setup script execution complete; testing connection to LRR server.")
-        retry_count = 0
-        while True:
-            try:
-                resp = requests.get(f"http://127.0.0.1:{self.lrr_port}")
-                if resp.status_code != 200:
-                    self.reset_docker_test_env()
-                    raise WindowsTestException(f"Response status code is not 200: {resp.status_code}")
-                else:
-                    break
-            except requests.exceptions.ConnectionError:
-                if retry_count < test_connection_max_retries:
-                    time_to_sleep = 2 ** (retry_count + 1)
-                    self.get_logger().warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
-                    retry_count += 1
-                    time.sleep(time_to_sleep)
-                    continue
-                else:
-                    self.get_logger().error("Failed to connect to LRR server! Dumping logs and shutting down server.")
-                    self.display_lrr_logs()
-                    self.reset_docker_test_env()
-                    raise WindowsTestException("Failed to connect to the LRR server!")
-
-        # connect to redis
-        self.redis = redis.Redis(host="127.0.0.1", port=self.redis_port, decode_responses=True)
-        self.redis.ping()
-
-        self.get_logger().debug("Collecting PID info...")
-        self.redis_pid = self._get_redis_pid()
-        self.lrr_pid = self._get_lrr_pid()
-
-        if self.init_with_allow_uploads:
-            self.get_logger().info("LRR services on Windows allow uploads by default. No action needed")
-
-        self.get_logger().info(f"Completed setup of LANraragi. LRR PID = {self.lrr_pid}; Redis PID = {self.redis_pid}.")
-
-    @override
-    def teardown(self):
-        """
-        Forceful shutdown of LRR and Redis, preparing it for another test.
-        """
-        if self.lrr_pid and self._is_running(self.lrr_pid):
-            script = [
-                "taskkill", "/PID", str(self.lrr_pid), "/F",
-            ]
-            self.get_logger().info("Shutting down LRR with script: " + subprocess.list2cmdline(script))
-            subprocess.run(script)
-            self.get_logger().info("LRR shutdown complete.")
-        self.lrr_pid = None
-        if self.redis_pid and self._is_running(self.redis_pid):
-            script = [
-                "taskkill", "/PID", str(self.redis_pid), "/F",
-            ]
-            self.get_logger().info("Shutting down Redis with script: " + subprocess.list2cmdline(script))
-            subprocess.run(script)
-            self.get_logger().info("Redis shutdown complete.")
-        self.redis_pid = None
-
-        if self.content_path.exists():
-            self.get_logger().info(f"Removing content path: {self.content_path}")
-            shutil.rmtree(self.content_path)
-
-    @override
-    def start_lrr(self):
-        raise NotImplementedError
-
-    @override
-    def start_redis(self):
-        raise NotImplementedError
-
-    @override
-    def stop_lrr(self, timeout: int = 10):
-        pid = self._get_lrr_pid()
-        if not pid:
-            self.get_logger().warning("No LRR PID found, skipping shutdown.")
-            return
-
-        output = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"])
-        if output.returncode != 0:
-            self.get_logger().error(f"LRR PID {pid} shutdown failed with exit code {output.returncode}")
-        else:
-            self.get_logger().info(f"LRR PID {pid} shutdown output: {output.stdout}")
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if self._get_lrr_pid() is None and is_port_available(self.lrr_port):
-                self.get_logger().info(f"LRR PID {pid} shutdown complete.")
-                return
-
-            time.sleep(0.2)
-        raise WindowsTestException(f"LRR PID {pid} is still running after {timeout}s, forcing shutdown.")
-
-    @override
-    def stop_redis(self, timeout: int = 10):
-        pid = self._get_redis_pid()
-        if not pid:
-            self.get_logger().warning("No Redis PID found, skipping shutdown.")
-            return
-
-        output = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"])
-        if output.returncode != 0:
-            self.get_logger().error(f"Redis PID {pid} shutdown failed with exit code {output.returncode}")
-        else:
-            self.get_logger().info(f"Redis PID {pid} shutdown output: {output.stdout}")
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if self._get_redis_pid() is None and is_port_available(self.redis_port):
-                self.get_logger().info(f"Redis PID {pid} shutdown complete.")
-                return
-
-            time.sleep(0.2)
-        raise WindowsTestException(f"Redis PID {pid} is still running after {timeout}s, forcing shutdown.")
-
-    @override
-    def get_lrr_logs(self, tail: int=100) -> bytes:
-        if self.lrr_logs_path.exists():
-            with open(self.lrr_logs_path, 'rb') as rb:
-                lines = rb.readlines()
-                return b''.join(lines[-tail:])
-        return b"No LRR logs available."
 
     def _is_running(self, pid: int) -> bool:
         """

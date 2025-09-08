@@ -17,12 +17,8 @@ import docker.models.networks
 from git import Repo
 import requests
 
-from aio_lanraragi_tests.lrr_environment_base import AbstractLRREnvironment
-
-class DockerTestException(Exception):
-    def __init__(self, message):
-        super().__init__(message)
-    pass
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.exceptions import DeploymentException
 
 DEFAULT_REDIS_TAG = "redis:7.2.4"
 DEFAULT_LANRARAGI_TAG = "difegue/lanraragi"
@@ -30,7 +26,7 @@ DEFAULT_NETWORK_NAME = "lanraragi-integration-test-network"
 
 LOGGER = logging.getLogger(__name__)
 
-class LRRDockerEnvironment(AbstractLRREnvironment):
+class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     """
     Set up a containerized LANraragi environment with Docker.
@@ -196,11 +192,11 @@ class LRRDockerEnvironment(AbstractLRREnvironment):
         container: docker.models.containers.Container
         for container in self.docker_client.containers.list(all=True):
             if container_name := container.name in {'test-lanraragi', 'test-redis'}:
-                raise DockerTestException(f"Container {container_name} exists!")
+                raise DeploymentException(f"Container {container_name} exists!")
         network: docker.models.networks.Network
         for network in self.docker_client.networks.list():
             if network_name := network.name == DEFAULT_NETWORK_NAME:
-                raise DockerTestException(f"Network {network_name} exists!")
+                raise DeploymentException(f"Network {network_name} exists!")
 
         # pull redis
         self.docker_client.images.pull(DEFAULT_REDIS_TAG)
@@ -237,13 +233,13 @@ class LRRDockerEnvironment(AbstractLRREnvironment):
             resp = self.add_api_key("lanraragi")
             if resp.exit_code != 0:
                 self.reset_docker_test_env()
-                raise DockerTestException(f"Failed to add API key to server: {resp}")
+                raise DeploymentException(f"Failed to add API key to server: {resp}")
         
         if self.init_with_nofunmode:
             resp = self.enable_nofun_mode()
             if resp.exit_code != 0:
                 self.reset_docker_test_env()
-                raise DockerTestException(f"Failed to enable nofunmode: {resp}")
+                raise DeploymentException(f"Failed to enable nofunmode: {resp}")
 
         # start lrr
         self.start_lrr()
@@ -256,7 +252,7 @@ class LRRDockerEnvironment(AbstractLRREnvironment):
                 resp = requests.get(f"http://127.0.0.1:{self.lrr_port}")
                 if resp.status_code != 200:
                     self.reset_docker_test_env()
-                    raise DockerTestException(f"Response status code is not 200: {resp.status_code}")
+                    raise DeploymentException(f"Response status code is not 200: {resp.status_code}")
                 else:
                     break
             except requests.exceptions.ConnectionError:
@@ -270,13 +266,13 @@ class LRRDockerEnvironment(AbstractLRREnvironment):
                     self.get_logger().error("Failed to connect to LRR server! Dumping logs and shutting down server.")
                     self.display_lrr_logs()
                     self.reset_docker_test_env()
-                    raise DockerTestException("Failed to connect to the LRR server!")
+                    raise DeploymentException("Failed to connect to the LRR server!")
 
         if self.init_with_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
                 self.reset_docker_test_env()
-                raise DockerTestException(f"Failed to modify permissions for LRR contents: {resp}")
+                raise DeploymentException(f"Failed to modify permissions for LRR contents: {resp}")
 
         self.get_logger().info("Environment setup complete, proceeding to testing...")
 
