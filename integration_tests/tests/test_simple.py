@@ -11,24 +11,14 @@ from pathlib import Path
 import sys
 import tempfile
 from typing import List, Tuple
-from aio_lanraragi_tests.lrr_environment_base import AbstractLRREnvironment
 import docker
 import numpy as np
 import pytest
 import pytest_asyncio
 import aiohttp
 from urllib.parse import urlparse, parse_qs
+
 from lanraragi.clients.client import LRRClient
-from aio_lanraragi_tests.lrr_docker import LRRDockerEnvironment
-from aio_lanraragi_tests.common import compute_upload_checksum
-from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
-from aio_lanraragi_tests.archive_generation.models import (
-    CreatePageRequest,
-    WriteArchiveRequest,
-    WriteArchiveResponse,
-)
-from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
-from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
 from lanraragi.clients.utils import _build_err_response
 from lanraragi.models.archive import (
     ClearNewArchiveFlagRequest,
@@ -81,6 +71,19 @@ from lanraragi.models.tankoubon import (
     UpdateTankoubonRequest,
 )
 
+from aio_lanraragi_tests.lrr_environment_base import AbstractLRREnvironment
+from aio_lanraragi_tests.lrr_windows import LRRWindowsEnvironment
+from aio_lanraragi_tests.lrr_docker import LRRDockerEnvironment
+from aio_lanraragi_tests.common import compute_upload_checksum
+from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
+from aio_lanraragi_tests.archive_generation.models import (
+    CreatePageRequest,
+    WriteArchiveRequest,
+    WriteArchiveResponse,
+)
+from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
+from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
+
 logger = logging.getLogger(__name__)
 
 @pytest.fixture(autouse=True)
@@ -91,8 +94,13 @@ def session_setup_teardown(request: pytest.FixtureRequest):
     # check operating system.
     match sys.platform:
         case 'win32':
-            # TODO: this would be where we run integration tests for native windows.
-            raise NotImplementedError("Testing environment for LRR in Windows is not implemented.")
+            runfile_path: str = request.config.getoption("--windows-runfile")
+            testing_workspace: str = request.config.getoption("--windows-workspace")
+            environment = LRRWindowsEnvironment(
+                runfile_path, testing_workspace,
+                init_with_allow_uploads=True
+            )
+
         case 'darwin' | 'linux':
             # TODO: we're assuming macos is used as a development environment with docker installed,
             # not a testing environment; for macos github runners, we would be using them

@@ -17,9 +17,12 @@ DEFAULT_NETWORK_NAME = "default-network"
 
 def pytest_addoption(parser: pytest.Parser):
     """
-    Set up a self-contained docker environment for LANraragi integration testing.
+    Set up a self-contained environment for LANraragi integration testing.
     New containers/networks will be created on each session. If an exception or invalid
     event occurred, an attempt will be made to clean up all test objects.
+
+    If running on a Windows machine, the `--windows-runfile` and `--windows-workspace`
+    flags must be provided. Docker integration testing is not supported on Windows.
 
     Parameters
     ----------
@@ -39,6 +42,12 @@ def pytest_addoption(parser: pytest.Parser):
     git-branch : `str`
         Optional branch name of the corresponding git repository.
 
+    windows-runfile : `str`
+        Path to the runfile to use for the LRR environment on Windows.
+
+    windows-workspace : `str`
+        Path to the workspace to use for the LRR environment on Windows.
+
     experimental : `bool = False`
         Run experimental tests. For example, to test a set of LANraragi APIs in
         active development, but are yet merged upstream.
@@ -48,6 +57,8 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--git-url", action="store", default=None, help="Link to a LANraragi git repository (e.g. fork or branch).")
     parser.addoption("--git-branch", action="store", default=None, help="Branch to checkout; if not supplied, uses the main branch.")
     parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
+    parser.addoption("--windows-runfile", action="store", default=None, help="Path to the runfile to use for the LRR environment on Windows.")
+    parser.addoption("--windows-workspace", action="store", default=None, help="Path to the workspace to use for the LRR environment on Windows.")
     parser.addoption("--experimental", action="store_true", default=False, help="Run experimental tests.")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
 
