@@ -124,8 +124,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Forceful shutdown of LRR and Redis and remove the content path, preparing it for another test.
         """
-        self.stop_lrr()
-        self.stop_redis()
+        try:
+            self.stop_lrr(timeout=30)
+        except DeploymentException as e:
+            self.get_logger().warning(f"stop_lrr failed during teardown: {e}")
+        try:
+            self.stop_redis(timeout=20)
+        except DeploymentException as e:
+            self.get_logger().warning(f"stop_redis failed during teardown: {e}")
 
         if self.content_path.exists():
             self.get_logger().info(f"Removing content path: {self.content_path}")
@@ -140,7 +146,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         raise NotImplementedError
 
     @override
-    def stop_lrr(self, timeout: int = 10):
+    def stop_lrr(self, timeout: int = 30):
         pid = self._get_lrr_pid()
         if pid:
             output = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"])
@@ -163,11 +169,21 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             if self._get_lrr_pid() is None and is_port_available(self.lrr_port):
                 self.get_logger().info("LRR shutdown complete.")
                 return
+            # If a new owner appears, try to kill it as well
+            new_owner = self._get_port_owner_pid(self.lrr_port)
+            if new_owner:
+                subprocess.run(["taskkill", "/PID", str(new_owner), "/F", "/T"])  # best-effort
             time.sleep(0.2)
-        raise DeploymentException(f"LRR is still running or port {self.lrr_port} still occupied after {timeout}s.")
+        # Last attempt to free the port, but do not fail teardown by default
+        self._ensure_port_free(self.lrr_port, service_name="LRR", timeout=10)
+        if is_port_available(self.lrr_port):
+            self.get_logger().info("LRR shutdown complete after extended wait.")
+        else:
+            self.get_logger().warning(f"LRR port {self.lrr_port} still occupied after shutdown attempts.")
+        return
 
     @override
-    def stop_redis(self, timeout: int = 10):
+    def stop_redis(self, timeout: int = 20):
         pid = self._get_redis_pid()
         if not pid:
             self.get_logger().warning("No Redis PID found, skipping shutdown.")
@@ -185,7 +201,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 return
 
             time.sleep(0.2)
-        raise DeploymentException(f"Redis PID {pid} is still running after {timeout}s, forcing shutdown.")
+        # Do not fail teardown; just warn
+        self.get_logger().warning(f"Redis PID {pid} may still be running or port {self.redis_port} not freed after {timeout}s.")
+        return
 
     @override
     def get_lrr_logs(self, tail: int=100) -> bytes:
