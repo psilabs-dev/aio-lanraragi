@@ -88,6 +88,8 @@ logger = logging.getLogger(__name__)
 @pytest.fixture(autouse=True)
 def session_setup_teardown(request: pytest.FixtureRequest):
 
+    global_run_id: int = request.config.global_run_id
+
     # TODO: this should be refactored.
     environment: AbstractLRRDeploymentContext = None
 
@@ -115,7 +117,8 @@ def session_setup_teardown(request: pytest.FixtureRequest):
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
             environment = DockerLRRDeploymentContext(
                 build_path, image, git_url, git_branch, docker_client, docker_api=docker_api,
-                init_with_allow_uploads=True, init_with_api_key=True, init_with_nofunmode=True
+                init_with_allow_uploads=True, init_with_api_key=True, init_with_nofunmode=True,
+                global_run_id=global_run_id
             )
 
     environment.setup()

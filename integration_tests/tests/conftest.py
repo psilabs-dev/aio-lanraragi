@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Any, List
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 import pytest
@@ -55,7 +56,7 @@ def pytest_addoption(parser: pytest.Parser):
         Run tests that are known to fail.
     """
     parser.addoption("--build", action="store", default=None, help="Path to docker build context for LANraragi.")
-    parser.addoption("--image", action="store", default=DEFAULT_LANRARAGI_TAG, help="LANraragi image to use.")
+    parser.addoption("--image", action="store", default=None, help="LANraragi image to use.")
     parser.addoption("--git-url", action="store", default=None, help="Link to a LANraragi git repository (e.g. fork or branch).")
     parser.addoption("--git-branch", action="store", default=None, help="Branch to checkout; if not supplied, uses the main branch.")
     parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
@@ -85,6 +86,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: List[pytest.Item
         for item in items:
             if 'failing' in item.keywords:
                 item.add_marker(skip_failing)
+
+def pytest_sessionstart(session: pytest.Session):
+    """
+    Configure a global run ID for a pytest session.
+    """
+    session.config.global_run_id = int(time.time() * 1000)
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item: Item, call: CallInfo[Any]):

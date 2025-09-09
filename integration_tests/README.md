@@ -6,6 +6,10 @@ Versioning of `integration_tests` is synced to that of `aio-lanraragi`.
 
 ## Usage
 
+Integration testing relies on a deployment environment. Currently two environments (Docker, Windows runfile) are supported.
+
+### Docker Deployment
+
 Install `aio-lanraragi` from the root directory, then:
 ```sh
 cd integration_tests && pip install .
@@ -33,7 +37,16 @@ Run integration tests with a Docker image built off a path to a local LANraragi 
 pytest tests --build /path/to/LANraragi/project
 ```
 
-To see LRR docker container logs accompanying a test failure, use the pytest flag `--log-cli-level=ERROR`:
+### Windows Deployment
+
+Run integration tests on Windows with a pre-built runfile:
+```sh
+pytest tests --windows-runfile /path/to/run.ps1 --windows-content-path /path/to/content
+```
+
+### Logging
+
+To see LRR process logs accompanying a test failure, use the pytest flag `--log-cli-level=ERROR`:
 ```sh
 pytest tests/test_simple.py::test_should_fail --log-cli-level=ERROR
 # ------------------------------------------------------- live log call --------------------------------------------------------
@@ -42,6 +55,8 @@ pytest tests/test_simple.py::test_should_fail --log-cli-level=ERROR
 # ERROR    aio_lanraragi_tests.lrr_docker:conftest.py:96 LRR: s6-rc: info: service s6rc-oneshot-runner successfully started
 # ERROR    aio_lanraragi_tests.lrr_docker:conftest.py:96 LRR: s6-rc: info: service fix-attrs: starting
 ```
+
+On test failures, pytest will attempt to collect the service logs from the running LRR process/container before cleaning the environment for the next test.
 
 See [pytest](https://docs.pytest.org/en/stable/#) docs for more test-related options.
 

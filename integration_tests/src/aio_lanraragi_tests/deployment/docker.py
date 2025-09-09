@@ -22,6 +22,9 @@ from aio_lanraragi_tests.exceptions import DeploymentException
 from aio_lanraragi_tests.common import DEFAULT_API_KEY
 
 DEFAULT_REDIS_TAG = "redis:7.2.4"
+LANRARAGI_CONTAINER_NAME = "test-lanraragi"
+REDIS_CONTAINER_NAME = "test-redis"
+DEFAULT_LOCAL_IMAGE = "lanraragi-integration-test"
 DEFAULT_LANRARAGI_TAG = "difegue/lanraragi"
 DEFAULT_NETWORK_NAME = "lanraragi-integration-test-network"
 
@@ -35,13 +38,15 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     """
     
     def __init__(
-            self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient, 
+            self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient,
             docker_api: docker.APIClient=None, logger: Optional[logging.Logger]=None,
             init_with_api_key: bool=False, init_with_nofunmode: bool=False, init_with_allow_uploads: bool=False,
-            lrr_port: int=3001
+            lrr_port: int=3001, global_run_id: int=None
     ):
+
         self.build_path = build
         self.image = image
+        self.global_run_id = global_run_id
         self.git_url = git_url
         self.git_branch = git_branch
         self.docker_client = docker_client
@@ -49,7 +54,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.redis_container: docker.models.containers.Container = None
         self.lrr_container: docker.models.containers.Container = None
         if logger is None:
-            logger = logging.getLogger(__name__)
+            logger = LOGGER
         self.logger = logger
         self.lrr_port = lrr_port
 
@@ -133,36 +138,43 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         # prepare images
         if self.build_path:
-            self._build_docker_image(self.build_path)
+            self.get_logger().info(f"Building LRR image {self._get_image_name_from_global_run_id()} from build path {self.build_path}.")
+            self._build_docker_image(self.build_path, force=False)
         elif self.git_url:
-            self.get_logger().info(f"Cloning from {self.git_url}...")
-            with tempfile.TemporaryDirectory() as tmpdir:
-                repo_dir = Path(tmpdir) / "LANraragi"
-                repo = Repo.clone_from(self.git_url, repo_dir)
-                if self.git_branch: # throws git.exc.GitCommandError if branch does not exist.
-                    repo.git.checkout(self.git_branch)
-                self._build_docker_image(repo.working_dir)
+            self.get_logger().info(f"Building LRR image {self._get_image_name_from_global_run_id()} from git URL {self.git_url}.")
+            try:
+                self.docker_client.images.get(self._get_image_name_from_global_run_id())
+                self.get_logger().info(f"Image {self._get_image_name_from_global_run_id()} already exists, skipping build.")
+            except docker.errors.ImageNotFound:
+                self.get_logger().info(f"Cloning {self.git_url}...")
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    repo_dir = Path(tmpdir) / "LANraragi"
+                    repo = Repo.clone_from(self.git_url, repo_dir)
+                    if self.git_branch: # throws git.exc.GitCommandError if branch does not exist.
+                        repo.git.checkout(self.git_branch)
+                    self._build_docker_image(repo.working_dir, force=True)
         else:
+            self.get_logger().info(f"Pulling LRR image from Docker Hub {self.image}.")
             image = DEFAULT_LANRARAGI_TAG
             if self.image:
                 image = self.image
-            self.get_logger().debug(f"Pulling {image}.")
-            self.docker_client.images.pull(image)
-            self.docker_client.images.get(image).tag("lanraragi-integration-test")
+            self._pull_docker_image_if_not_exists(image, force=False)
+            self.docker_client.images.get(image).tag(self._get_image_name_from_global_run_id())
 
         # check testing environment availability
         # raise a testing exception if these conditions are violated.
         container: docker.models.containers.Container
         for container in self.docker_client.containers.list(all=True):
-            if container_name := container.name in {'test-lanraragi', 'test-redis'}:
-                raise DeploymentException(f"Container {container_name} exists!")
+            if container.name in {LANRARAGI_CONTAINER_NAME, REDIS_CONTAINER_NAME}:
+                raise DeploymentException(f"Container {container.name} exists!")
         network: docker.models.networks.Network
         for network in self.docker_client.networks.list():
-            if network_name := network.name == DEFAULT_NETWORK_NAME:
-                raise DeploymentException(f"Network {network_name} exists!")
+            if network.name == DEFAULT_NETWORK_NAME:
+                raise DeploymentException(f"Network {network.name} exists!")
 
         # pull redis
-        self.docker_client.images.pull(DEFAULT_REDIS_TAG)
+        self._pull_docker_image_if_not_exists(DEFAULT_REDIS_TAG, force=False)
+
         self.get_logger().info("Creating test network.")
         network = self.docker_client.networks.create(DEFAULT_NETWORK_NAME, driver="bridge")
         self.network = network
@@ -174,17 +186,17 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             "start_period": 1000000 * 1000 # 1s
         }
         self.redis_container = self.docker_client.containers.create(
-            DEFAULT_REDIS_TAG, name="test-redis", hostname="test-redis", detach=True, network=DEFAULT_NETWORK_NAME, healthcheck=redis_healthcheck, auto_remove=True
+            DEFAULT_REDIS_TAG, name=REDIS_CONTAINER_NAME, hostname=REDIS_CONTAINER_NAME, detach=True, network=DEFAULT_NETWORK_NAME, healthcheck=redis_healthcheck, auto_remove=True
         )
 
         lrr_ports = {
             "3000/tcp": self.lrr_port
         }
         lrr_environment = [
-            "LRR_REDIS_ADDRESS=test-redis:6379"
+            f"LRR_REDIS_ADDRESS={REDIS_CONTAINER_NAME}:6379"
         ]
         self.lrr_container = self.docker_client.containers.create(
-            "lanraragi-integration-test", hostname="test-lanraragi", name="test-lanraragi", detach=True, network=DEFAULT_NETWORK_NAME, ports=lrr_ports, environment=lrr_environment, auto_remove=True
+            self._get_image_name_from_global_run_id(), hostname=LANRARAGI_CONTAINER_NAME, name=LANRARAGI_CONTAINER_NAME, detach=True, network=DEFAULT_NETWORK_NAME, ports=lrr_ports, environment=lrr_environment, auto_remove=True
         )
 
         # start database
@@ -197,7 +209,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if resp.exit_code != 0:
                 self._reset_docker_test_env()
                 raise DeploymentException(f"Failed to add API key to server: {resp}")
-        
+
         if self.init_with_nofunmode:
             resp = self.enable_nofun_mode()
             if resp.exit_code != 0:
@@ -242,6 +254,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def teardown(self):
         self._reset_docker_test_env()
+        # with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+        #     self.docker_client.images.get(self._get_image_name_from_global_run_id()).remove(force=True)
         self.get_logger().info("Cleanup complete.")
 
 
@@ -250,35 +264,83 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Reset docker test environment (LRR and Redis containers, testing network) if something
         goes wrong during setup.
         """
-        if self.redis_container:
-            with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
-                container = self.docker_client.containers.get(self.redis_container.id)
-                container.stop(timeout=3)
-                container.remove(force=True)
         if self.lrr_container:
             with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
                 container = self.docker_client.containers.get(self.lrr_container.id)
-                container.stop(timeout=3)
+                container.stop(timeout=1)
+                container.remove(force=True)
+        if self.redis_container:
+            with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+                container = self.docker_client.containers.get(self.redis_container.id)
+                container.stop(timeout=1)
                 container.remove(force=True)
         if hasattr(self, 'network') and self.network:
             with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
                 self.docker_client.networks.get(self.network.id).remove()
-        with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
-            self.docker_client.images.get("lanraragi-integration-test").remove(force=True)
 
-    def _build_docker_image(self, build_path: Path):
-        if not Path(build_path).exists():
-            raise FileNotFoundError(f"Build path {build_path} does not exist!")
-        dockerfile_path = Path(build_path) / "tools" / "build" / "docker" / "Dockerfile"
-        if not dockerfile_path.exists():
-            raise FileNotFoundError(f"Dockerfile {dockerfile_path} does not exist!")
-        self.get_logger().info(f"Building LRR image; this can take a while ({dockerfile_path}).")
-        build_start = time.time()
-        if self.docker_api:
-            for lineb in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag='lanraragi-integration-test'):
-                if (data := json.loads(lineb.decode('utf-8').strip())) and (stream := data.get('stream')):
-                    self.get_logger().info(stream.strip())
+    def _build_docker_image(self, build_path: Path, force: bool=False):
+        """
+        Build a docker image.
+
+        Args:
+            build_path: The path to the build directory.
+            force: Whether to force the build (e.g. even if the image already exists).
+        """
+
+        if force:
+            if not Path(build_path).exists():
+                raise FileNotFoundError(f"Build path {build_path} does not exist!")
+            dockerfile_path = Path(build_path) / "tools" / "build" / "docker" / "Dockerfile"
+            if not dockerfile_path.exists():
+                raise FileNotFoundError(f"Dockerfile {dockerfile_path} does not exist!")
+            self.get_logger().info(f"Building LRR image; this can take a while ({dockerfile_path}).")
+            build_start = time.time()
+            if self.docker_api:
+                for lineb in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag=self._get_image_name_from_global_run_id()):
+                    if (data := json.loads(lineb.decode('utf-8').strip())) and (stream := data.get('stream')):
+                        self.get_logger().info(stream.strip())
+            else:
+                self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag=self._get_image_name_from_global_run_id())
+            build_time = time.time() - build_start
+            self.get_logger().info(f"LRR image {self._get_image_name_from_global_run_id()} build complete: time {build_time}s")
+            return
         else:
-            self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag='lanraragi-integration-test')
-        build_time = time.time() - build_start
-        self.get_logger().info(f"LRR image build complete: time {build_time}s")
+            try:
+                self.docker_client.images.get(self._get_image_name_from_global_run_id())
+                self.get_logger().info(f"Image {self._get_image_name_from_global_run_id()} already exists, skipping build.")
+                return
+            except docker.errors.ImageNotFound:
+                self.get_logger().info(f"Image {self._get_image_name_from_global_run_id()} not found, building.")
+                self._build_docker_image(build_path, force=True)
+                return
+
+    def _pull_docker_image_if_not_exists(self, image: str, force: bool=False):
+        """
+        Pull a docker image if it does not exist.
+
+        Args:
+            image: The name of the image to pull.
+            force: Whether to force the pull (e.g. even if the image already exists).
+        """
+        
+        if force:
+            self.docker_client.images.pull(image)
+            return
+        else:
+            self.get_logger().info(f"Checking if {image} exists.")
+            try:
+                self.docker_client.images.get(image)
+                self.get_logger().info(f"{image} already exists, skipping pull.")
+                return
+            except docker.errors.ImageNotFound:
+                self.get_logger().info(f"{image} not found, pulling.")
+                self.docker_client.images.pull(image)
+                return
+
+    def _get_image_name_from_global_run_id(self) -> str:
+        """
+        Get the unique name for the image for this global pytest run.
+
+        Allows for docker deployment context to build once and reuse for multiple tests.
+        """
+        return f"{DEFAULT_LOCAL_IMAGE}:{self.global_run_id}"
