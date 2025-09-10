@@ -27,9 +27,12 @@ class AbstractLRRDeploymentContext(abc.ABC):
         """
     
     @abc.abstractmethod
-    def teardown(self):
+    def teardown(self, remove_data: bool=False):
         """
-        Main entrypoint to cleaning up and removing a LRR installation.
+        Main entrypoint to removing a LRR installation and cleaning up data.
+
+        Args:
+            remove_data: whether to remove the data associated with the LRR environment
         """
 
     @abc.abstractmethod

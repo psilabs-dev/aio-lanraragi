@@ -27,6 +27,9 @@ REDIS_CONTAINER_NAME = "test-redis"
 DEFAULT_LOCAL_IMAGE = "lanraragi-integration-test"
 DEFAULT_LANRARAGI_TAG = "difegue/lanraragi"
 DEFAULT_NETWORK_NAME = "lanraragi-integration-test-network"
+DEFAULT_CONTENT_VOLUME_NAME = "lanraragi-integration-test-content"
+DEFAULT_THUMB_VOLUME_NAME = "lanraragi-integration-test-thumb"
+DEFAULT_REDIS_VOLUME_NAME = "lanraragi-integration-test-db"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -181,12 +184,20 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         # create containers
         self.get_logger().info("Creating containers.")
+        # ensure volumes exist
+        self.get_logger().info("Ensuring test volumes.")
+        self._ensure_volume(DEFAULT_CONTENT_VOLUME_NAME)
+        self._ensure_volume(DEFAULT_THUMB_VOLUME_NAME)
+        self._ensure_volume(DEFAULT_REDIS_VOLUME_NAME)
         redis_healthcheck = {
             "test": [ "CMD", "redis-cli", "--raw", "incr", "ping" ],
             "start_period": 1000000 * 1000 # 1s
         }
         self.redis_container = self.docker_client.containers.create(
-            DEFAULT_REDIS_TAG, name=REDIS_CONTAINER_NAME, hostname=REDIS_CONTAINER_NAME, detach=True, network=DEFAULT_NETWORK_NAME, healthcheck=redis_healthcheck, auto_remove=True
+            DEFAULT_REDIS_TAG, name=REDIS_CONTAINER_NAME, hostname=REDIS_CONTAINER_NAME, detach=True, network=DEFAULT_NETWORK_NAME, healthcheck=redis_healthcheck, auto_remove=True,
+            volumes={
+                DEFAULT_REDIS_VOLUME_NAME: {"bind": "/data", "mode": "rw"}
+            }
         )
 
         lrr_ports = {
@@ -196,7 +207,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             f"LRR_REDIS_ADDRESS={REDIS_CONTAINER_NAME}:6379"
         ]
         self.lrr_container = self.docker_client.containers.create(
-            self._get_image_name_from_global_run_id(), hostname=LANRARAGI_CONTAINER_NAME, name=LANRARAGI_CONTAINER_NAME, detach=True, network=DEFAULT_NETWORK_NAME, ports=lrr_ports, environment=lrr_environment, auto_remove=True
+            self._get_image_name_from_global_run_id(), hostname=LANRARAGI_CONTAINER_NAME, name=LANRARAGI_CONTAINER_NAME, detach=True, network=DEFAULT_NETWORK_NAME, ports=lrr_ports, environment=lrr_environment, auto_remove=True,
+            volumes={
+                DEFAULT_CONTENT_VOLUME_NAME: {"bind": "/home/koyomi/lanraragi/content", "mode": "rw"},
+                DEFAULT_THUMB_VOLUME_NAME: {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"}
+            }
         )
 
         # start database
@@ -207,13 +222,13 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.init_with_api_key:
             resp = self.add_api_key(DEFAULT_API_KEY)
             if resp.exit_code != 0:
-                self._reset_docker_test_env()
+                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to add API key to server: {resp}")
 
         if self.init_with_nofunmode:
             resp = self.enable_nofun_mode()
             if resp.exit_code != 0:
-                self._reset_docker_test_env()
+                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to enable nofunmode: {resp}")
 
         # start lrr
@@ -226,7 +241,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             try:
                 resp = requests.get(f"http://127.0.0.1:{self.lrr_port}")
                 if resp.status_code != 200:
-                    self._reset_docker_test_env()
+                    self._reset_docker_test_env(remove_data=True)
                     raise DeploymentException(f"Response status code is not 200: {resp.status_code}")
                 else:
                     break
@@ -240,29 +255,29 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 else:
                     self.get_logger().error("Failed to connect to LRR server! Dumping logs and shutting down server.")
                     self.display_lrr_logs()
-                    self._reset_docker_test_env()
+                    self._reset_docker_test_env(remove_data=True)
                     raise DeploymentException("Failed to connect to the LRR server!")
 
         if self.init_with_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
-                self._reset_docker_test_env()
+                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to modify permissions for LRR contents: {resp}")
 
         self.get_logger().info("Environment setup complete, proceeding to testing...")
 
     @override
-    def teardown(self):
-        self._reset_docker_test_env()
+    def teardown(self, remove_data: bool=False):
+        self._reset_docker_test_env(remove_data=remove_data)
         # with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
         #     self.docker_client.images.get(self._get_image_name_from_global_run_id()).remove(force=True)
         self.get_logger().info("Cleanup complete.")
 
-
-    def _reset_docker_test_env(self):
+    def _reset_docker_test_env(self, remove_data: bool=False):
         """
-        Reset docker test environment (LRR and Redis containers, testing network) if something
-        goes wrong during setup.
+        Reset docker test environment (LRR and Redis containers, testing network) between tests.
+        
+        If something goes wrong during setup, the environment will be reset and the data should be removed.
         """
         if self.lrr_container:
             with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
@@ -277,6 +292,31 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if hasattr(self, 'network') and self.network:
             with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
                 self.docker_client.networks.get(self.network.id).remove()
+        
+        if remove_data:
+            self._remove_volume_if_exists(DEFAULT_CONTENT_VOLUME_NAME)
+            self._remove_volume_if_exists(DEFAULT_THUMB_VOLUME_NAME)
+            self._remove_volume_if_exists(DEFAULT_REDIS_VOLUME_NAME)
+
+    def _ensure_volume(self, name: str):
+        """
+        Ensure a named Docker volume exists; create it if missing.
+        """
+        self.get_logger().info(f"Checking if volume {name} exists.")
+        try:
+            self.docker_client.volumes.get(name)
+            self.get_logger().info(f"Volume {name} already exists, skipping creation.")
+        except docker.errors.NotFound:
+            self.get_logger().info(f"Creating volume {name}.")
+            self.docker_client.volumes.create(name=name)
+
+    def _remove_volume_if_exists(self, name: str):
+        """
+        Remove a named Docker volume if it exists.
+        """
+        with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+            self.get_logger().info(f"Removing volume {name}.")
+            self.docker_client.volumes.get(name).remove(force=True)
 
     def _build_docker_image(self, build_path: Path, force: bool=False):
         """

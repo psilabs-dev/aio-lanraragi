@@ -124,7 +124,7 @@ def session_setup_teardown(request: pytest.FixtureRequest):
     environment.setup()
     request.session.lrr_environment = environment # Store environment in pytest session for access in hooks
     yield
-    environment.teardown()
+    environment.teardown(remove_data=True)
 
 @pytest.fixture
 def semaphore():

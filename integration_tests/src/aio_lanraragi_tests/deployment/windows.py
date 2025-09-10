@@ -125,14 +125,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.get_logger().info(f"Completed setup of LANraragi. LRR PID = {self.lrr_pid}; Redis PID = {self.redis_pid}.")
 
     @override
-    def teardown(self):
+    def teardown(self, remove_data: bool=False):
         """
         Forceful shutdown of LRR and Redis and remove the content path, preparing it for another test.
         """
         self.stop_lrr()
         self.stop_redis()
 
-        if self.content_path.exists():
+        if self.content_path.exists() and remove_data:
             self.get_logger().info(f"Removing content path: {self.content_path}")
             shutil.rmtree(self.content_path)
 
