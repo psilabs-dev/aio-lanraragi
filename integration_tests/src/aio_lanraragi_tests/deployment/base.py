@@ -1,6 +1,7 @@
 import abc
 import logging
 import time
+from typing import Optional
 
 from aio_lanraragi_tests.exceptions import DeploymentException
 import requests
@@ -13,7 +14,12 @@ class AbstractLRRDeploymentContext(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def add_api_key(self, api_key: str):
+    def update_api_key(self, api_key: Optional[str]):
+        """
+        Add an API key to the LRR environment.
+
+        If api_key is None, the API key will be removed.
+        """
         ...
 
     @abc.abstractmethod

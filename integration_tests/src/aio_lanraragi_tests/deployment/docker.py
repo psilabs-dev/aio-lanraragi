@@ -65,8 +65,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self.logger
 
     @override
-    def add_api_key(self, api_key: str):
-        return self.redis_container.exec_run(["bash", "-c", f'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG apikey {api_key}\nEOF'])
+    def update_api_key(self, api_key: Optional[str]):
+        if api_key is None:
+            return self.redis_container.exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHDEL LRR_CONFIG apikey\nEOF'])
+        else:
+            return self.redis_container.exec_run(["bash", "-c", f'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG apikey {api_key}\nEOF'])
 
     @override
     def enable_nofun_mode(self):
@@ -227,7 +230,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         self.get_logger().debug("Running post-startup configuration.")
         if with_api_key:
-            resp = self.add_api_key(DEFAULT_API_KEY)
+            resp = self.update_api_key(DEFAULT_API_KEY)
             if resp.exit_code != 0:
                 self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to add API key to server: {resp}")
