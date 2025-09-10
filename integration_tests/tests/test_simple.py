@@ -793,9 +793,22 @@ async def test_shinobu_api(lanraragi: LRRClient):
     # <<<<< STOP SHINOBU STAGE <<<<<
 
     # >>>>> GET SHINOBU STATUS STAGE >>>>>
-    response, error = await lanraragi.shinobu_api.get_shinobu_status()
-    assert not error, f"Failed to get shinobu status (status {error.status}): {error.error}"
-    assert not response.is_alive, "Shinobu should be stopped!"
+    # shinobu may not stop immediately.
+    retry_count = 0
+    max_retries = 3
+    has_stopped = False
+    while retry_count < max_retries:
+        response, error = await lanraragi.shinobu_api.get_shinobu_status()
+        assert not error, f"Failed to get shinobu status (status {error.status}): {error.error}"
+        if response.is_alive:
+            logger.warning(f"Shinobu is still running; retrying in 1s... ({retry_count+1}/{max_retries})")
+            retry_count += 1
+            await asyncio.sleep(1)
+            continue
+        else:
+            has_stopped = True
+            break
+    assert has_stopped, "Shinobu did not stop after 3 retries!"
     del response, error
     # <<<<< GET SHINOBU STATUS STAGE <<<<<
 
