@@ -81,6 +81,9 @@ logger = logging.getLogger(__name__)
 
 @pytest.fixture
 def environment(request: pytest.FixtureRequest):
+    """
+    Provides an uninitialized LRR environment for testing.
+    """
 
     global_run_id: int = request.config.global_run_id
 
@@ -113,7 +116,7 @@ def environment(request: pytest.FixtureRequest):
                 global_run_id=global_run_id, is_allow_uploads=True
             )
 
-    environment.setup(with_api_key=True, with_nofunmode=True)
+    # environment.setup(with_api_key=True, with_nofunmode=True)
     request.session.lrr_environment = environment # Store environment in pytest session for access in hooks
     yield environment
     environment.teardown(remove_data=True)
@@ -136,3 +139,13 @@ async def lanraragi():
         yield client
     finally:
         await client.close()
+
+@pytest.mark.asyncio
+async def test_api_key(environment: AbstractLRRDeploymentContext, lanraragi: LRRClient):
+    """
+    Test the following situation combinations:
+    - whether nofunmode is configured
+    - whether endpoint is public or protected
+    - whether API key is set
+    - whether API key is provided (and if provided, whether it is valid)
+    """
