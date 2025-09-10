@@ -54,6 +54,9 @@ def pytest_addoption(parser: pytest.Parser):
 
     failing : `bool = False`
         Run tests that are known to fail.
+
+    npseed : `int = 42`
+        Seed (in numpy) to set for any randomized behavior.
     """
     parser.addoption("--build", action="store", default=None, help="Path to docker build context for LANraragi.")
     parser.addoption("--image", action="store", default=None, help="LANraragi image to use.")
@@ -64,6 +67,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--windows-content-path", action="store", default=None, help="Path to the content path to use for the LRR environment on Windows.")
     parser.addoption("--experimental", action="store_true", default=False, help="Run experimental tests.")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
+    parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
 
 def pytest_configure(config: pytest.Config):
     config.addinivalue_line(

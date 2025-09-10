@@ -89,7 +89,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def restart(self):
         self.stop_lrr()
         self.start_lrr()
-        self.get_logger().info("Testing connection to LRR server.")
+        self.get_logger().debug("Testing connection to LRR server.")
         self.test_lrr_connection()
 
     @override
@@ -204,7 +204,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             "start_period": 1000000 * 1000 # 1s
         }
         self.redis_container = self.docker_client.containers.create(
-            DEFAULT_REDIS_TAG, name=REDIS_CONTAINER_NAME, hostname=REDIS_CONTAINER_NAME, detach=True, network=DEFAULT_NETWORK_NAME, healthcheck=redis_healthcheck, auto_remove=True,
+            DEFAULT_REDIS_TAG, name=REDIS_CONTAINER_NAME, hostname=REDIS_CONTAINER_NAME, detach=True, network=DEFAULT_NETWORK_NAME, healthcheck=redis_healthcheck,
             volumes={
                 DEFAULT_REDIS_VOLUME_NAME: {"bind": "/data", "mode": "rw"}
             }
@@ -217,7 +217,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             f"LRR_REDIS_ADDRESS={REDIS_CONTAINER_NAME}:6379"
         ]
         self.lrr_container = self.docker_client.containers.create(
-            self._get_image_name_from_global_run_id(), hostname=LANRARAGI_CONTAINER_NAME, name=LANRARAGI_CONTAINER_NAME, detach=True, network=DEFAULT_NETWORK_NAME, ports=lrr_ports, environment=lrr_environment, auto_remove=True,
+            self._get_image_name_from_global_run_id(), hostname=LANRARAGI_CONTAINER_NAME, name=LANRARAGI_CONTAINER_NAME, detach=True, network=DEFAULT_NETWORK_NAME, ports=lrr_ports, environment=lrr_environment,
             volumes={
                 DEFAULT_CONTENT_VOLUME_NAME: {"bind": "/home/koyomi/lanraragi/content", "mode": "rw"},
                 DEFAULT_THUMB_VOLUME_NAME: {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"}
@@ -245,7 +245,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.start_lrr()
 
         # post LRR startup
-        self.get_logger().info("Testing connection to LRR server.")
+        self.get_logger().debug("Testing connection to LRR server.")
         self.test_lrr_connection(test_connection_max_retries)
 
         # allow uploads

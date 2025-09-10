@@ -1,83 +1,28 @@
 import asyncio
 import logging
-from pathlib import Path
-import sys
-import tempfile
-from typing import List, Tuple
-import docker
 import numpy as np
+import sys
+from typing import List
+import docker
+from pydantic import BaseModel, Field
 import pytest
 import pytest_asyncio
-import aiohttp
-from urllib.parse import urlparse, parse_qs
 
 from lanraragi.clients.client import LRRClient
-from lanraragi.clients.utils import _build_err_response
-from lanraragi.models.archive import (
-    ClearNewArchiveFlagRequest,
-    DeleteArchiveRequest,
-    DeleteArchiveResponse,
-    ExtractArchiveRequest,
-    GetArchiveMetadataRequest,
-    GetArchiveThumbnailRequest,
-    UpdateArchiveThumbnailRequest,
-    UpdateReadingProgressionRequest,
-    UploadArchiveRequest,
-    UploadArchiveResponse,
-)
-from lanraragi.models.base import (
-    LanraragiErrorResponse,
-    LanraragiResponse
-)
-from lanraragi.models.category import (
-    AddArchiveToCategoryRequest,
-    AddArchiveToCategoryResponse,
-    CreateCategoryRequest,
-    DeleteCategoryRequest,
-    GetCategoryRequest,
-    GetCategoryResponse,
-    RemoveArchiveFromCategoryRequest,
-    UpdateBookmarkLinkRequest,
-    UpdateCategoryRequest
-)
-from lanraragi.models.database import GetDatabaseStatsRequest
-from lanraragi.models.minion import (
-    GetMinionJobDetailRequest,
-    GetMinionJobStatusRequest
-)
-from lanraragi.models.misc import (
-    GetAvailablePluginsRequest,
-    GetOpdsCatalogRequest,
-    RegenerateThumbnailRequest
-)
-from lanraragi.models.search import (
-    GetRandomArchivesRequest,
-    SearchArchiveIndexRequest
-)
-from lanraragi.models.tankoubon import (
-    AddArchiveToTankoubonRequest,
-    CreateTankoubonRequest,
-    DeleteTankoubonRequest,
-    GetTankoubonRequest,
-    RemoveArchiveFromTankoubonRequest,
-    TankoubonMetadata,
-    UpdateTankoubonRequest,
-)
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
-from aio_lanraragi_tests.common import compute_upload_checksum, DEFAULT_API_KEY
-from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
-from aio_lanraragi_tests.archive_generation.models import (
-    CreatePageRequest,
-    WriteArchiveRequest,
-    WriteArchiveResponse,
-)
-from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
-from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
+from aio_lanraragi_tests.common import DEFAULT_API_KEY
 
 logger = logging.getLogger(__name__)
+
+class ApiAuthMatrixParams(BaseModel):
+    # used by test_api_auth_matrix.
+    is_nofunmode: bool
+    is_api_key_configured_server: bool
+    is_api_key_configured_client: bool
+    is_matching_api_key: bool = Field(..., description="Set to False if not is_api_key_configured_server or not is_api_key_configured_client")
 
 @pytest.fixture
 def environment(request: pytest.FixtureRequest):
@@ -122,6 +67,12 @@ def environment(request: pytest.FixtureRequest):
     environment.teardown(remove_data=True)
 
 @pytest.fixture
+def npgenerator(request: pytest.FixtureRequest):
+    seed: int = int(request.config.getoption("npseed"))
+    generator = np.random.default_rng(seed)
+    yield generator
+
+@pytest.fixture
 def semaphore():
     yield asyncio.BoundedSemaphore(value=8)
 
@@ -140,12 +91,132 @@ async def lanraragi():
     finally:
         await client.close()
 
+async def sample_test_api_auth_matrix(
+    is_nofunmode: bool, is_api_key_configured_server: bool, is_api_key_configured_client: bool,
+    is_matching_api_key: bool, deployment_context: AbstractLRRDeploymentContext, lrr_client: LRRClient
+):
+    # sanity check.
+    if is_matching_api_key and ((not is_api_key_configured_client) or (not is_api_key_configured_server)):
+        raise ValueError("is_matching_api_key must have configured API keys for client and server.")
+
+    # configuration stage.
+    if is_nofunmode:
+        deployment_context.enable_nofun_mode()
+    else:
+        deployment_context.disable_nofun_mode()
+    if is_api_key_configured_server:
+        deployment_context.update_api_key(DEFAULT_API_KEY)
+    else:
+        deployment_context.update_api_key(None)
+    if is_api_key_configured_client:
+        if is_matching_api_key:
+            lrr_client.update_api_key(DEFAULT_API_KEY)
+        else:
+            lrr_client.update_api_key(DEFAULT_API_KEY+"wrong")
+    else:
+        lrr_client.update_api_key(None)
+
+    def endpoint_permission_granted(endpoint_is_public: bool) -> bool:
+        """
+        Returns True if the permission is granted for an API call given a set of configurations, 
+        and False otherwise.
+
+        There are probably a dozen other ways to express this function.
+        """
+        require_valid_api_key = is_api_key_configured_server and is_api_key_configured_client and is_matching_api_key
+
+        if endpoint_is_public:
+            if is_nofunmode:
+                return require_valid_api_key
+            else:
+                return True
+        else: # nofunmode doesn't matter.
+            return require_valid_api_key
+
+    # apply configurations
+    deployment_context.restart()
+
+    # test public endpoint.
+    endpoint_is_public = True
+    for method in [
+        lrr_client.archive_api.get_all_archives,
+        lrr_client.category_api.get_all_categories,
+        lrr_client.misc_api.get_server_info
+    ]:
+        response, error = await method()
+        method_name = method.__name__
+        
+        if endpoint_permission_granted(endpoint_is_public):
+            assert not error, f"API call failed for method {method_name} (status {error.status}): {error.error}"
+        else:
+            assert not response, f"Expected forbidden error from calling {method_name}, got response: {response}"
+            assert error.status == 401, f"Expected status 401, got: {error.status}."
+
+    # test protected endpoint.
+    endpoint_is_public = False
+    for method in [
+        lrr_client.shinobu_api.get_shinobu_status,
+        lrr_client.database_api.get_database_backup
+    ]:
+        response, error = await method()
+        method_name = method.__name__
+
+        if endpoint_permission_granted(endpoint_is_public):
+            assert not error, f"API call failed for method {method_name} (status {error.status}): {error.error}"
+        else:
+            assert not response, f"Expected forbidden error from calling {method_name}, got response: {response}"
+            assert error.status == 401, f"Expected status 401, got: {error.status}."
+
 @pytest.mark.asyncio
-async def test_api_key(environment: AbstractLRRDeploymentContext, lanraragi: LRRClient):
+async def test_api_auth_matrix(environment: AbstractLRRDeploymentContext, lanraragi: LRRClient, npgenerator: np.random.Generator):
     """
     Test the following situation combinations:
     - whether nofunmode is configured
     - whether endpoint is public or protected
-    - whether API key is set
-    - whether API key is provided (and if provided, whether it is valid)
+    - whether API key is set by server
+    - whether API key is passed by client
+    - whether client API key equals server API key
+
+    sample public endpoints to use:
+    - GET /api/archives
+    - GET /api/categories
+    - GET /api/tankoubons
+    - GET /api/info
+
+    sample protected endpoints to use:
+    - GET /api/shinobu
+    - GET /api/database/backup
     """
+    # initialize the server.
+    environment.setup(with_api_key=False, with_nofunmode=False)
+
+    # generate the parameters list, then randomize it to remove ordering effect.
+    test_params: List[ApiAuthMatrixParams] = []
+    for is_nofunmode in [True, False]:
+        for is_api_key_configured_server in [True, False]:
+            for is_api_key_configured_client in [True, False]:
+                if is_api_key_configured_client and is_api_key_configured_server:
+                    for is_matching_api_key in [True, False]:
+                        test_params.append(ApiAuthMatrixParams(
+                            is_nofunmode=is_nofunmode, is_api_key_configured_server=is_api_key_configured_server,
+                            is_api_key_configured_client=is_api_key_configured_client,
+                            is_matching_api_key=is_matching_api_key
+                        ))
+                else:
+                    is_matching_api_key = False
+                    test_params.append(ApiAuthMatrixParams(
+                        is_nofunmode=is_nofunmode, is_api_key_configured_server=is_api_key_configured_server,
+                        is_api_key_configured_client=is_api_key_configured_client,
+                        is_matching_api_key=is_matching_api_key
+                    ))
+
+    npgenerator.shuffle(test_params)
+    num_tests = len(test_params)
+
+    # execute tests with randomized order of configurations.
+    for i, test_param in enumerate(test_params):
+        logger.info(f"Test configuration ({i+1}/{num_tests}): is_nofunmode={test_param.is_nofunmode}, is_apikey_configured_server={test_param.is_api_key_configured_server}, is_apikey_configured_client={test_param.is_api_key_configured_client}, is_matching_api_key={test_param.is_matching_api_key}")
+        await sample_test_api_auth_matrix(
+            test_param.is_nofunmode, test_param.is_api_key_configured_server, test_param.is_api_key_configured_client,
+            test_param.is_matching_api_key, environment, lanraragi
+        )

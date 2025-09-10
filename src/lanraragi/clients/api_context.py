@@ -55,7 +55,8 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         If api_key is None, the API key will be removed.
         """
         if api_key is None:
-            del self.headers["Authorization"]
+            if "Authorization" in self.headers:
+                del self.headers["Authorization"]
         else:
             self.headers["Authorization"] = _build_auth_header(api_key)
 

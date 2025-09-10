@@ -125,6 +125,12 @@ def session_setup_teardown(request: pytest.FixtureRequest):
     environment.teardown(remove_data=True)
 
 @pytest.fixture
+def npgenerator(request: pytest.FixtureRequest):
+    seed: int = int(request.config.getoption("npseed"))
+    generator = np.random.default_rng(seed)
+    yield generator
+
+@pytest.fixture
 def semaphore():
     yield asyncio.BoundedSemaphore(value=8)
 
@@ -266,7 +272,7 @@ def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Gen
     return responses
 
 @pytest.mark.asyncio
-async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
     Creates 100 archives to upload to the LRR server,
     and verifies that this number of archives is correct.
@@ -274,7 +280,6 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     Then deletes 50 archives (5 sequentially, followed by
     45 concurrently). Verifies archive count is correct.
     """
-    generator = np.random.default_rng(42)
     num_archives = 100
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -294,7 +299,7 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         logger.debug(f"Creating {num_archives} archives to upload.")
-        write_responses = save_archives(num_archives, tmpdir, generator)
+        write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
@@ -302,7 +307,7 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, generator))
+            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
             checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
                 upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
@@ -353,11 +358,10 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     # <<<<< DELETE ARCHIVE ASYNC STAGE <<<<<
 
 @pytest.mark.asyncio
-async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
     Simulates a read archive operation.
     """
-    generator = np.random.default_rng(42)
     num_archives = 100
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -377,7 +381,7 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         logger.debug(f"Creating {num_archives} archives to upload.")
-        write_responses = save_archives(num_archives, tmpdir, generator)
+        write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
@@ -385,7 +389,7 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, generator))
+            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
             checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
                 upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
@@ -544,7 +548,7 @@ async def test_category(lanraragi: LRRClient):
     # <<<<< UNLINK BOOKMARK <<<<<
 
 @pytest.mark.asyncio
-async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
     Creates 100 archives to upload to the LRR server, with an emphasis on testing category/archive addition/removal
     and asynchronous operations.
@@ -560,7 +564,6 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
     9. remove 50 archives from bookmark asynchronously
     10. check that 0 archives are in the bookmark category
     """
-    generator = np.random.default_rng(42)
     num_archives = 100
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -581,7 +584,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         logger.debug(f"Creating {num_archives} archives to upload.")
-        write_responses = save_archives(num_archives, tmpdir, generator)
+        write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
@@ -589,7 +592,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, generator))
+            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
             checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
                 upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
@@ -679,7 +682,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
     # <<<<< GET CATEGORY STAGE <<<<<
 
 @pytest.mark.asyncio
-async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
     Very basic functional test of the search API.
     
@@ -689,7 +692,6 @@ async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     4. search for 20 archives using random search API with newonly=true
     5. search for 20 archives using random search API with untaggedonly=true (should return empty)
     """
-    generator = np.random.default_rng(42)
     num_archives = 100
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -709,7 +711,7 @@ async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         logger.debug(f"Creating {num_archives} archives to upload.")
-        write_responses = save_archives(num_archives, tmpdir, generator)
+        write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
@@ -717,7 +719,7 @@ async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, generator))
+            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
             checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
                 upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
@@ -813,12 +815,11 @@ async def test_shinobu_api(lanraragi: LRRClient):
     # <<<<< GET SHINOBU STATUS STAGE <<<<<
 
 @pytest.mark.asyncio
-async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
     Very basic functional test of the database API.
     Does not test drop database or get backup.
     """
-    generator = np.random.default_rng(42)
     num_archives = 100
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -832,7 +833,7 @@ async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         logger.debug(f"Creating {num_archives} archives to upload.")
-        write_responses = save_archives(num_archives, tmpdir, generator)
+        write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
@@ -840,7 +841,7 @@ async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, generator))
+            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
             checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
                 upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
@@ -886,11 +887,10 @@ async def test_drop_database(lanraragi: LRRClient):
     # <<<<< TEST CONNECTION STAGE <<<<<
 
 @pytest.mark.asyncio
-async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
     Very basic functional test of the tankoubon API.
     """
-    generator = np.random.default_rng(42)
     num_archives = 100
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -904,7 +904,7 @@ async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         logger.debug(f"Creating {num_archives} archives to upload.")
-        write_responses = save_archives(num_archives, tmpdir, generator)
+        write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
@@ -912,7 +912,7 @@ async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore)
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, generator))
+            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
             checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
                 upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
@@ -989,11 +989,10 @@ async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore)
     # <<<<< DELETE TANKOUBON STAGE <<<<<
 
 @pytest.mark.asyncio
-async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
     Basic functional test of miscellaneous API.
     """
-    generator = np.random.default_rng(42)
     num_archives = 100
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -1007,7 +1006,7 @@ async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         logger.debug(f"Creating {num_archives} archives to upload.")
-        write_responses = save_archives(num_archives, tmpdir, generator)
+        write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
@@ -1015,7 +1014,7 @@ async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, generator))
+            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
             checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
                 upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
@@ -1058,11 +1057,10 @@ async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     # <<<<< REGENERATE THUMBNAILS STAGE <<<<<
 
 @pytest.mark.asyncio
-async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
     Very basic functional test of the minion API.
     """
-    generator = np.random.default_rng(42)
     num_archives = 100
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -1076,7 +1074,7 @@ async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         logger.debug(f"Creating {num_archives} archives to upload.")
-        write_responses = save_archives(num_archives, tmpdir, generator)
+        write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
@@ -1084,7 +1082,7 @@ async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, generator))
+            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
             checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
                 upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
