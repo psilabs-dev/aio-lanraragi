@@ -97,7 +97,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         
         # post LRR startup
         self.get_logger().info("Setup script execution complete; testing connection to LRR server.")
-        self._test_lrr_connection(test_connection_max_retries)
+        self.test_lrr_connection(test_connection_max_retries)
 
         # connect to redis
         self._test_redis_connection()
@@ -131,6 +131,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.content_path.exists() and remove_data:
             self.get_logger().info(f"Removing content path: {self.content_path}")
             shutil.rmtree(self.content_path)
+
+    @override
+    def restart(self):
+        self._restart_deployment()
 
     @override
     def start_lrr(self):
@@ -302,29 +306,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         # see _get_lrr_pid for explanation
         return self._get_port_owner_pid(self.redis_port)
 
-    def _test_lrr_connection(self, test_connection_max_retries: int=4):
-        retry_count = 0
-        while True:
-            try:
-                resp = requests.get(f"http://127.0.0.1:{self.lrr_port}")
-                if resp.status_code != 200:
-                    self.teardown()
-                    raise DeploymentException(f"Response status code is not 200: {resp.status_code}")
-                else:
-                    break
-            except requests.exceptions.ConnectionError:
-                if retry_count < test_connection_max_retries:
-                    time_to_sleep = 2 ** (retry_count + 1)
-                    self.get_logger().warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
-                    retry_count += 1
-                    time.sleep(time_to_sleep)
-                    continue
-                else:
-                    self.get_logger().error("Failed to connect to LRR server! Dumping logs and shutting down server.")
-                    self.display_lrr_logs()
-                    self.teardown()
-                    raise DeploymentException("Failed to connect to the LRR server!")
-
     def _test_redis_connection(self):
         self.get_logger().info("Connecting to Redis...")
         if not self.redis:
@@ -337,7 +318,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.stop_lrr()
         self.stop_redis()
         self._execute_lrr_runfile()
-        self._test_lrr_connection(test_connection_max_retries)
+        self.get_logger().info("Testing connection to LRR server.")
+        self.test_lrr_connection(test_connection_max_retries)
         self._test_redis_connection()
         self.get_logger().info("Restart complete.")
 

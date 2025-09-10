@@ -15,7 +15,6 @@ import docker.models
 import docker.models.containers
 import docker.models.networks
 from git import Repo
-import requests
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
@@ -82,6 +81,13 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def allow_uploads(self):
         return self.lrr_container.exec_run(["sh", "-c", 'chown -R koyomi: content'])
+
+    @override
+    def restart(self):
+        self.stop_lrr()
+        self.start_lrr()
+        self.get_logger().info("Testing connection to LRR server.")
+        self.test_lrr_connection()
 
     @override
     def start_lrr(self):
@@ -237,28 +243,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         # post LRR startup
         self.get_logger().info("Testing connection to LRR server.")
-        retry_count = 0
-        while True:
-            try:
-                resp = requests.get(f"http://127.0.0.1:{self.lrr_port}")
-                if resp.status_code != 200:
-                    self._reset_docker_test_env(remove_data=True)
-                    raise DeploymentException(f"Response status code is not 200: {resp.status_code}")
-                else:
-                    break
-            except requests.exceptions.ConnectionError:
-                if retry_count < test_connection_max_retries:
-                    time_to_sleep = 2 ** (retry_count + 1)
-                    self.get_logger().warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
-                    retry_count += 1
-                    time.sleep(time_to_sleep)
-                    continue
-                else:
-                    self.get_logger().error("Failed to connect to LRR server! Dumping logs and shutting down server.")
-                    self.display_lrr_logs()
-                    self._reset_docker_test_env(remove_data=True)
-                    raise DeploymentException("Failed to connect to the LRR server!")
+        self.test_lrr_connection(test_connection_max_retries)
 
+        # allow uploads
         if self.is_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
