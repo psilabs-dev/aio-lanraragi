@@ -43,8 +43,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def __init__(
             self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient,
             docker_api: docker.APIClient=None, logger: Optional[logging.Logger]=None,
-            init_with_api_key: bool=False, init_with_nofunmode: bool=False, init_with_allow_uploads: bool=False,
-            lrr_port: int=3001, global_run_id: int=None
+            lrr_port: int=3001, global_run_id: int=None, is_allow_uploads: bool=True,
     ):
 
         self.build_path = build
@@ -60,10 +59,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             logger = LOGGER
         self.logger = logger
         self.lrr_port = lrr_port
-
-        self.init_with_api_key = init_with_api_key
-        self.init_with_nofunmode = init_with_nofunmode
-        self.init_with_allow_uploads = init_with_allow_uploads
+        self.is_allow_uploads = is_allow_uploads
 
     @override
     def get_logger(self) -> logging.Logger:
@@ -81,6 +77,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def disable_nofun_mode(self):
         return self.redis_container.exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG nofunmode 0\nEOF'])
 
+    # by default LRR contents directory is owned by root.
+    # to make it writable by the koyomi user, we need to change the ownership.
     @override
     def allow_uploads(self):
         return self.lrr_container.exec_run(["sh", "-c", 'chown -R koyomi: content'])
@@ -129,7 +127,10 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             return b"No Redis container available"
 
     @override
-    def setup(self, test_connection_max_retries: int=4):
+    def setup(
+        self, with_api_key: bool=False, with_nofunmode: bool=False, 
+        test_connection_max_retries: int=4
+    ):
         """
         Main entrypoint to setting up a LRR docker environment. Pulls/builds required images,
         creates/recreates required volumes, containers, networks, and connects them together,
@@ -219,13 +220,13 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.start_redis()
 
         self.get_logger().debug("Running post-startup configuration.")
-        if self.init_with_api_key:
+        if with_api_key:
             resp = self.add_api_key(DEFAULT_API_KEY)
             if resp.exit_code != 0:
                 self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to add API key to server: {resp}")
 
-        if self.init_with_nofunmode:
+        if with_nofunmode:
             resp = self.enable_nofun_mode()
             if resp.exit_code != 0:
                 self._reset_docker_test_env(remove_data=True)
@@ -258,7 +259,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                     self._reset_docker_test_env(remove_data=True)
                     raise DeploymentException("Failed to connect to the LRR server!")
 
-        if self.init_with_allow_uploads:
+        if self.is_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
                 self._reset_docker_test_env(remove_data=True)

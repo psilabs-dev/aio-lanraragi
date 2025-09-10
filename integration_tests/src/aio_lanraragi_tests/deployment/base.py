@@ -21,9 +21,17 @@ class AbstractLRRDeploymentContext(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def setup(self, test_connection_max_retries: int=4):
+    def setup(
+        self, with_api_key: bool=False, with_nofunmode: bool=False,
+        test_connection_max_retries: int=4
+    ):
         """
         Main entrypoint to setting up a LRR environment.
+
+        Args:
+            with_api_key: whether to add an API key (default API key: "lanraragi") to the LRR environment
+            with_nofunmode: whether to enable nofunmode in the LRR environment
+            test_connection_max_retries: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
     
     @abc.abstractmethod

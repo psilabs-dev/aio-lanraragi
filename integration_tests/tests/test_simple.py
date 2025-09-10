@@ -100,7 +100,6 @@ def session_setup_teardown(request: pytest.FixtureRequest):
             windows_content_path: str = request.config.getoption("--windows-content-path")
             environment = WindowsLRRDeploymentContext(
                 runfile_path, windows_content_path,
-                init_with_allow_uploads=True, init_with_api_key=True, init_with_nofunmode=True
             )
 
         case 'darwin' | 'linux':
@@ -117,11 +116,10 @@ def session_setup_teardown(request: pytest.FixtureRequest):
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
             environment = DockerLRRDeploymentContext(
                 build_path, image, git_url, git_branch, docker_client, docker_api=docker_api,
-                init_with_allow_uploads=True, init_with_api_key=True, init_with_nofunmode=True,
-                global_run_id=global_run_id
+                global_run_id=global_run_id, is_allow_uploads=True
             )
 
-    environment.setup()
+    environment.setup(with_api_key=True, with_nofunmode=True)
     request.session.lrr_environment = environment # Store environment in pytest session for access in hooks
     yield
     environment.teardown(remove_data=True)

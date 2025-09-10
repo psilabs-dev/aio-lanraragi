@@ -25,7 +25,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def __init__(
         self, runfile: str, content_path: str,
         logger: Optional[logging.Logger]=None,
-        init_with_api_key: bool=False, init_with_nofunmode: bool=False, init_with_allow_uploads: bool=False,
         lrr_port: int=3001
     ):
         self.runfile = Path(runfile)
@@ -34,10 +33,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger = logger
         self.lrr_port = lrr_port
         self.redis_port = 6379 # maybe this can be changed?
-
-        self.init_with_api_key = init_with_api_key
-        self.init_with_nofunmode = init_with_nofunmode
-        self.init_with_allow_uploads = init_with_allow_uploads
 
         self.network = f"http://127.0.0.1:{lrr_port}"
         self.content_path = Path(content_path).absolute()
@@ -71,7 +66,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.redis.hset("LRR_CONFIG", "nofunmode", "0")
 
     @override
-    def setup(self, test_connection_max_retries: int = 4):
+    def setup(
+        self, with_api_key: bool=False, with_nofunmode: bool=False,
+        test_connection_max_retries: int=4
+    ):
         """
         Setup the LANraragi environment.
 
@@ -104,16 +102,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         # connect to redis
         self._test_redis_connection()
         restart_required = False
-        if self.init_with_api_key:
+        if with_api_key:
             self.get_logger().info("Adding API key to Redis...")
             self.add_api_key(DEFAULT_API_KEY)
             restart_required = True
-        if self.init_with_nofunmode:
+        if with_nofunmode:
             self.get_logger().info("Enabling NoFun mode...")
             self.enable_nofun_mode()
             restart_required = True
-        if self.init_with_allow_uploads:
-            self.get_logger().info("LRR services on Windows allow uploads by default. No action needed")
 
         if restart_required:
             self._restart_deployment(test_connection_max_retries)
