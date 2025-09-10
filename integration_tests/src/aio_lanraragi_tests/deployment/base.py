@@ -1,5 +1,9 @@
 import abc
 import logging
+import time
+
+from aio_lanraragi_tests.exceptions import DeploymentException
+import requests
 
 
 class AbstractLRRDeploymentContext(abc.ABC):
@@ -34,6 +38,12 @@ class AbstractLRRDeploymentContext(abc.ABC):
             test_connection_max_retries: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
     
+    @abc.abstractmethod
+    def restart(self):
+        """
+        Restart the deployment (does not remove data), and ensures the LRR server is running.
+        """
+
     @abc.abstractmethod
     def teardown(self, remove_data: bool=False):
         """
@@ -72,6 +82,33 @@ class AbstractLRRDeploymentContext(abc.ABC):
         """
         Get logs as bytes.
         """
+
+    def test_lrr_connection(self, test_connection_max_retries: int=4):
+        """
+        Test the LRR connection with retry and exponential backoff.
+        If connection is not established by then, teardown the deployment completely and raise an exception.
+        """
+        retry_count = 0
+        while True:
+            try:
+                resp = requests.get(f"http://127.0.0.1:{self.lrr_port}")
+                if resp.status_code != 200:
+                    self.teardown(remove_data=True)
+                    raise DeploymentException(f"Response status code is not 200: {resp.status_code}")
+                else:
+                    break
+            except requests.exceptions.ConnectionError:
+                if retry_count < test_connection_max_retries:
+                    time_to_sleep = 2 ** (retry_count + 1)
+                    self.get_logger().warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
+                    retry_count += 1
+                    time.sleep(time_to_sleep)
+                    continue
+                else:
+                    self.get_logger().error("Failed to connect to LRR server! Dumping logs and shutting down server.")
+                    self.display_lrr_logs()
+                    self.teardown(remove_data=True)
+                    raise DeploymentException("Failed to connect to the LRR server!")
 
     def display_lrr_logs(self, tail: int=100, log_level: int=logging.ERROR):
         """
