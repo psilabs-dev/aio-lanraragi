@@ -7,7 +7,6 @@ import subprocess
 import threading
 import time
 from typing import Optional, override
-import requests
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.common import is_port_available
@@ -51,9 +50,12 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self.logger
 
     @override
-    def add_api_key(self, api_key: str):
+    def update_api_key(self, api_key: Optional[str]):
         self.redis.select(2)
-        self.redis.hset("LRR_CONFIG", "apikey", api_key)
+        if api_key is None:
+            self.redis.hdel("LRR_CONFIG", "apikey")
+        else:
+            self.redis.hset("LRR_CONFIG", "apikey", api_key)
 
     @override
     def enable_nofun_mode(self):
@@ -104,7 +106,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         restart_required = False
         if with_api_key:
             self.get_logger().info("Adding API key to Redis...")
-            self.add_api_key(DEFAULT_API_KEY)
+            self.update_api_key(DEFAULT_API_KEY)
             restart_required = True
         if with_nofunmode:
             self.get_logger().info("Enabling NoFun mode...")
