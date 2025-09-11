@@ -1,6 +1,4 @@
-import asyncio
 import logging
-import numpy as np
 import sys
 import docker
 from playwright.async_api import Page, expect
@@ -74,6 +72,7 @@ async def lanraragi():
         await client.close()
 
 @pytest.mark.asyncio
+@pytest.mark.experimental
 async def test_failed_login(environment: AbstractLRRDeploymentContext, page: Page):
     environment.setup(with_api_key=False, with_nofunmode=True)
     logger.info("Visiting test LRR page...")

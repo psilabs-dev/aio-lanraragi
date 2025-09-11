@@ -11,9 +11,9 @@ dependencies = [
     "git-python",
     "numpy",
     "pillow",
-    "pytest",
+    "pytest>=0.26.0",
     "pytest-asyncio",
-    "pytest-playwright-asyncio>=0.26.0",
+    "pytest-playwright-asyncio",
     "redis"
 ]
 
