@@ -44,6 +44,13 @@ Run integration tests on Windows with a pre-built runfile:
 pytest tests --windows-runfile /path/to/run.ps1 --windows-content-path /path/to/content
 ```
 
+### Deterministic Testing
+
+By default, random variable sampling (e.g. for tag generation or list shuffling) is induced by seed value 42 via a numpy generator. You may change the seed to something else:
+```sh
+pytest tests/test_auth.py --npseed 43
+```
+
 ### Logging
 
 To see LRR process logs accompanying a test failure, use the pytest flag `--log-cli-level=ERROR`:
