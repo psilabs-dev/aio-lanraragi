@@ -293,12 +293,12 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Ensure a named Docker volume exists; create it if missing.
         """
-        self.get_logger().info(f"Checking if volume {name} exists.")
+        self.get_logger().debug(f"Checking if volume {name} exists.")
         try:
             self.docker_client.volumes.get(name)
-            self.get_logger().info(f"Volume {name} already exists, skipping creation.")
+            self.get_logger().debug(f"Volume {name} already exists, skipping creation.")
         except docker.errors.NotFound:
-            self.get_logger().info(f"Creating volume {name}.")
+            self.get_logger().debug(f"Creating volume {name}.")
             self.docker_client.volumes.create(name=name)
 
     def _remove_volume_if_exists(self, name: str):
@@ -306,7 +306,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Remove a named Docker volume if it exists.
         """
         with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
-            self.get_logger().info(f"Removing volume {name}.")
+            self.get_logger().debug(f"Removing volume {name}.")
             self.docker_client.volumes.get(name).remove(force=True)
 
     def _build_docker_image(self, build_path: Path, force: bool=False):
@@ -358,13 +358,13 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.docker_client.images.pull(image)
             return
         else:
-            self.get_logger().info(f"Checking if {image} exists.")
+            self.get_logger().debug(f"Checking if {image} exists.")
             try:
                 self.docker_client.images.get(image)
-                self.get_logger().info(f"{image} already exists, skipping pull.")
+                self.get_logger().debug(f"{image} already exists, skipping pull.")
                 return
             except docker.errors.ImageNotFound:
-                self.get_logger().info(f"{image} not found, pulling.")
+                self.get_logger().debug(f"{image} not found, pulling.")
                 self.docker_client.images.pull(image)
                 return
 

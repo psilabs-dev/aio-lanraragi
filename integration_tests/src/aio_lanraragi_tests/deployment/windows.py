@@ -167,7 +167,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             if output.returncode != 0:
                 self.get_logger().error(f"LRR PID {pid} shutdown failed with exit code {output.returncode}")
             else:
-                self.get_logger().info(f"LRR PID {pid} shutdown output: {output.stdout}")
+                self.get_logger().debug(f"LRR PID {pid} shutdown output: {output.stdout}")
         else:
             self.get_logger().warning("No LRR PID found; attempting to free port and kill matching processes.")
             owner_pid = self._get_port_owner_pid(self.lrr_port)
@@ -179,7 +179,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self._get_lrr_pid() is None and is_port_available(self.lrr_port):
-                self.get_logger().info("LRR shutdown complete...?")
+                self.get_logger().debug("LRR shutdown complete...?")
                 # could be a hoax, let's check again
                 time.sleep(1.0)
                 if self._get_lrr_pid() is None and is_port_available(self.lrr_port):
@@ -205,18 +205,18 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def stop_redis(self, timeout: int = 10):
         pid = self._get_redis_pid()
         if not pid:
-            self.get_logger().warning("No Redis PID found, skipping shutdown.")
+            self.get_logger().info("No Redis PID found, skipping shutdown.")
             return
 
         output = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"])
         if output.returncode != 0:
             self.get_logger().error(f"Redis PID {pid} shutdown failed with exit code {output.returncode}")
         else:
-            self.get_logger().info(f"Redis PID {pid} shutdown output: {output.stdout}")
+            self.get_logger().debug(f"Redis PID {pid} shutdown output: {output.stdout}")
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self._get_redis_pid() is None and is_port_available(self.redis_port):
-                self.get_logger().info(f"Redis PID {pid} shutdown complete.")
+                self.get_logger().debug(f"Redis PID {pid} shutdown complete.")
                 return
 
             time.sleep(0.2)
@@ -309,7 +309,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self._get_port_owner_pid(self.redis_port)
 
     def _test_redis_connection(self):
-        self.get_logger().info("Connecting to Redis...")
+        self.get_logger().debug("Connecting to Redis...")
         if not self.redis:
             self.redis = redis.Redis(host="127.0.0.1", port=self.redis_port, decode_responses=True)
         self.redis.ping()
@@ -320,7 +320,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.stop_lrr()
         self.stop_redis()
         self._execute_lrr_runfile()
-        self.get_logger().info("Testing connection to LRR server.")
+        self.get_logger().debug("Testing connection to LRR server.")
         self.test_lrr_connection(test_connection_max_retries)
         self._test_redis_connection()
         self.get_logger().info("Restart complete.")
@@ -350,9 +350,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         )
         pids = [p.strip() for p in result.stdout.splitlines() if p.strip().isdigit()]
         for p in pids:
-            self.get_logger().info(f"Killing perl process PID {p}...")
+            self.get_logger().debug(f"Killing perl process PID {p}...")
             subprocess.run(["taskkill", "/PID", p, "/F", "/T"])
-        self.get_logger().info("Killing perl processes by path attempt complete.")
+        self.get_logger().debug("Killing perl processes by path attempt complete.")
 
     def _ensure_port_free(self, port: int, service_name: str, timeout: int = 15):
         """
@@ -360,11 +360,11 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         self.get_logger().info(f"Ensuring port {port} is free for {service_name}...")
         if is_port_available(port):
-            self.get_logger().info(f"{service_name} port {port} is already free.")
+            self.get_logger().debug(f"{service_name} port {port} is already free.")
             return
         owner_pid = self._get_port_owner_pid(port)
         if owner_pid:
-            self.get_logger().info(f"Killing process {owner_pid} for {service_name} port {port}...")
+            self.get_logger().debug(f"Killing process {owner_pid} for {service_name} port {port}...")
             subprocess.run(["taskkill", "/PID", str(owner_pid), "/F", "/T"])
         if port == self.lrr_port and not is_port_available(port):
             self.get_logger().warning(f"LRR port {port} still occupied after best-effort cleanup; killing perl.exe processes by path.")
@@ -372,7 +372,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         deadline = time.time() + timeout
         while time.time() < deadline:
             if is_port_available(port):
-                self.get_logger().info(f"{service_name} port {port} is now free...?")
+                self.get_logger().debug(f"{service_name} port {port} is now free...?")
                 time.sleep(1.0)
                 if is_port_available(port):
                     self.get_logger().info(f"{service_name} port {port} is now free.")
