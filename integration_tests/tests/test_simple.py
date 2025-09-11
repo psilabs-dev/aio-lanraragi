@@ -753,6 +753,12 @@ async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
     del response, error
     # <<<<< SEARCH STAGE <<<<<
 
+    # >>>>> DISCARD SEARCH CACHE STAGE >>>>>
+    response, error = await lanraragi.search_api.discard_search_cache()
+    assert not error, f"Failed to discard search cache (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< DISCARD SEARCH CACHE STAGE <<<<<
+
 @pytest.mark.asyncio
 async def test_shinobu_api(lanraragi: LRRClient):
     """
