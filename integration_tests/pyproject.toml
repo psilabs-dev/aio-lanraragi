@@ -13,6 +13,7 @@ dependencies = [
     "pillow",
     "pytest",
     "pytest-asyncio",
+    "pytest-playwright-asyncio>=0.26.0",
     "redis"
 ]
 
@@ -23,7 +24,9 @@ Homepage = "https://github.com/psilabs-dev/aio-lanraragi"
 addopts = [
     "--import-mode=importlib"
 ]
-asyncio_default_fixture_loop_scope = "function"
+
+# https://github.com/tortoise/tortoise-orm/issues/638#issuecomment-2466433657
+asyncio_default_fixture_loop_scope = "session"
 filterwarnings = [
     "ignore:This process .* is multi-threaded:DeprecationWarning"
 ]
