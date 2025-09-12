@@ -153,19 +153,23 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.get_logger().info(f"Temp directory {self._get_lrr_temp_directory()} does not exist; making...")
                 self._get_lrr_temp_directory().mkdir(parents=True, exist_ok=False)
 
+            lrr_env = os.environ.copy()
             perl_path = str(windist_path / "runtime" / "bin" / "perl.exe")
+            path_var = lrr_env.get("Path", lrr_env.get("PATH", ""))
+            runtime_bin = str(windist_path / "runtime" / "bin")
+            runtime_redis = str(windist_path / "runtime" / "redis")
             lrr_network = self._get_lrr_network()
             lrr_data_directory = self._get_contents_path()
             lrr_log_directory = self._get_logs_dir()
             lrr_temp_directory = self._get_lrr_temp_directory()
             lrr_thumb_directory = self._get_thumb_path()
-            lrr_env = os.environ.copy()
             lrr_env["LRR_NETWORK"] = lrr_network
             lrr_env["LRR_DATA_DIRECTORY"] = str(lrr_data_directory)
             lrr_env["LRR_LOG_DIRECTORY"] = str(lrr_log_directory)
             lrr_env["LRR_TEMP_DIRECTORY"] = str(lrr_temp_directory)
             lrr_env["LRR_THUMB_DIRECTORY"] = str(lrr_thumb_directory)
             lrr_env["LRR_REDIS_ADDRESS"] = f"127.0.0.1:{self._get_redis_port()}"
+            lrr_env["Path"] = runtime_bin + os.pathsep + runtime_redis + os.pathsep + path_var if path_var else runtime_bin + os.pathsep + runtime_redis
 
             script = [
                 perl_path, str(Path("script") / "launcher.pl"),
@@ -307,7 +311,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         return f"{self.resource_prefix}content"
 
     def _get_contents_path(self) -> Path:
-        return Path(self._get_contents_path_str()).absolute()
+        # TODO: we (probably) need an absolute path here but maybe there's a better way
+        windist_path = self.windist_path.absolute()
+        return (windist_path / self._get_contents_path_str()).absolute()
     
     def _get_lrr_temp_directory(self) -> Path:
         return Path(self._get_contents_path()) / "temp"
