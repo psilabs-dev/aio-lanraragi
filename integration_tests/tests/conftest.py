@@ -59,6 +59,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--git-branch", action="store", default=None, help="Branch to checkout; if not supplied, uses the main branch.")
     parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
     parser.addoption("--windist", action="store", default=None, help="Path to the LRR app distribution for Windows.")
+    parser.addoption("--lrr-debug", action="store_true", default=False, help="Enable debug mode for the LRR logs.")
     parser.addoption("--experimental", action="store_true", default=False, help="Run experimental tests.")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
@@ -102,7 +103,7 @@ def pytest_runtest_makereport(item: Item, call: CallInfo[Any]):
     outcome = yield
     report: TestReport = outcome.get_result()
     if report.when == "call" and report.failed:
-        logger.info(f"Test failed: {item.nodeid}")
+        logger.info(f"Test failed: dumping logs... ({item.nodeid})")
 
         # # TODO: don't delete this tutorial; will probably use this in the future. (9/6/25)
         # # Log exception details from the report
@@ -147,7 +148,9 @@ def pytest_runtest_makereport(item: Item, call: CallInfo[Any]):
         try:
             if hasattr(item.session, 'lrr_environment'):
                 environment: AbstractLRRDeploymentContext = item.session.lrr_environment
+                logger.error("\n\n >>>>> LRR LOGS >>>>>")
                 environment.display_lrr_logs()
+                logger.error("<<<<< LRR LOGS <<<<<\n\n")
             else:
                 logger.warning("LRR environment not available in session for failure debugging")
         except Exception as e:

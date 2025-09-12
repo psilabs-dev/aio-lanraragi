@@ -2,7 +2,7 @@ import asyncio
 import logging
 import numpy as np
 import sys
-from typing import List
+from typing import Generator, List
 import docker
 from pydantic import BaseModel, Field
 import pytest
@@ -25,11 +25,15 @@ class ApiAuthMatrixParams(BaseModel):
     is_matching_api_key: bool = Field(..., description="Set to False if not is_api_key_configured_server or not is_api_key_configured_client")
 
 @pytest.fixture
-def port_offset():
+def port_offset() -> Generator[int, None, None]:
     yield 10
 
 @pytest.fixture
-def environment(request: pytest.FixtureRequest):
+def is_lrr_debug_mode(request: pytest.FixtureRequest) -> Generator[bool, None, None]:
+    yield request.config.getoption("--lrr-debug")
+
+@pytest.fixture
+def environment(request: pytest.FixtureRequest) -> Generator[AbstractLRRDeploymentContext, None, None]:
     """
     Provides an uninitialized LRR environment for testing.
     """
@@ -70,17 +74,17 @@ def environment(request: pytest.FixtureRequest):
     environment.teardown(remove_data=True)
 
 @pytest.fixture
-def npgenerator(request: pytest.FixtureRequest):
+def npgenerator(request: pytest.FixtureRequest) -> Generator[np.random.Generator, None, None]:
     seed: int = int(request.config.getoption("npseed"))
     generator = np.random.default_rng(seed)
     yield generator
 
 @pytest.fixture
-def semaphore():
+def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
     yield asyncio.BoundedSemaphore(value=8)
 
 @pytest_asyncio.fixture
-async def lanraragi(port_offset: int):
+async def lanraragi(port_offset: int) -> Generator[LRRClient, None, None]:
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
@@ -171,7 +175,9 @@ async def sample_test_api_auth_matrix(
             assert error.status == 401, f"Expected status 401, got: {error.status}."
 
 @pytest.mark.asyncio
-async def test_api_auth_matrix(environment: AbstractLRRDeploymentContext, lanraragi: LRRClient, npgenerator: np.random.Generator, port_offset: int):
+async def test_api_auth_matrix(
+    environment: AbstractLRRDeploymentContext, lanraragi: LRRClient, npgenerator: np.random.Generator, port_offset: int, is_lrr_debug_mode: bool
+):
     """
     Test the following situation combinations:
     - whether nofunmode is configured
@@ -191,7 +197,7 @@ async def test_api_auth_matrix(environment: AbstractLRRDeploymentContext, lanrar
     - GET /api/database/backup
     """
     # initialize the server.
-    environment.setup("test_", port_offset, with_api_key=False, with_nofunmode=False)
+    environment.setup("test_", port_offset, with_api_key=False, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
 
     # generate the parameters list, then randomize it to remove ordering effect.
     test_params: List[ApiAuthMatrixParams] = []

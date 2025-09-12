@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 import sys
 import tempfile
-from typing import List, Tuple
+from typing import Generator, List, Tuple
 import docker
 import numpy as np
 import pytest
@@ -86,13 +86,14 @@ from aio_lanraragi_tests.archive_generation.metadata import create_tag_generator
 logger = logging.getLogger(__name__)
 
 @pytest.fixture
-def port_offset():
+def port_offset() -> Generator[int, None, None]:
     yield 10
 
 @pytest.fixture(autouse=True)
 def session_setup_teardown(request: pytest.FixtureRequest, port_offset: int):
 
     global_run_id: int = request.config.global_run_id
+    is_lrr_debug_mode: bool = request.config.getoption("--lrr-debug") 
 
     # TODO: this should be refactored.
     environment: AbstractLRRDeploymentContext = None
@@ -122,23 +123,23 @@ def session_setup_teardown(request: pytest.FixtureRequest, port_offset: int):
                 global_run_id=global_run_id, is_allow_uploads=True
             )
 
-    environment.setup("test_", port_offset, with_api_key=True, with_nofunmode=True)
+    environment.setup("test_", port_offset, with_api_key=True, with_nofunmode=True, lrr_debug_mode=is_lrr_debug_mode)
     request.session.lrr_environment = environment # Store environment in pytest session for access in hooks
     yield
     environment.teardown(remove_data=True)
 
 @pytest.fixture
-def npgenerator(request: pytest.FixtureRequest):
+def npgenerator(request: pytest.FixtureRequest) -> Generator[np.random.Generator, None, None]:
     seed: int = int(request.config.getoption("npseed"))
     generator = np.random.default_rng(seed)
     yield generator
 
 @pytest.fixture
-def semaphore():
+def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
     yield asyncio.BoundedSemaphore(value=8)
 
 @pytest_asyncio.fixture
-async def lanraragi(port_offset: int):
+async def lanraragi(port_offset: int) ->  Generator[LRRClient, None, None]:
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
