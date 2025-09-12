@@ -47,8 +47,8 @@ jobs:
           cd integration_tests
           export CI=true
           pytest tests --log-cli-level=INFO \
-            --git-url=https://github.com/difegue/LANraragi.git \
-            --git-branch=dev \
+            --git-url=https://github.com/psilabs-dev/LANraragi.git \
+            --git-branch=dev-redis-port \
             --docker-api \
             --npseed 42
         env:
@@ -70,8 +70,8 @@ jobs:
       - name: Checkout LANraragi repository
         uses: actions/checkout@v4
         with:
-          repository: difegue/LANraragi
-          ref: dev
+          repository: psilabs-dev/LANraragi
+          ref: dev-redis-port
           submodules: true
           path: LANraragi
 

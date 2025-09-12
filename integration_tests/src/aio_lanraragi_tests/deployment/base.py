@@ -9,6 +9,22 @@ import requests
 
 class AbstractLRRDeploymentContext(abc.ABC):
 
+    @property
+    def resource_prefix(self) -> str:
+        return self._resource_prefix
+    
+    @resource_prefix.setter
+    def resource_prefix(self, new_resource_prefix: str):
+        self._resource_prefix = new_resource_prefix
+
+    @property
+    def port_offset(self) -> int:
+        return self._port_offset
+    
+    @port_offset.setter
+    def port_offset(self, new_port_offset: int):
+        self._port_offset = new_port_offset
+
     @abc.abstractmethod
     def get_logger(self) -> logging.Logger:
         ...
@@ -32,13 +48,16 @@ class AbstractLRRDeploymentContext(abc.ABC):
 
     @abc.abstractmethod
     def setup(
-        self, with_api_key: bool=False, with_nofunmode: bool=False,
+        self, resource_prefix: str, port_offset: int,
+        with_api_key: bool=False, with_nofunmode: bool=False,
         test_connection_max_retries: int=4
     ):
         """
         Main entrypoint to setting up a LRR environment.
 
         Args:
+            resource_prefix: prefix to use for resource names
+            port_offset: offset to use for port numbers
             with_api_key: whether to add an API key (default API key: "lanraragi") to the LRR environment
             with_nofunmode: whether to enable nofunmode in the LRR environment
             test_connection_max_retries: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
@@ -89,7 +108,13 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Get logs as bytes.
         """
 
-    def test_lrr_connection(self, test_connection_max_retries: int=4):
+    @abc.abstractmethod
+    def get_lrr_port(self) -> int:
+        """
+        Get the LRR port.
+        """
+
+    def test_lrr_connection(self, port: int, test_connection_max_retries: int=4):
         """
         Test the LRR connection with retry and exponential backoff.
         If connection is not established by then, teardown the deployment completely and raise an exception.
@@ -97,7 +122,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
         retry_count = 0
         while True:
             try:
-                resp = requests.get(f"http://127.0.0.1:{self.lrr_port}")
+                resp = requests.get(f"http://127.0.0.1:{port}")
                 if resp.status_code != 200:
                     self.teardown(remove_data=True)
                     raise DeploymentException(f"Response status code is not 200: {resp.status_code}")

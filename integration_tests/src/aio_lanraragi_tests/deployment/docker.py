@@ -18,17 +18,10 @@ from git import Repo
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
-from aio_lanraragi_tests.common import DEFAULT_API_KEY
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PORT, DEFAULT_REDIS_PORT
 
-DEFAULT_REDIS_TAG = "redis:7.2.4"
-LANRARAGI_CONTAINER_NAME = "test-lanraragi"
-REDIS_CONTAINER_NAME = "test-redis"
-DEFAULT_LOCAL_IMAGE = "lanraragi-integration-test"
-DEFAULT_LANRARAGI_TAG = "difegue/lanraragi"
-DEFAULT_NETWORK_NAME = "lanraragi-integration-test-network"
-DEFAULT_CONTENT_VOLUME_NAME = "lanraragi-integration-test-content"
-DEFAULT_THUMB_VOLUME_NAME = "lanraragi-integration-test-thumb"
-DEFAULT_REDIS_VOLUME_NAME = "lanraragi-integration-test-db"
+DEFAULT_REDIS_DOCKER_TAG = "redis:7.2.4"
+DEFAULT_LANRARAGI_DOCKER_TAG = "difegue/lanraragi"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,7 +35,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def __init__(
             self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient,
             docker_api: docker.APIClient=None, logger: Optional[logging.Logger]=None,
-            lrr_port: int=3001, global_run_id: int=None, is_allow_uploads: bool=True,
+            global_run_id: int=None, is_allow_uploads: bool=True,
     ):
 
         self.build_path = build
@@ -57,7 +50,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if logger is None:
             logger = LOGGER
         self.logger = logger
-        self.lrr_port = lrr_port
         self.is_allow_uploads = is_allow_uploads
 
     @override
@@ -90,7 +82,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.stop_lrr()
         self.start_lrr()
         self.get_logger().debug("Testing connection to LRR server.")
-        self.test_lrr_connection()
+        self.test_lrr_connection(self.get_lrr_port())
 
     @override
     def start_lrr(self):
@@ -137,7 +129,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def setup(
-        self, with_api_key: bool=False, with_nofunmode: bool=False, 
+        self, resource_prefix: str, port_offset: int,
+        with_api_key: bool=False, with_nofunmode: bool=False, 
         test_connection_max_retries: int=4
     ):
         """
@@ -146,8 +139,13 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         as well as any other configuration.
 
         Args:
+            resource_prefix: prefix to use for resource names
+            port_offset: offset to use for port numbers
             test_connection_max_retries: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
+
+        self.resource_prefix = resource_prefix
+        self.port_offset = port_offset
 
         # prepare images
         if self.build_path:
@@ -159,8 +157,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.docker_client.images.get(self._get_image_name_from_global_run_id())
                 self.get_logger().info(f"Image {self._get_image_name_from_global_run_id()} already exists, skipping build.")
             except docker.errors.ImageNotFound:
-                self.get_logger().info(f"Cloning {self.git_url}...")
                 with tempfile.TemporaryDirectory() as tmpdir:
+                    self.get_logger().info(f"Cloning {self.git_url} to {tmpdir}...")
                     repo_dir = Path(tmpdir) / "LANraragi"
                     repo = Repo.clone_from(self.git_url, repo_dir)
                     if self.git_branch: # throws git.exc.GitCommandError if branch does not exist.
@@ -168,7 +166,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                     self._build_docker_image(repo.working_dir, force=True)
         else:
             self.get_logger().info(f"Pulling LRR image from Docker Hub {self.image}.")
-            image = DEFAULT_LANRARAGI_TAG
+            image = DEFAULT_LANRARAGI_DOCKER_TAG
             if self.image:
                 image = self.image
             self._pull_docker_image_if_not_exists(image, force=False)
@@ -178,49 +176,58 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         # raise a testing exception if these conditions are violated.
         container: docker.models.containers.Container
         for container in self.docker_client.containers.list(all=True):
-            if container.name in {LANRARAGI_CONTAINER_NAME, REDIS_CONTAINER_NAME}:
+            if container.name in {self._get_lrr_container_name(), self._get_redis_container_name()}:
                 raise DeploymentException(f"Container {container.name} exists!")
         network: docker.models.networks.Network
         for network in self.docker_client.networks.list():
-            if network.name == DEFAULT_NETWORK_NAME:
+            if network.name == self._get_network_name():
                 raise DeploymentException(f"Network {network.name} exists!")
 
         # pull redis
-        self._pull_docker_image_if_not_exists(DEFAULT_REDIS_TAG, force=False)
+        self._pull_docker_image_if_not_exists(DEFAULT_REDIS_DOCKER_TAG, force=False)
 
         self.get_logger().info("Creating test network.")
-        network = self.docker_client.networks.create(DEFAULT_NETWORK_NAME, driver="bridge")
+        network = self.docker_client.networks.create(self._get_network_name(), driver="bridge")
         self.network = network
 
         # create containers
         self.get_logger().info("Creating containers.")
         # ensure volumes exist
         self.get_logger().info("Ensuring test volumes.")
-        self._ensure_volume(DEFAULT_CONTENT_VOLUME_NAME)
-        self._ensure_volume(DEFAULT_THUMB_VOLUME_NAME)
-        self._ensure_volume(DEFAULT_REDIS_VOLUME_NAME)
+        self._ensure_volume(self._get_lrr_contents_volume_name())
+        self._ensure_volume(self._get_lrr_thumb_volume_name())
+        self._ensure_volume(self._get_redis_volume_name())
         redis_healthcheck = {
             "test": [ "CMD", "redis-cli", "--raw", "incr", "ping" ],
             "start_period": 1000000 * 1000 # 1s
         }
+        redis_ports = {
+            "6379/tcp": self._get_redis_port()
+        }
         self.redis_container = self.docker_client.containers.create(
-            DEFAULT_REDIS_TAG, name=REDIS_CONTAINER_NAME, hostname=REDIS_CONTAINER_NAME, detach=True, network=DEFAULT_NETWORK_NAME, healthcheck=redis_healthcheck,
+            DEFAULT_REDIS_DOCKER_TAG,
+            name=self._get_redis_container_name(),
+            hostname=self._get_redis_container_name(),
+            detach=True,
+            network=self._get_network_name(),
+            ports=redis_ports,
+            healthcheck=redis_healthcheck,
             volumes={
-                DEFAULT_REDIS_VOLUME_NAME: {"bind": "/data", "mode": "rw"}
+                self._get_redis_volume_name(): {"bind": "/data", "mode": "rw"}
             }
         )
 
         lrr_ports = {
-            "3000/tcp": self.lrr_port
+            "3000/tcp": self.get_lrr_port()
         }
         lrr_environment = [
-            f"LRR_REDIS_ADDRESS={REDIS_CONTAINER_NAME}:6379"
+            f"LRR_REDIS_ADDRESS={self._get_redis_container_name()}:{DEFAULT_REDIS_PORT}"
         ]
         self.lrr_container = self.docker_client.containers.create(
-            self._get_image_name_from_global_run_id(), hostname=LANRARAGI_CONTAINER_NAME, name=LANRARAGI_CONTAINER_NAME, detach=True, network=DEFAULT_NETWORK_NAME, ports=lrr_ports, environment=lrr_environment,
+            self._get_image_name_from_global_run_id(), hostname=self._get_lrr_container_name(), name=self._get_lrr_container_name(), detach=True, network=self._get_network_name(), ports=lrr_ports, environment=lrr_environment,
             volumes={
-                DEFAULT_CONTENT_VOLUME_NAME: {"bind": "/home/koyomi/lanraragi/content", "mode": "rw"},
-                DEFAULT_THUMB_VOLUME_NAME: {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"}
+                self._get_lrr_contents_volume_name(): {"bind": "/home/koyomi/lanraragi/content", "mode": "rw"},
+                self._get_lrr_thumb_volume_name(): {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"}
             }
         )
 
@@ -246,7 +253,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         # post LRR startup
         self.get_logger().debug("Testing connection to LRR server.")
-        self.test_lrr_connection(test_connection_max_retries)
+        self.test_lrr_connection(self.get_lrr_port(), test_connection_max_retries)
 
         # allow uploads
         if self.is_allow_uploads:
@@ -263,6 +270,34 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         # with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
         #     self.docker_client.images.get(self._get_image_name_from_global_run_id()).remove(force=True)
         self.get_logger().info("Cleanup complete.")
+
+    def _get_lrr_contents_volume_name(self) -> str:
+        return f"{self.resource_prefix}lanraragi_contents"
+
+    def _get_lrr_thumb_volume_name(self) -> str:
+        return f"{self.resource_prefix}lanraragi_thumb"
+
+    def _get_redis_volume_name(self) -> str:
+        return f"{self.resource_prefix}redis_data"
+
+    def _get_network_name(self) -> str:
+        return f"{self.resource_prefix}network"
+
+    def _get_lrr_container_name(self) -> str:
+        return f"{self.resource_prefix}lanraragi_service"
+
+    def _get_redis_container_name(self) -> str:
+        return f"{self.resource_prefix}redis_service"
+
+    def _get_lrr_image_name(self) -> str:
+        return f"integration_test_lanraragi:{self.global_run_id}"
+
+    @override
+    def get_lrr_port(self) -> int:
+        return DEFAULT_LRR_PORT + self.port_offset
+
+    def _get_redis_port(self) -> int:
+        return DEFAULT_REDIS_PORT + self.port_offset
 
     def _reset_docker_test_env(self, remove_data: bool=False):
         """
@@ -285,9 +320,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.docker_client.networks.get(self.network.id).remove()
         
         if remove_data:
-            self._remove_volume_if_exists(DEFAULT_CONTENT_VOLUME_NAME)
-            self._remove_volume_if_exists(DEFAULT_THUMB_VOLUME_NAME)
-            self._remove_volume_if_exists(DEFAULT_REDIS_VOLUME_NAME)
+            self._remove_volume_if_exists(self._get_lrr_contents_volume_name())
+            self._remove_volume_if_exists(self._get_lrr_thumb_volume_name())
+            self._remove_volume_if_exists(self._get_redis_volume_name())
 
     def _ensure_volume(self, name: str):
         """
@@ -374,4 +409,4 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         Allows for docker deployment context to build once and reuse for multiple tests.
         """
-        return f"{DEFAULT_LOCAL_IMAGE}:{self.global_run_id}"
+        return f"lanraragi:{self.global_run_id}"

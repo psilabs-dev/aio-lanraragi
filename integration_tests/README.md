@@ -67,6 +67,34 @@ On test failures, pytest will attempt to collect the service logs from the runni
 
 See [pytest](https://docs.pytest.org/en/stable/#) docs for more test-related options.
 
+## Resource Management during Automated Test Deployments
+To prepare for potential distributed testing, we should ensure all resources provided by the test host during the lifecycle of a test session are available to one (and only one) test case. All such resources should be reclaimed at the end of tests, and at the end of a failed test or exception. Examples of resources include: networks, volumes, containers, ports, and temporary directories.
+
+To streamline resource management, each test deployment is passed a `resource_prefix` and a `port_offset`. The former is prepended to the names of all named resources, while the latter is added to the default port values of service resources.
+
+The following are general rules for provisioning resources:
+
+- all automated testing resources should start with `test_` prefix.
+- all LRR automated testing containers should expose ports within the range 3010-3020.
+- all redis automated testing containers should expose ports within the range 6389-6399.
+
+In a docker deployment, considered resources are as follows:
+
+| resource | deployment type | format | description |
+| - | - | - | - |
+| LRR contents volume | docker | "{resource_prefix}lanraragi_contents" | name of docker volume for LRR archives storage |
+| LRR thumbnail volume | docker | "{resource_prefix}lanraragi_thumb" | name of docker volume for LRR thumbnails storage |
+| redis volume | docker | "{resource_prefix}redis_data" | name of docker volume for LRR database |
+| network | network | "{resource_prefix}network" | name of docker network |
+| LRR container | docker | "{resource_prefix}lanraragi_service" | |
+| redis container | docker | "{resource_prefix}redis_service | |
+| LRR image | docker | "integration_test_lanraragi:{global_id} | |
+| contents directory | windows | "{resource_prefix}content" | name of the windows contents directory containing everything |
+
+> For example: if `resource_prefix="test_lanraragi_` and `port_offset=10`, then `network=test_lanraragi_network` and the redis port equals 6389.
+
+Since docker test deployments rely only on one image, we will pin the image ID to the global run ID instead.
+
 ## Scope
 The scope of this library is limited to perform routine (i.e. not long-running by default) API integration tests within the "tests" directory. Each integration test must contain at least one LRR API call in an isolated LRR docker environment. The library tests will check the following points:
 

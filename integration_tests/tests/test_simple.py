@@ -73,7 +73,7 @@ from lanraragi.models.tankoubon import (
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
-from aio_lanraragi_tests.common import compute_upload_checksum, DEFAULT_API_KEY
+from aio_lanraragi_tests.common import compute_upload_checksum, DEFAULT_API_KEY, DEFAULT_LRR_PORT
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import (
     CreatePageRequest,
@@ -85,8 +85,12 @@ from aio_lanraragi_tests.archive_generation.metadata import create_tag_generator
 
 logger = logging.getLogger(__name__)
 
+@pytest.fixture
+def port_offset():
+    yield 10
+
 @pytest.fixture(autouse=True)
-def session_setup_teardown(request: pytest.FixtureRequest):
+def session_setup_teardown(request: pytest.FixtureRequest, port_offset: int):
 
     global_run_id: int = request.config.global_run_id
 
@@ -119,7 +123,7 @@ def session_setup_teardown(request: pytest.FixtureRequest):
                 global_run_id=global_run_id, is_allow_uploads=True
             )
 
-    environment.setup(with_api_key=True, with_nofunmode=True)
+    environment.setup("test_simple_", port_offset, with_api_key=True, with_nofunmode=True)
     request.session.lrr_environment = environment # Store environment in pytest session for access in hooks
     yield
     environment.teardown(remove_data=True)
@@ -135,12 +139,12 @@ def semaphore():
     yield asyncio.BoundedSemaphore(value=8)
 
 @pytest_asyncio.fixture
-async def lanraragi():
+async def lanraragi(port_offset: int):
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
     client = LRRClient(
-        lrr_host="http://localhost:3001",
+        lrr_host=f"http://localhost:{DEFAULT_LRR_PORT + port_offset}",
         lrr_api_key=DEFAULT_API_KEY,
         timeout=10
     )
@@ -1120,7 +1124,7 @@ async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
     # <<<<< GET MINION JOB DETAILS STAGE <<<<<
 
 @pytest.mark.asyncio
-async def test_concurrent_clients():
+async def test_concurrent_clients(port_offset: int):
     """
     Example test that shows how to use multiple client instances
     with a shared session for better performance.
@@ -1128,12 +1132,12 @@ async def test_concurrent_clients():
     session = aiohttp.ClientSession()
     try:
         client1 = LRRClient(
-            lrr_host="http://localhost:3001",
+            lrr_host=f"http://localhost:{DEFAULT_LRR_PORT + port_offset}",
             lrr_api_key="lanraragi",
             session=session
         )
         client2 = LRRClient(
-            lrr_host="http://localhost:3001",
+            lrr_host=f"http://localhost:{DEFAULT_LRR_PORT + port_offset}",
             lrr_api_key="lanraragi",
             session=session
         )
@@ -1141,7 +1145,7 @@ async def test_concurrent_clients():
             client1.misc_api.get_server_info(),
             client2.category_api.get_all_categories()
         )
-        for response, error in results:
+        for _, error in results:
             assert not error, f"Failed to get server info (status {error.status}): {error.error}"
     finally:
         await session.close()

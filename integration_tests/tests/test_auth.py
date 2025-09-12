@@ -13,7 +13,7 @@ from lanraragi.clients.client import LRRClient
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
-from aio_lanraragi_tests.common import DEFAULT_API_KEY
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,10 @@ class ApiAuthMatrixParams(BaseModel):
     is_api_key_configured_server: bool
     is_api_key_configured_client: bool
     is_matching_api_key: bool = Field(..., description="Set to False if not is_api_key_configured_server or not is_api_key_configured_client")
+
+@pytest.fixture
+def port_offset():
+    yield 10
 
 @pytest.fixture
 def environment(request: pytest.FixtureRequest):
@@ -77,12 +81,12 @@ def semaphore():
     yield asyncio.BoundedSemaphore(value=8)
 
 @pytest_asyncio.fixture
-async def lanraragi():
+async def lanraragi(port_offset: int):
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
     client = LRRClient(
-        lrr_host="http://localhost:3001",
+        lrr_host=f"http://localhost:{DEFAULT_LRR_PORT + port_offset}",
         lrr_api_key=DEFAULT_API_KEY,
         timeout=10
     )
@@ -168,7 +172,7 @@ async def sample_test_api_auth_matrix(
             assert error.status == 401, f"Expected status 401, got: {error.status}."
 
 @pytest.mark.asyncio
-async def test_api_auth_matrix(environment: AbstractLRRDeploymentContext, lanraragi: LRRClient, npgenerator: np.random.Generator):
+async def test_api_auth_matrix(environment: AbstractLRRDeploymentContext, lanraragi: LRRClient, npgenerator: np.random.Generator, port_offset: int):
     """
     Test the following situation combinations:
     - whether nofunmode is configured
@@ -188,7 +192,7 @@ async def test_api_auth_matrix(environment: AbstractLRRDeploymentContext, lanrar
     - GET /api/database/backup
     """
     # initialize the server.
-    environment.setup(with_api_key=False, with_nofunmode=False)
+    environment.setup("test_auth_", port_offset, with_api_key=False, with_nofunmode=False)
 
     # generate the parameters list, then randomize it to remove ordering effect.
     test_params: List[ApiAuthMatrixParams] = []

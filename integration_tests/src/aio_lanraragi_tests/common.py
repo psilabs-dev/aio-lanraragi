@@ -47,6 +47,9 @@ IMAGE_SIGNATURES = [signature.replace(' ', '').lower() for signature in __IMAGE_
 ALLOWED_LRR_EXTENSIONS = {"zip", "rar", "targz", "lzma", "7z", "xz", "cbz", "cbr", "pdf"}
 NULL_ARCHIVE_ID = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
 
+DEFAULT_LRR_PORT = 3000
+DEFAULT_REDIS_PORT = 6379
+
 DEFAULT_API_KEY = "lanraragi"
 
 @overload
