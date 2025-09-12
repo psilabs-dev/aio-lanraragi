@@ -3,6 +3,7 @@ import logging
 import os
 from pathlib import Path
 import redis
+import redis.exceptions
 import shutil
 import subprocess
 import threading
@@ -411,11 +412,23 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         # see _get_lrr_pid for explanation
         return self._get_port_owner_pid(self._get_redis_port())
 
-    def _test_redis_connection(self):
+    def _test_redis_connection(self, max_retries: int=4):
         self.get_logger().debug("Connecting to Redis...")
         if not self.redis:
             self.redis = redis.Redis(host="127.0.0.1", port=self._get_redis_port(), decode_responses=True)
-        self.redis.ping()
+
+        retry_count = 0
+        while True:
+            try:
+                self.redis.ping()
+                break
+            except redis.exceptions.ConnectionError:
+                if retry_count >= max_retries:
+                    raise
+                time_to_sleep = 2 ** (retry_count + 1)
+                self.get_logger().warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
+                retry_count += 1
+                time.sleep(time_to_sleep)
         self.get_logger().info("Redis connection established.")
 
     def _get_port_owner_pid(self, port: int) -> Optional[int]:
