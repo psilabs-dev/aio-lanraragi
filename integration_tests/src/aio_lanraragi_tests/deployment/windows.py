@@ -124,10 +124,11 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         self.stop_lrr()
         self.stop_redis()
+        contents_path = self._get_contents_path()
 
-        if self._get_contents_path().exists() and remove_data:
-            self.get_logger().info(f"Removing content path: {self._get_contents_path()}")
-            shutil.rmtree(self._get_contents_path())
+        if contents_path.exists() and remove_data:
+            self.get_logger().info(f"Removing content path: {contents_path}")
+            shutil.rmtree(contents_path)
 
     @override
     def restart(self):

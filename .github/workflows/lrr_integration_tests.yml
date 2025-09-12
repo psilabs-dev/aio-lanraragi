@@ -129,7 +129,6 @@ jobs:
           pytest tests `
           --log-cli-level=INFO `
           --windows-runfile "$env:GITHUB_WORKSPACE\\LANraragi\\win-dist\\run.ps1" `
-          --windows-content-path "$env:GITHUB_WORKSPACE\\lanraragi_tests" `
           --npseed 42 `
           --exitfirst
 

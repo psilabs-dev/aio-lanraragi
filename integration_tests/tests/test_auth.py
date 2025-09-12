@@ -43,9 +43,8 @@ def environment(request: pytest.FixtureRequest):
     match sys.platform:
         case 'win32':
             runfile_path: str = request.config.getoption("--windows-runfile")
-            windows_content_path: str = request.config.getoption("--windows-content-path")
             environment = WindowsLRRDeploymentContext(
-                runfile_path, windows_content_path,
+                runfile_path,
             )
 
         case 'darwin' | 'linux':
@@ -192,7 +191,7 @@ async def test_api_auth_matrix(environment: AbstractLRRDeploymentContext, lanrar
     - GET /api/database/backup
     """
     # initialize the server.
-    environment.setup("test_auth_", port_offset, with_api_key=False, with_nofunmode=False)
+    environment.setup("test_", port_offset, with_api_key=False, with_nofunmode=False)
 
     # generate the parameters list, then randomize it to remove ordering effect.
     test_params: List[ApiAuthMatrixParams] = []

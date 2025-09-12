@@ -101,9 +101,8 @@ def session_setup_teardown(request: pytest.FixtureRequest, port_offset: int):
     match sys.platform:
         case 'win32':
             runfile_path: str = request.config.getoption("--windows-runfile")
-            windows_content_path: str = request.config.getoption("--windows-content-path")
             environment = WindowsLRRDeploymentContext(
-                runfile_path, windows_content_path,
+                runfile_path,
             )
 
         case 'darwin' | 'linux':
@@ -123,7 +122,7 @@ def session_setup_teardown(request: pytest.FixtureRequest, port_offset: int):
                 global_run_id=global_run_id, is_allow_uploads=True
             )
 
-    environment.setup("test_simple_", port_offset, with_api_key=True, with_nofunmode=True)
+    environment.setup("test_", port_offset, with_api_key=True, with_nofunmode=True)
     request.session.lrr_environment = environment # Store environment in pytest session for access in hooks
     yield
     environment.teardown(remove_data=True)
