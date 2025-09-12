@@ -128,7 +128,7 @@ jobs:
           $env:CI='true'
           pytest tests `
           --log-cli-level=INFO `
-          --windows-runfile "$env:GITHUB_WORKSPACE\\LANraragi\\win-dist\\run.ps1" `
+          --windist "$env:GITHUB_WORKSPACE\\LANraragi\\win-dist" `
           --npseed 42 `
           --exitfirst
 

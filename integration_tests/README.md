@@ -39,9 +39,9 @@ pytest tests --build /path/to/LANraragi/project
 
 ### Windows Deployment
 
-Run integration tests on Windows with a pre-built runfile:
+Run integration tests on Windows from a pre-built distribution:
 ```sh
-pytest tests --windows-runfile /path/to/run.ps1
+pytest tests --win-dist /path/to/win-dist
 ```
 
 ### Deterministic Testing

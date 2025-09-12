@@ -18,14 +18,14 @@ LOGGER = logging.getLogger(__name__)
 
 class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     """
-    Set up a LANraragi environment on Windows. Requires a runfile to be provided.
+    Set up a LANraragi environment on Windows. Requires a win-dist path to be provided.
     """
 
     def __init__(
-        self, runfile_parent: str,
+        self, win_dist_path: str,
         logger: Optional[logging.Logger]=None
     ):
-        self.runfile_parent = Path(runfile_parent)
+        self.windist_path = Path(win_dist_path)
         if logger is None:
             logger = LOGGER
         self.logger = logger
@@ -74,9 +74,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         lrr_port = self.get_lrr_port()
         redis_port = self._get_redis_port()
 
-        runfile_parent = self.runfile_parent.absolute()
-        if not runfile_parent.exists():
-            raise FileNotFoundError(f"Runfile {runfile_parent} not found.")
+        windist_path = self.windist_path.absolute()
+        if not windist_path.exists():
+            raise FileNotFoundError(f"win-dist path {windist_path} not found.")
 
         self.get_logger().info("Checking if ports are available.")
         if not is_port_available(lrr_port):
@@ -140,10 +140,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         cwd = os.getcwd()
 
         try:
-            parent = self.runfile_parent.absolute()
-            if not parent.exists():
-                raise DeploymentException(f"Expected runfile parent {parent} to exist.")
-            os.chdir(parent)
+            windist_path = self.windist_path.absolute()
+            if not windist_path.exists():
+                raise DeploymentException(f"Expected windist {windist_path} to exist.")
+            os.chdir(windist_path)
 
             if not self._get_logs_dir().exists():
                 self.get_logger().info(f"Logs directory {self._get_logs_dir()} does not exist; making...")
@@ -153,25 +153,29 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self._get_lrr_temp_directory().mkdir(parents=True, exist_ok=False)
 
             current_path = os.environ.get("PATH", "")
-            runtime_bin = parent / "runtime" / "bin"
+            runtime_bin = windist_path / "runtime" / "bin"
             new_path = str(runtime_bin) + os.pathsep + str(current_path)
 
+            lrr_network = self._get_lrr_network()
+            lrr_data_directory = self._get_contents_path()
+            lrr_log_directory = self._get_logs_dir()
+            lrr_temp_directory = self._get_lrr_temp_directory()
+            lrr_thumb_directory = self._get_thumb_path()
             lrr_env = os.environ.copy()
             lrr_env["PATH"] = new_path
-            lrr_env["LRR_NETWORK"] = self._get_lrr_network()
-            lrr_env["LRR_DATA_DIRECTORY"] = str(self._get_contents_path())
-            lrr_env["LRR_LOG_DIRECTORY"] = str(self._get_logs_dir())
-            lrr_env["LRR_TEMP_DIRECTORY"] = str(self._get_lrr_temp_directory())
-            lrr_env["LRR_THUMB_DIRECTORY"] = str(self._get_thumb_path())
+            lrr_env["LRR_NETWORK"] = lrr_network
+            lrr_env["LRR_DATA_DIRECTORY"] = str(lrr_data_directory)
+            lrr_env["LRR_LOG_DIRECTORY"] = str(lrr_log_directory)
+            lrr_env["LRR_TEMP_DIRECTORY"] = str(lrr_temp_directory)
+            lrr_env["LRR_THUMB_DIRECTORY"] = str(lrr_thumb_directory)
 
             script = [
-                "perl",
-                "script/launcher.pl",
+                "perl", str(Path("script") / "launcher.pl"),
                 "-d", str(Path("script") / "lanraragi")
             ]
+            self.get_logger().info(f"(lrr_network={lrr_network}, lrr_data_directory={lrr_data_directory}, lrr_log_directory={lrr_log_directory}, lrr_temp_directory={lrr_temp_directory}, lrr_thumb_directory={lrr_thumb_directory}) running script {subprocess.list2cmdline(script)}")
             lrr_process = subprocess.Popen(script, env=lrr_env)
-            self.get_logger().info(f"Started LRR server with PID: {lrr_process.pid}")
-
+            self.get_logger().info(f"Started LRR process with PID {lrr_process}.")
             # confirm it has started.
             self.test_lrr_connection(self.get_lrr_port())
         finally:
@@ -185,32 +189,35 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         cwd = os.getcwd()
 
         try:
-            parent = self.runfile_parent.absolute()
-            if not parent.exists():
-                raise DeploymentException(f"Expected runfile parent {parent} to exist.")
-            os.chdir(parent)
+            windist_path = self.windist_path.absolute()
+            if not windist_path.exists():
+                raise DeploymentException(f"Expected windist {windist_path} to exist.")
+            os.chdir(windist_path)
 
             if not self._get_logs_dir().exists():
                 self.get_logger().info(f"Logs directory {self._get_logs_dir()} does not exist; making...")
                 self._get_logs_dir().mkdir(parents=True, exist_ok=False)
 
             current_path = os.environ.get("PATH", "")
-            runtime_bin = parent / "runtime" / "redis"
-            new_path = str(runtime_bin) + os.pathsep + str(current_path)
+            redis_bin = windist_path / "runtime" / "redis"
+            runtime_bin = windist_path / "runtime" / "bin"
+            new_path = str(redis_bin) + os.pathsep + str(runtime_bin) + os.pathsep + str(current_path)
 
             redis_env = os.environ.copy()
             redis_env["PATH"] = new_path
 
+            pid_filepath = self._get_logs_dir() / "redis.pid"
+            redis_dir = self._get_contents_path()
+            redis_logfile_path = self._get_redis_logs_path()
             script = [
-                "redis-server",
-                "./runtime/redis/redis.conf",
-                "--pidfile", str(self._get_lrr_temp_directory() / "redis.pid"), # maybe we don't need this...?
-                "--dir", str(self._get_contents_path()),
-                "--logfile", str(self._get_redis_logs_path())
+                "redis-server", str(Path("runtime") / "redis" / "redis.conf"),
+                "--pidfile", str(pid_filepath), # maybe we don't need this...?
+                "--dir", str(redis_dir),
+                "--logfile", str(redis_logfile_path)
             ]
+            self.get_logger().info(f"(redis_dir={redis_dir}, redis_logfile_path={redis_logfile_path}) running script {subprocess.list2cmdline(script)}")
             redis_process = subprocess.Popen(script, env=redis_env)
-            self.get_logger().info(f"Started redis server with PID: {redis_process.pid}")
-
+            self.get_logger().info(f"Started redis service with PID {redis_process.pid}.")
             # confirm it has started.
             self._test_redis_connection()
         finally:
@@ -335,6 +342,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def _get_lrr_network(self) -> str:
         return f"http://127.0.0.1:{self.get_lrr_port()}"
 
+    # # for reference only.
     # def _execute_lrr_runfile(self):
     #     runfile = self.runfile.absolute()
     #     if not runfile.exists():
@@ -432,9 +440,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     def _kill_lrr_perl_processes_by_path(self):
         """
-        Kill perl.exe processes started from the win-dist runtime path for this runfile directory.
+        Kill perl.exe processes started from within the win-dist runtime path.
         """
-        perl_path = str((self.runfile_parent / "runtime" / "bin" / "perl.exe").absolute())
+        perl_path = str((self.windist_path / "runtime" / "bin" / "perl.exe").absolute())
         ps = (
             "Get-CimInstance Win32_Process -Filter \"Name = 'perl.exe'\" | "
             f"Where-Object {{ $_.ExecutablePath -ieq '{perl_path}' }} | "

@@ -40,8 +40,8 @@ def pytest_addoption(parser: pytest.Parser):
     git-branch : `str`
         Optional branch name of the corresponding git repository.
 
-    windows-runfile-parent : `str`
-        Path to the runfile to use for the LRR environment on Windows.
+    windist : `str`
+        Path to the LRR app distribution bundle for Windows.
 
     experimental : `bool = False`
         Run experimental tests. For example, to test a set of LANraragi APIs in
@@ -58,7 +58,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--git-url", action="store", default=None, help="Link to a LANraragi git repository (e.g. fork or branch).")
     parser.addoption("--git-branch", action="store", default=None, help="Branch to checkout; if not supplied, uses the main branch.")
     parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
-    parser.addoption("--windows-runfile-parent", action="store", default=None, help="Parent directory containing the runfile to use for the LRR environment on Windows.")
+    parser.addoption("--windist", action="store", default=None, help="Path to the LRR app distribution for Windows.")
     parser.addoption("--experimental", action="store_true", default=False, help="Run experimental tests.")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")

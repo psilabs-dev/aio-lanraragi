@@ -11,14 +11,23 @@ class AbstractLRRDeploymentContext(abc.ABC):
 
     @property
     def resource_prefix(self) -> str:
+        """
+        String to be attached to the beginning of most provisioned deployment resources.
+        This string SHOULD be "test_" or "test_integration_", or "test_{case_no}_" in a
+        distributed testing workflow.
+        """
         return self._resource_prefix
-    
+
     @resource_prefix.setter
     def resource_prefix(self, new_resource_prefix: str):
         self._resource_prefix = new_resource_prefix
 
     @property
     def port_offset(self) -> int:
+        """
+        A number to be added to all default service ports (LRR and Redis) during testing.
+        This number SHOULD be between 10-20 (inclusive).
+        """
         return self._port_offset
     
     @port_offset.setter
@@ -34,7 +43,8 @@ class AbstractLRRDeploymentContext(abc.ABC):
         """
         Add an API key to the LRR environment.
 
-        If api_key is None, the API key will be removed.
+        Args:
+            `api_key`: API key to add to redis. If set to None, will remove it from the database.
         """
         ...
 
@@ -56,11 +66,11 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Main entrypoint to setting up a LRR environment.
 
         Args:
-            resource_prefix: prefix to use for resource names
-            port_offset: offset to use for port numbers
-            with_api_key: whether to add an API key (default API key: "lanraragi") to the LRR environment
-            with_nofunmode: whether to enable nofunmode in the LRR environment
-            test_connection_max_retries: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
+            `resource_prefix`: prefix to use for resource names
+            `port_offset`: offset to use for port numbers
+            `with_api_key`: whether to add an API key (default API key: "lanraragi") to the LRR environment
+            `with_nofunmode`: whether to enable nofunmode in the LRR environment
+            `test_connection_max_retries`: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
     
     @abc.abstractmethod
@@ -75,7 +85,8 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Main entrypoint to removing a LRR installation and cleaning up data.
 
         Args:
-            remove_data: whether to remove the data associated with the LRR environment
+            `remove_data`: whether to remove the data associated with the LRR environment,
+            such as logs, archives, and cache.
         """
 
     @abc.abstractmethod
@@ -93,31 +104,46 @@ class AbstractLRRDeploymentContext(abc.ABC):
     @abc.abstractmethod
     def stop_lrr(self, timeout: int=10):
         """
-        Stop the LRR server (timeout in s)
+        Stop the LRR server
+        
+        Args:
+            `timeout`: timeout in seconds.
         """
     
     @abc.abstractmethod
     def stop_redis(self, timeout: int=10):
         """
-        Stop the Redis server (timeout in s)
+        Stop the Redis server
+
+        Args:
+            `timeout`: timeout in seconds.
         """
 
     @abc.abstractmethod
     def get_lrr_logs(self, tail: int=100) -> bytes:
         """
         Get logs as bytes.
+
+        Args:
+            `tail`: max number of lines to keep from last line.
         """
 
     @abc.abstractmethod
     def get_lrr_port(self) -> int:
         """
         Get the LRR port.
+
+        This should be an available method, because the client may need it
+        during test time.
         """
 
     def test_lrr_connection(self, port: int, test_connection_max_retries: int=4):
         """
         Test the LRR connection with retry and exponential backoff.
         If connection is not established by then, teardown the deployment completely and raise an exception.
+
+        Args:
+            `test_connection_max_retries`: max number of retries before throwing a `DeploymentException`.
         """
         retry_count = 0
         while True:
