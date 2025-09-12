@@ -1,4 +1,5 @@
 import json
+import base64
 
 from lanraragi.models.base import LanraragiErrorResponse
 
@@ -18,6 +19,14 @@ def _build_err_response(content: str, status: int) -> LanraragiErrorResponse:
         response = LanraragiErrorResponse(error=err_message, status=status)
         return response
 
+def _build_auth_header(lrr_api_key: str) -> str:
+    """
+    Converts a string key to 'Bearer <base64(key)>' format.
+    """
+    bearer = base64.b64encode(lrr_api_key.encode(encoding='utf-8')).decode('utf-8')
+    return f"Bearer {bearer}"
+
 __all__ = [
+    "_build_auth_header",
     "_build_err_response"
 ]

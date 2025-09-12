@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import contextlib
 import http
 import io
@@ -17,6 +16,8 @@ from typing import (
 import aiohttp
 import aiohttp.client_exceptions
 from yarl import Query
+
+from lanraragi.clients.utils import _build_auth_header
 
 _ApiContextManagerLike = TypeVar('_ApiContextManagerLike', bound='ApiContextManager')
 class ApiContextManager(contextlib.AbstractAsyncContextManager):
@@ -46,6 +47,18 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
 
     def initialize_api_groups(self):
         return
+
+    def update_api_key(self, api_key: Optional[str]):
+        """
+        Update the API key.
+
+        If api_key is None, the API key will be removed.
+        """
+        if api_key is None:
+            if "Authorization" in self.headers:
+                del self.headers["Authorization"]
+        else:
+            self.headers["Authorization"] = _build_auth_header(api_key)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if not self.session:
@@ -104,6 +117,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         - aiohttp.client_exceptions.ClientConnectionError
         - aiohttp.client_exceptions.ClientOSError
         - aiohttp.client_exceptions.ClientConnectorError
+        - asyncio.TimeoutError: when server doesn't respond in time
         """
         self.logger.debug(f"[{request_type.name}][{url}]")
         retry_count = 0
@@ -199,13 +213,6 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
                 self.logger.warning(f"[GET][{url}] encountered connection error ({aiohttp_error}); retrying in {2 ** retry_count} seconds...")
                 await asyncio.sleep(2 ** retry_count)
                 continue
-
-def _build_auth_header(lrr_api_key: str) -> str:
-    """
-    Converts key to 'Bearer <base64(key)>' format.
-    """
-    bearer = base64.b64encode(lrr_api_key.encode(encoding='utf-8')).decode('utf-8')
-    return f"Bearer {bearer}"
 
 __all__ = [
     "ApiContextManager"

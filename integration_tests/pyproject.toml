@@ -3,7 +3,7 @@ requires = ["setuptools"]
 
 [project]
 name = "aio-lanraragi-integration-tests"
-version = "0.1.0"
+version = "0.1.7"
 description = "Integration tests for aio-lanraragi"
 requires-python = ">=3.12, <3.14"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
     "pillow",
     "pytest",
     "pytest-asyncio",
+    "redis"
 ]
 
 [project.urls]
