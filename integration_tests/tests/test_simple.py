@@ -192,12 +192,44 @@ async def get_bookmark_category_detail(client: LRRClient, semaphore: asyncio.Sem
         assert not error, f"Failed to get category (status {error.status}): {error.error}"
         return (response, error)
 
-async def upload_archive(client: LRRClient, save_path: Path, filename: str, semaphore: asyncio.Semaphore, checksum: str=None, title: str=None, tags: str=None) -> Tuple[UploadArchiveResponse, LanraragiErrorResponse]:
+async def upload_archive(
+    client: LRRClient, save_path: Path, filename: str, semaphore: asyncio.Semaphore, checksum: str=None, title: str=None, tags: str=None,
+    max_retries: int=4
+) -> Tuple[UploadArchiveResponse, LanraragiErrorResponse]:
     async with semaphore:
         with open(save_path, 'rb') as f:  # noqa: ASYNC230
             file = f.read()
             request = UploadArchiveRequest(file=file, filename=filename, title=title, tags=tags, file_checksum=checksum)
-        return await client.archive_api.upload_archive(request)
+
+        retry_count = 0
+        while True:
+            try:
+                response, error = await client.archive_api.upload_archive(request)
+                if response:
+                    return response, error
+                if error.status == 423: # locked resource
+                    if retry_count >= max_retries:
+                        return None, error
+                    tts = 2 ** retry_count
+                    logger.warning(f"Locked resource when uploading {filename}. Retrying in {tts}s ({retry_count+1}/{max_retries})...")
+                    await asyncio.sleep(tts)
+                    retry_count += 1
+                    continue
+            except asyncio.TimeoutError as timeout_error:
+                # if LRR handles files synchronously then our concurrent uploads may put too much pressure.
+                # employ retry with exponential backoff here as well. This is not considered a server-side
+                # problem.
+                if retry_count >= max_retries:
+                    error = LanraragiErrorResponse(error=str(timeout_error), status=408)
+                    return None, error
+                tts = 2 ** retry_count
+                logger.warning(f"Encountered timeout exception while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})...")
+                await asyncio.sleep(tts)
+                retry_count += 1
+                continue
+            except Exception as exception:
+                logger.error("Unhandled exception occurred while uploading archive!", exception)
+                raise exception
 
 async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[DeleteArchiveResponse, LanraragiErrorResponse]:
     retry_count = 0
