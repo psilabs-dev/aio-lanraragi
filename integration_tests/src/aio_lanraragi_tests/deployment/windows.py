@@ -1,5 +1,6 @@
 import io
 import logging
+import os
 from pathlib import Path
 import redis
 import shutil
@@ -21,10 +22,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     """
 
     def __init__(
-        self, runfile: str,
+        self, runfile_parent: str,
         logger: Optional[logging.Logger]=None
     ):
-        self.runfile = Path(runfile)
+        self.runfile_parent = Path(runfile_parent)
         if logger is None:
             logger = LOGGER
         self.logger = logger
@@ -73,9 +74,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         lrr_port = self.get_lrr_port()
         redis_port = self._get_redis_port()
 
-        runfile = self.runfile.absolute()
-        if not runfile.exists():
-            raise FileNotFoundError(f"Runfile {runfile} not found.")
+        runfile_parent = self.runfile_parent.absolute()
+        if not runfile_parent.exists():
+            raise FileNotFoundError(f"Runfile {runfile_parent} not found.")
 
         self.get_logger().info("Checking if ports are available.")
         if not is_port_available(lrr_port):
@@ -90,27 +91,19 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self._get_contents_path().mkdir(parents=True, exist_ok=True)
         self._get_thumb_path().mkdir(parents=True, exist_ok=True)
 
-        self._execute_lrr_runfile()
-        
-        # post LRR startup
-        self.get_logger().info("Setup script execution complete; testing connection to LRR server.")
-        self.test_lrr_connection(lrr_port, test_connection_max_retries)
-
-        # connect to redis
-        self._test_redis_connection()
-        restart_required = False
+        # self._execute_lrr_runfile()
+        self.start_redis()
+        # self._test_redis_connection()
         if with_api_key:
             self.get_logger().info("Adding API key to Redis...")
             self.update_api_key(DEFAULT_API_KEY)
-            restart_required = True
         if with_nofunmode:
             self.get_logger().info("Enabling NoFun mode...")
             self.enable_nofun_mode()
-            restart_required = True
 
-        if restart_required:
-            self._restart_deployment(test_connection_max_retries)
-
+        # post LRR startup; if we start redis and LRR independently, 
+        # then there's no need to restart the server.
+        self.start_lrr()
         self.get_logger().debug("Collecting PID info...")
         self.redis_pid = self._get_redis_pid()
         self.lrr_pid = self._get_lrr_pid()
@@ -132,15 +125,96 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def restart(self):
-        self._restart_deployment()
+        self.get_logger().info("Restart require detected; restarting LRR and Redis...")
+        self.stop_lrr()
+        self.stop_redis()
+        self.start_redis()
+        self.start_lrr()
+        self.get_logger().info("Restart complete.")
 
     @override
     def start_lrr(self):
-        raise NotImplementedError
+        """
+        Executes the LRR portion of tools/build/windows/run.ps1.
+        """
+        cwd = os.getcwd()
+
+        try:
+            parent = self.runfile_parent.absolute()
+            if not parent.exists():
+                raise DeploymentException(f"Expected runfile parent {parent} to exist.")
+            os.chdir(parent)
+
+            if not self._get_logs_dir().exists():
+                self.get_logger().info(f"Logs directory {self._get_logs_dir()} does not exist; making...")
+                self._get_logs_dir().mkdir(parents=True, exist_ok=False)
+            if not self._get_lrr_temp_directory().exists():
+                self.get_logger().info(f"Temp directory {self._get_lrr_temp_directory()} does not exist; making...")
+                self._get_lrr_temp_directory().mkdir(parents=True, exist_ok=False)
+
+            current_path = os.environ.get("PATH", "")
+            runtime_bin = parent / "runtime" / "bin"
+            new_path = str(runtime_bin) + os.pathsep + str(current_path)
+
+            lrr_env = os.environ.copy()
+            lrr_env["PATH"] = new_path
+            lrr_env["LRR_NETWORK"] = self._get_lrr_network()
+            lrr_env["LRR_DATA_DIRECTORY"] = str(self._get_contents_path())
+            lrr_env["LRR_LOG_DIRECTORY"] = str(self._get_logs_dir())
+            lrr_env["LRR_TEMP_DIRECTORY"] = str(self._get_lrr_temp_directory())
+            lrr_env["LRR_THUMB_DIRECTORY"] = str(self._get_thumb_path())
+
+            script = [
+                "perl",
+                "script/launcher.pl",
+                "-d", str(Path("script") / "lanraragi")
+            ]
+            lrr_process = subprocess.Popen(script, env=lrr_env)
+            self.get_logger().info(f"Started LRR server with PID: {lrr_process.pid}")
+
+            # confirm it has started.
+            self.test_lrr_connection(self.get_lrr_port())
+        finally:
+            os.chdir(cwd)
 
     @override
     def start_redis(self):
-        raise NotImplementedError
+        """
+        Executes the Redis portion of tools/build/windows/run.ps1.
+        """
+        cwd = os.getcwd()
+
+        try:
+            parent = self.runfile_parent.absolute()
+            if not parent.exists():
+                raise DeploymentException(f"Expected runfile parent {parent} to exist.")
+            os.chdir(parent)
+
+            if not self._get_logs_dir().exists():
+                self.get_logger().info(f"Logs directory {self._get_logs_dir()} does not exist; making...")
+                self._get_logs_dir().mkdir(parents=True, exist_ok=False)
+
+            current_path = os.environ.get("PATH", "")
+            runtime_bin = parent / "runtime" / "redis"
+            new_path = str(runtime_bin) + os.pathsep + str(current_path)
+
+            redis_env = os.environ.copy()
+            redis_env["PATH"] = new_path
+
+            script = [
+                "redis-server",
+                "./runtime/redis/redis.conf",
+                "--pidfile", str(self._get_lrr_temp_directory() / "redis.pid"), # maybe we don't need this...?
+                "--dir", str(self._get_contents_path()),
+                "--logfile", str(self._get_redis_logs_path())
+            ]
+            redis_process = subprocess.Popen(script, env=redis_env)
+            self.get_logger().info(f"Started redis server with PID: {redis_process.pid}")
+
+            # confirm it has started.
+            self._test_redis_connection()
+        finally:
+            os.chdir(cwd)
 
     @override
     def stop_lrr(self, timeout: int = 60):
@@ -236,14 +310,20 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def _get_contents_path(self) -> Path:
         return Path(self._get_contents_path_str()).absolute()
     
+    def _get_lrr_temp_directory(self) -> Path:
+        return Path(self._get_contents_path()) / "temp"
+
     def _get_thumb_path(self) -> Path:
         return self._get_contents_path() / "thumb"
     
-    def _get_logs_path(self) -> Path:
+    def _get_logs_dir(self) -> Path:
         return self._get_contents_path() / "log"
-    
+
     def _get_lrr_logs_path(self) -> Path:
-        return self._get_logs_path() / "lanraragi.log"
+        return self._get_logs_dir() / "lanraragi.log"
+    
+    def _get_redis_logs_path(self) -> Path:
+        return self._get_logs_dir() / "redis.log"
 
     @override
     def get_lrr_port(self) -> int:
@@ -255,63 +335,63 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def _get_lrr_network(self) -> str:
         return f"http://127.0.0.1:{self.get_lrr_port()}"
 
-    def _execute_lrr_runfile(self):
-        runfile = self.runfile.absolute()
-        if not runfile.exists():
-            raise FileNotFoundError(f"Runfile {runfile} not found.")
+    # def _execute_lrr_runfile(self):
+    #     runfile = self.runfile.absolute()
+    #     if not runfile.exists():
+    #         raise FileNotFoundError(f"Runfile {runfile} not found.")
 
-        self.get_logger().debug("Building script.")
-        script = [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy", "Bypass",
-            "-File", str(runfile),
-            "-Data", str(self._get_contents_path()),
-            "-Thumb", str(self._get_thumb_path()),
-            "-Network", self._get_lrr_network(),
-            "-Database", str(self._get_contents_path()),
-            "-RedisPort", str(self._get_redis_port())
-        ]
-        script_s = subprocess.list2cmdline(script)
-        self.get_logger().info(f"Preparing to run script: {script_s}")
+    #     self.get_logger().debug("Building script.")
+    #     script = [
+    #         "powershell.exe",
+    #         "-NoProfile",
+    #         "-ExecutionPolicy", "Bypass",
+    #         "-File", str(runfile),
+    #         "-Data", str(self._get_contents_path()),
+    #         "-Thumb", str(self._get_thumb_path()),
+    #         "-Network", self._get_lrr_network(),
+    #         "-Database", str(self._get_contents_path()),
+    #         "-RedisPort", str(self._get_redis_port())
+    #     ]
+    #     script_s = subprocess.list2cmdline(script)
+    #     self.get_logger().info(f"Preparing to run script: {script_s}")
 
-        process = subprocess.Popen(
-            script,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            encoding="utf-8",
-            cwd=str(self.runfile.parent)
-        )
+    #     process = subprocess.Popen(
+    #         script,
+    #         stdout=subprocess.PIPE,
+    #         stderr=subprocess.STDOUT,
+    #         text=True,
+    #         bufsize=1,
+    #         encoding="utf-8",
+    #         cwd=str(self.runfile_parent.parent)
+    #     )
 
-        captured_lines = []
-        def log_stream(stream: io.TextIOWrapper):
-            for line in iter(stream.readline, ''):
-                line = line.rstrip("\r\n")
-                if line:
-                    captured_lines.append(line)
-                    self.get_logger().info(line)
-            stream.close()
-        t = threading.Thread(target=log_stream, args=(process.stdout,), daemon=True)
-        t.start()
+    #     captured_lines = []
+    #     def log_stream(stream: io.TextIOWrapper):
+    #         for line in iter(stream.readline, ''):
+    #             line = line.rstrip("\r\n")
+    #             if line:
+    #                 captured_lines.append(line)
+    #                 self.get_logger().info(line)
+    #         stream.close()
+    #     t = threading.Thread(target=log_stream, args=(process.stdout,), daemon=True)
+    #     t.start()
 
-        try:
-            exit_code = process.wait()
-        except KeyboardInterrupt:
-            process.kill()
-            process.wait()
-            raise
-        finally:
-            t.join()
+    #     try:
+    #         exit_code = process.wait()
+    #     except KeyboardInterrupt:
+    #         process.kill()
+    #         process.wait()
+    #         raise
+    #     finally:
+    #         t.join()
         
-        if exit_code != 0:
-            output = "\n".join(captured_lines[-200:])
-            raise subprocess.CalledProcessError(
-                returncode=exit_code,
-                cmd=script,
-                output=output
-            )
+    #     if exit_code != 0:
+    #         output = "\n".join(captured_lines[-200:])
+    #         raise subprocess.CalledProcessError(
+    #             returncode=exit_code,
+    #             cmd=script,
+    #             output=output
+    #         )
 
     def _is_running(self, pid: int) -> bool:
         """
@@ -341,16 +421,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.redis.ping()
         self.get_logger().info("Redis connection established.")
 
-    def _restart_deployment(self, test_connection_max_retries: int=4):
-        self.get_logger().info("Restart require detected; restarting LRR and Redis...")
-        self.stop_lrr()
-        self.stop_redis()
-        self._execute_lrr_runfile()
-        self.get_logger().debug("Testing connection to LRR server.")
-        self.test_lrr_connection(self.get_lrr_port(), test_connection_max_retries)
-        self._test_redis_connection()
-        self.get_logger().info("Restart complete.")
-
     def _get_port_owner_pid(self, port: int) -> Optional[int]:
         cmd = f"Get-NetTCPConnection -LocalPort {port} | Select-Object -First 1 -ExpandProperty OwningProcess"
         result = subprocess.run(
@@ -364,7 +434,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Kill perl.exe processes started from the win-dist runtime path for this runfile directory.
         """
-        perl_path = str((self.runfile.parent / "runtime" / "bin" / "perl.exe").absolute())
+        perl_path = str((self.runfile_parent / "runtime" / "bin" / "perl.exe").absolute())
         ps = (
             "Get-CimInstance Win32_Process -Filter \"Name = 'perl.exe'\" | "
             f"Where-Object {{ $_.ExecutablePath -ieq '{perl_path}' }} | "

@@ -42,9 +42,9 @@ def environment(request: pytest.FixtureRequest):
     # check operating system.
     match sys.platform:
         case 'win32':
-            runfile_path: str = request.config.getoption("--windows-runfile")
+            runfile_parent: str = request.config.getoption("--windows-runfile-parent")
             environment = WindowsLRRDeploymentContext(
-                runfile_path,
+                runfile_parent,
             )
 
         case 'darwin' | 'linux':

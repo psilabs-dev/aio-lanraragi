@@ -100,9 +100,9 @@ def session_setup_teardown(request: pytest.FixtureRequest, port_offset: int):
     # check operating system.
     match sys.platform:
         case 'win32':
-            runfile_path: str = request.config.getoption("--windows-runfile")
+            runfile_parent: str = request.config.getoption("--windows-runfile-parent")
             environment = WindowsLRRDeploymentContext(
-                runfile_path,
+                runfile_parent,
             )
 
         case 'darwin' | 'linux':
