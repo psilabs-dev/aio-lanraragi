@@ -1,4 +1,3 @@
-import io
 import logging
 import os
 from pathlib import Path
@@ -6,7 +5,6 @@ import redis
 import redis.exceptions
 import shutil
 import subprocess
-import threading
 import time
 from typing import Optional, override
 
