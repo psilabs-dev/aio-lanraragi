@@ -152,17 +152,13 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.get_logger().info(f"Temp directory {self._get_lrr_temp_directory()} does not exist; making...")
                 self._get_lrr_temp_directory().mkdir(parents=True, exist_ok=False)
 
-            current_path = os.environ.get("Path", "")
-            runtime_bin = windist_path / "runtime" / "bin"
-            new_path = str(runtime_bin) + os.pathsep + str(current_path)
-
+            perl_path = str(windist_path / "runtime" / "bin" / "perl.exe")
             lrr_network = self._get_lrr_network()
             lrr_data_directory = self._get_contents_path()
             lrr_log_directory = self._get_logs_dir()
             lrr_temp_directory = self._get_lrr_temp_directory()
             lrr_thumb_directory = self._get_thumb_path()
             lrr_env = os.environ.copy()
-            lrr_env["Path"] = new_path
             lrr_env["LRR_NETWORK"] = lrr_network
             lrr_env["LRR_DATA_DIRECTORY"] = str(lrr_data_directory)
             lrr_env["LRR_LOG_DIRECTORY"] = str(lrr_log_directory)
@@ -170,12 +166,12 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             lrr_env["LRR_THUMB_DIRECTORY"] = str(lrr_thumb_directory)
 
             script = [
-                "perl", str(Path("script") / "launcher.pl"),
+                perl_path, str(Path("script") / "launcher.pl"),
                 "-d", str(Path("script") / "lanraragi")
             ]
             self.get_logger().info(f"(lrr_network={lrr_network}, lrr_data_directory={lrr_data_directory}, lrr_log_directory={lrr_log_directory}, lrr_temp_directory={lrr_temp_directory}, lrr_thumb_directory={lrr_thumb_directory}) running script {subprocess.list2cmdline(script)}")
             lrr_process = subprocess.Popen(script, env=lrr_env)
-            self.get_logger().info(f"Started LRR process with PID {lrr_process}.")
+            self.get_logger().info(f"Started LRR process with PID {lrr_process.pid}.")
             # confirm it has started.
             self.test_lrr_connection(self.get_lrr_port())
         finally:
@@ -198,25 +194,18 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.get_logger().info(f"Logs directory {self._get_logs_dir()} does not exist; making...")
                 self._get_logs_dir().mkdir(parents=True, exist_ok=False)
 
-            current_path = os.environ.get("Path", "")
-            redis_bin = windist_path / "runtime" / "redis"
-            runtime_bin = windist_path / "runtime" / "bin"
-            new_path = str(redis_bin) + os.pathsep + str(runtime_bin) + os.pathsep + str(current_path)
-
-            redis_env = os.environ.copy()
-            redis_env["Path"] = new_path
-
+            redis_server_path = str(windist_path / "runtime" / "redis" / "redis-server.exe")
             pid_filepath = self._get_logs_dir() / "redis.pid"
             redis_dir = self._get_contents_path()
             redis_logfile_path = self._get_redis_logs_path()
             script = [
-                "redis-server", str(Path("runtime") / "redis" / "redis.conf"),
+                redis_server_path, str(Path("runtime") / "redis" / "redis.conf"),
                 "--pidfile", str(pid_filepath), # maybe we don't need this...?
                 "--dir", str(redis_dir),
                 "--logfile", str(redis_logfile_path)
             ]
             self.get_logger().info(f"(redis_dir={redis_dir}, redis_logfile_path={redis_logfile_path}) running script {subprocess.list2cmdline(script)}")
-            redis_process = subprocess.Popen(script, env=redis_env)
+            redis_process = subprocess.Popen(script)
             self.get_logger().info(f"Started redis service with PID {redis_process.pid}.")
             # confirm it has started.
             self._test_redis_connection()
