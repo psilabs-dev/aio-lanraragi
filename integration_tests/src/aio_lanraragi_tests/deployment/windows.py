@@ -152,7 +152,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.get_logger().info(f"Temp directory {self._get_lrr_temp_directory()} does not exist; making...")
                 self._get_lrr_temp_directory().mkdir(parents=True, exist_ok=False)
 
-            current_path = os.environ.get("PATH", "")
+            current_path = os.environ.get("Path", "")
             runtime_bin = windist_path / "runtime" / "bin"
             new_path = str(runtime_bin) + os.pathsep + str(current_path)
 
@@ -162,7 +162,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             lrr_temp_directory = self._get_lrr_temp_directory()
             lrr_thumb_directory = self._get_thumb_path()
             lrr_env = os.environ.copy()
-            lrr_env["PATH"] = new_path
+            lrr_env["Path"] = new_path
             lrr_env["LRR_NETWORK"] = lrr_network
             lrr_env["LRR_DATA_DIRECTORY"] = str(lrr_data_directory)
             lrr_env["LRR_LOG_DIRECTORY"] = str(lrr_log_directory)
@@ -198,13 +198,13 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.get_logger().info(f"Logs directory {self._get_logs_dir()} does not exist; making...")
                 self._get_logs_dir().mkdir(parents=True, exist_ok=False)
 
-            current_path = os.environ.get("PATH", "")
+            current_path = os.environ.get("Path", "")
             redis_bin = windist_path / "runtime" / "redis"
             runtime_bin = windist_path / "runtime" / "bin"
             new_path = str(redis_bin) + os.pathsep + str(runtime_bin) + os.pathsep + str(current_path)
 
             redis_env = os.environ.copy()
-            redis_env["PATH"] = new_path
+            redis_env["Path"] = new_path
 
             pid_filepath = self._get_logs_dir() / "redis.pid"
             redis_dir = self._get_contents_path()
