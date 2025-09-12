@@ -304,7 +304,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self._get_lrr_logs_path().exists():
             with open(self._get_lrr_logs_path(), 'rb') as rb:
                 lines = rb.readlines()
-                return b''.join(lines[-tail:])
+                # Normalize Windows CRLF line endings to LF to avoid extra spacing
+                normalized_lines = [line.replace(b'\r\n', b'\n') for line in lines]
+                return b''.join(normalized_lines[-tail:])
         return b"No LRR logs available."
 
     def _get_contents_path_str(self) -> str:
