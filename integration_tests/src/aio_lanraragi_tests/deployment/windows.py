@@ -57,9 +57,19 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.redis.hset("LRR_CONFIG", "nofunmode", "0")
 
     @override
+    def enable_lrr_debug_mode(self):
+        self.redis.select(2)
+        self.redis.hset("LRR_CONFIG", "enable_devmode", "1")
+
+    @override
+    def disable_lrr_debug_mode(self):
+        self.redis.select(2)
+        self.redis.hset("LRR_CONFIG", "enable_devmode", "0")
+
+    @override
     def setup(
         self, resource_prefix: str, port_offset: int,
-        with_api_key: bool=False, with_nofunmode: bool=False,
+        with_api_key: bool=False, with_nofunmode: bool=False, lrr_debug_mode: bool=False,
         test_connection_max_retries: int=4
     ):
         """
@@ -102,6 +112,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         if with_nofunmode:
             self.get_logger().info("Enabling NoFun mode...")
             self.enable_nofun_mode()
+        if lrr_debug_mode:
+            self.get_logger().info("Enabling debug mode in LRR...")
+            self.enable_lrr_debug_mode()
 
         # post LRR startup; if we start redis and LRR independently, 
         # then there's no need to restart the server.

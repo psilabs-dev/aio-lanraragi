@@ -71,9 +71,16 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def disable_nofun_mode(self):
         return self.redis_container.exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG nofunmode 0\nEOF'])
 
+    @override
+    def enable_lrr_debug_mode(self):
+        return self.redis_container.exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG enable_devmode 1\nEOF'])
+    
+    @override
+    def disable_lrr_debug_mode(self):
+        return self.redis_container.exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG enable_devmode 0\nEOF'])
+
     # by default LRR contents directory is owned by root.
     # to make it writable by the koyomi user, we need to change the ownership.
-    @override
     def allow_uploads(self):
         return self.lrr_container.exec_run(["sh", "-c", 'chown -R koyomi: content'])
 
@@ -130,7 +137,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def setup(
         self, resource_prefix: str, port_offset: int,
-        with_api_key: bool=False, with_nofunmode: bool=False, 
+        with_api_key: bool=False, with_nofunmode: bool=False, lrr_debug_mode: bool=False,
         test_connection_max_retries: int=4
     ):
         """
@@ -251,6 +258,12 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if resp.exit_code != 0:
                 self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to enable nofunmode: {resp}")
+
+        if lrr_debug_mode:
+            resp = self.enable_lrr_debug_mode()
+            if resp.exit_code  != 0:
+                self._reset_docker_test_env(remove_data=True)
+                raise DeploymentException(f"Failed to enable debug mode for LRR: {resp}")
 
         # start lrr
         self.start_lrr()
