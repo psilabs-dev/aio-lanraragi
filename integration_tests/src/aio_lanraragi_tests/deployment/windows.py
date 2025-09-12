@@ -1,4 +1,7 @@
-import io
+"""
+Python module for setting up and tearing down Windows environments for LANraragi.
+"""
+
 import logging
 import os
 from pathlib import Path
@@ -6,7 +9,6 @@ import redis
 import redis.exceptions
 import shutil
 import subprocess
-import threading
 import time
 from typing import Optional, override
 
@@ -23,10 +25,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     """
 
     def __init__(
-        self, win_dist_path: str,
+        self, windist_path: str,
         logger: Optional[logging.Logger]=None
     ):
-        self.windist_path = Path(win_dist_path)
+        self.windist_path = Path(windist_path)
         if logger is None:
             logger = LOGGER
         self.logger = logger
@@ -119,10 +121,17 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.stop_lrr()
         self.stop_redis()
         contents_path = self._get_contents_path()
-
+        windist_logs_path = self.windist_path / "log"
+        windist_temp_path = self._get_lrr_temp_directory()
         if contents_path.exists() and remove_data:
             self.get_logger().info(f"Removing content path: {contents_path}")
             shutil.rmtree(contents_path)
+        if windist_logs_path.exists() and remove_data:
+            self.get_logger().info(f"Removing windist logs path: {windist_logs_path}")
+            shutil.rmtree(windist_logs_path)
+        if windist_temp_path.exists() and remove_data:
+            self.get_logger().info(f"Removing windist temp path: {windist_temp_path}")
+            shutil.rmtree(windist_temp_path)
 
     @override
     def restart(self):
@@ -142,16 +151,20 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         try:
             windist_path = self.windist_path.absolute()
+            logs_dir = self._get_logs_dir()
+            temp_dir = self._get_lrr_temp_directory()
+            thumb_dir = self._get_thumb_path()
+            redis_port = self._get_redis_port()
             if not windist_path.exists():
                 raise DeploymentException(f"Expected windist {windist_path} to exist.")
             os.chdir(windist_path)
 
-            if not self._get_logs_dir().exists():
-                self.get_logger().info(f"Logs directory {self._get_logs_dir()} does not exist; making...")
-                self._get_logs_dir().mkdir(parents=True, exist_ok=False)
-            if not self._get_lrr_temp_directory().exists():
-                self.get_logger().info(f"Temp directory {self._get_lrr_temp_directory()} does not exist; making...")
-                self._get_lrr_temp_directory().mkdir(parents=True, exist_ok=False)
+            if not logs_dir.exists():
+                self.get_logger().info(f"Logs directory {logs_dir} does not exist; making...")
+                logs_dir.mkdir(parents=True, exist_ok=False)
+            if not temp_dir.exists():
+                self.get_logger().info(f"Temp directory {temp_dir} does not exist; making...")
+                temp_dir.mkdir(parents=True, exist_ok=False)
 
             lrr_env = os.environ.copy()
             perl_path = str(windist_path / "runtime" / "bin" / "perl.exe")
@@ -160,15 +173,15 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             runtime_redis = str(windist_path / "runtime" / "redis")
             lrr_network = self._get_lrr_network()
             lrr_data_directory = self._get_contents_path()
-            lrr_log_directory = self._get_logs_dir()
-            lrr_temp_directory = self._get_lrr_temp_directory()
-            lrr_thumb_directory = self._get_thumb_path()
+            lrr_log_directory = logs_dir
+            lrr_temp_directory = temp_dir
+            lrr_thumb_directory = thumb_dir
             lrr_env["LRR_NETWORK"] = lrr_network
             lrr_env["LRR_DATA_DIRECTORY"] = str(lrr_data_directory)
             lrr_env["LRR_LOG_DIRECTORY"] = str(lrr_log_directory)
             lrr_env["LRR_TEMP_DIRECTORY"] = str(lrr_temp_directory)
             lrr_env["LRR_THUMB_DIRECTORY"] = str(lrr_thumb_directory)
-            lrr_env["LRR_REDIS_ADDRESS"] = f"127.0.0.1:{self._get_redis_port()}"
+            lrr_env["LRR_REDIS_ADDRESS"] = f"127.0.0.1:{redis_port}"
             lrr_env["Path"] = runtime_bin + os.pathsep + runtime_redis + os.pathsep + path_var if path_var else runtime_bin + os.pathsep + runtime_redis
 
             script = [
@@ -192,16 +205,21 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         try:
             windist_path = self.windist_path.absolute()
+            temp_path =  self._get_lrr_temp_directory()
+            logs_dir =  self._get_logs_dir()
             if not windist_path.exists():
                 raise DeploymentException(f"Expected windist {windist_path} to exist.")
             os.chdir(windist_path)
 
-            if not self._get_logs_dir().exists():
-                self.get_logger().info(f"Logs directory {self._get_logs_dir()} does not exist; making...")
-                self._get_logs_dir().mkdir(parents=True, exist_ok=False)
+            if not logs_dir.exists():
+                self.get_logger().info(f"Logs directory {logs_dir} does not exist; making...")
+                logs_dir.mkdir(parents=True, exist_ok=False)
+            if not temp_path.exists():
+                self.get_logger().info(f"Temp directory {temp_path} does not exist; making...")
+                temp_path.mkdir(parents=True, exist_ok=False)
 
             redis_server_path = str(windist_path / "runtime" / "redis" / "redis-server.exe")
-            pid_filepath = self._get_logs_dir() / "redis.pid"
+            pid_filepath = str(temp_path / "redis.pid")
             redis_dir = self._get_contents_path()
             redis_logfile_path = self._get_redis_logs_path()
             script = [
@@ -316,15 +334,15 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         # TODO: we (probably) need an absolute path here but maybe there's a better way
         windist_path = self.windist_path.absolute()
         return (windist_path / self._get_contents_path_str()).absolute()
-    
+
     def _get_lrr_temp_directory(self) -> Path:
-        return Path(self._get_contents_path()) / "temp"
+        return self.windist_path / "temp"
 
     def _get_thumb_path(self) -> Path:
         return self._get_contents_path() / "thumb"
     
     def _get_logs_dir(self) -> Path:
-        return self._get_contents_path() / "log"
+        return self.windist_path / "log"
 
     def _get_lrr_logs_path(self) -> Path:
         return self._get_logs_dir() / "lanraragi.log"
