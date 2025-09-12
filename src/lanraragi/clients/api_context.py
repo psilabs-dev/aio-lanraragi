@@ -117,6 +117,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         - aiohttp.client_exceptions.ClientConnectionError
         - aiohttp.client_exceptions.ClientOSError
         - aiohttp.client_exceptions.ClientConnectorError
+        - asyncio.TimeoutError: when server doesn't respond in time
         """
         self.logger.debug(f"[{request_type.name}][{url}]")
         retry_count = 0
