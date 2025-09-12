@@ -165,6 +165,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             lrr_env["LRR_LOG_DIRECTORY"] = str(lrr_log_directory)
             lrr_env["LRR_TEMP_DIRECTORY"] = str(lrr_temp_directory)
             lrr_env["LRR_THUMB_DIRECTORY"] = str(lrr_thumb_directory)
+            lrr_env["LRR_REDIS_ADDRESS"] = f"127.0.0.1:{self._get_redis_port()}"
 
             script = [
                 perl_path, str(Path("script") / "launcher.pl"),
@@ -203,7 +204,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 redis_server_path, str(Path("runtime") / "redis" / "redis.conf"),
                 "--pidfile", str(pid_filepath), # maybe we don't need this...?
                 "--dir", str(redis_dir),
-                "--logfile", str(redis_logfile_path)
+                "--logfile", str(redis_logfile_path),
+                "--port", str(self._get_redis_port()),
             ]
             self.get_logger().info(f"(redis_dir={redis_dir}, redis_logfile_path={redis_logfile_path}) running script {subprocess.list2cmdline(script)}")
             redis_process = subprocess.Popen(script)
