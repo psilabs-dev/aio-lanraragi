@@ -147,6 +147,10 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.resource_prefix = resource_prefix
         self.port_offset = port_offset
 
+        # log the setup resource allocations for user to see
+        # the docker image is not included, haven't decided how to classify it yet.
+        self.get_logger().info(f"Deploying Docker LRR with the following resources: LRR container {self._get_lrr_container_name()}, Redis container {self._get_redis_container_name()}, LRR contents volume {self._get_lrr_contents_volume_name()}, LRR thumb volume {self._get_lrr_thumb_volume_name()}, redis volume {self._get_redis_volume_name()}, network {self._get_network_name()}")
+
         # prepare images
         if self.build_path:
             self.get_logger().info(f"Building LRR image {self._get_image_name_from_global_run_id()} from build path {self.build_path}.")

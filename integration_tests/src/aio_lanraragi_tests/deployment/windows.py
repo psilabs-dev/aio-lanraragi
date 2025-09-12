@@ -76,6 +76,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         windist_path = self.windist_path.absolute()
         if not windist_path.exists():
             raise FileNotFoundError(f"win-dist path {windist_path} not found.")
+        
+        # log the setup resource allocations for user to see
+        self.get_logger().info(f"Deploying Windows LRR with the following resources: LRR port {lrr_port}, Redis port {redis_port}, content path {self._get_contents_path()}.")
 
         self.get_logger().info("Checking if ports are available.")
         if not is_port_available(lrr_port):
