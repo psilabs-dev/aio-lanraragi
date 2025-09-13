@@ -103,7 +103,7 @@ def session_setup_teardown(request: pytest.FixtureRequest, port_offset: int):
         case 'win32':
             windist: str = request.config.getoption("--windist")
             environment = WindowsLRRDeploymentContext(
-                windist,
+                windist, "test_", 10,
             )
 
         case 'darwin' | 'linux':
@@ -119,11 +119,11 @@ def session_setup_teardown(request: pytest.FixtureRequest, port_offset: int):
             docker_client = docker.from_env()
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
             environment = DockerLRRDeploymentContext(
-                build_path, image, git_url, git_branch, docker_client, docker_api=docker_api,
+                build_path, image, git_url, git_branch, docker_client, "test_", 10, docker_api=docker_api,
                 global_run_id=global_run_id, is_allow_uploads=True
             )
 
-    environment.setup("test_", port_offset, with_api_key=True, with_nofunmode=True, lrr_debug_mode=is_lrr_debug_mode)
+    environment.setup(with_api_key=True, with_nofunmode=True, lrr_debug_mode=is_lrr_debug_mode)
     request.session.lrr_environment = environment # Store environment in pytest session for access in hooks
     yield
     environment.teardown(remove_data=True)

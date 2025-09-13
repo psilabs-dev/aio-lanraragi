@@ -21,9 +21,12 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     """
 
     def __init__(
-        self, win_dist_path: str,
+        self, win_dist_path: str, resource_prefix: str, port_offset: int,
         logger: Optional[logging.Logger]=None
     ):
+        self.resource_prefix = resource_prefix
+        self.port_offset = port_offset
+
         self.windist_path = Path(win_dist_path)
         if logger is None:
             logger = LOGGER
@@ -68,8 +71,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def setup(
-        self, resource_prefix: str, port_offset: int,
-        with_api_key: bool=False, with_nofunmode: bool=False, lrr_debug_mode: bool=False,
+        self, with_api_key: bool=False, with_nofunmode: bool=False, lrr_debug_mode: bool=False,
         test_connection_max_retries: int=4
     ):
         """
@@ -78,8 +80,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         Teardowns do not necessarily guarantee port availability. Windows may
         keep a port non-bindable for a short period of time even with no visible owning process.
         """
-        self.resource_prefix = resource_prefix
-        self.port_offset = port_offset
         lrr_port = self.get_lrr_port()
         redis_port = self._get_redis_port()
 

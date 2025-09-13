@@ -66,16 +66,13 @@ class AbstractLRRDeploymentContext(abc.ABC):
 
     @abc.abstractmethod
     def setup(
-        self, resource_prefix: str, port_offset: int,
-        with_api_key: bool=False, with_nofunmode: bool=False, lrr_debug_mode: bool=False,
+        self, with_api_key: bool=False, with_nofunmode: bool=False, lrr_debug_mode: bool=False,
         test_connection_max_retries: int=4
     ):
         """
         Main entrypoint to setting up a LRR environment.
 
         Args:
-            `resource_prefix`: prefix to use for resource names
-            `port_offset`: offset to use for port numbers
             `with_api_key`: whether to add an API key (default API key: "lanraragi") to the LRR environment
             `with_nofunmode`: whether to enable nofunmode in the LRR environment
             `lrr_debug_mode`: whether to enable debug mode for the LRR application

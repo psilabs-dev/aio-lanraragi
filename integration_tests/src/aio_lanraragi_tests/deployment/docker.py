@@ -34,9 +34,13 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     
     def __init__(
             self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient,
+            resource_prefix: str, port_offset: int,
             docker_api: docker.APIClient=None, logger: Optional[logging.Logger]=None,
             global_run_id: int=None, is_allow_uploads: bool=True,
     ):
+
+        self.resource_prefix = resource_prefix
+        self.port_offset = port_offset
 
         self.build_path = build
         self.image = image
@@ -136,8 +140,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def setup(
-        self, resource_prefix: str, port_offset: int,
-        with_api_key: bool=False, with_nofunmode: bool=False, lrr_debug_mode: bool=False,
+        self, with_api_key: bool=False, with_nofunmode: bool=False, lrr_debug_mode: bool=False,
         test_connection_max_retries: int=4
     ):
         """
@@ -150,10 +153,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             port_offset: offset to use for port numbers
             test_connection_max_retries: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
-
-        self.resource_prefix = resource_prefix
-        self.port_offset = port_offset
-
         # log the setup resource allocations for user to see
         # the docker image is not included, haven't decided how to classify it yet.
         self.get_logger().info(f"Deploying Docker LRR with the following resources: LRR container {self._get_lrr_container_name()}, Redis container {self._get_redis_container_name()}, LRR contents volume {self._get_lrr_contents_volume_name()}, LRR thumb volume {self._get_lrr_thumb_volume_name()}, redis volume {self._get_redis_volume_name()}, network {self._get_network_name()}")
