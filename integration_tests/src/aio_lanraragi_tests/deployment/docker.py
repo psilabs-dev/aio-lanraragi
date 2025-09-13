@@ -218,7 +218,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if not self.redis_volume:
             raise DeploymentException(f"Missing Redis volume: {self._get_redis_volume_name()}")
 
-        self.stop_lrr()
+        self.stop_lrr(timeout=1)
+        self.stop_redis(timeout=1)
+        self.start_redis()
         self.start_lrr()
         self.get_logger().debug("Testing connection to LRR server.")
         self.test_lrr_connection(self.get_lrr_port())
@@ -287,14 +289,15 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.get_logger().info(f"Deploying Docker LRR with the following resources: LRR container {self._get_lrr_container_name()}, Redis container {self._get_redis_container_name()}, LRR contents volume {self._get_lrr_contents_volume_name()}, LRR thumb volume {self._get_lrr_thumb_volume_name()}, redis volume {self._get_redis_volume_name()}, network {self._get_network_name()}")
 
         # >>>>> IMAGE PREPARATION >>>>>
+        image_id = self._get_image_name_from_global_run_id()
         if self.build_path:
-            self.get_logger().info(f"Building LRR image {self._get_image_name_from_global_run_id()} from build path {self.build_path}.")
+            self.get_logger().info(f"Building LRR image {image_id} from build path {self.build_path}.")
             self._build_docker_image(self.build_path, force=False)
         elif self.git_url:
-            self.get_logger().info(f"Building LRR image {self._get_image_name_from_global_run_id()} from git URL {self.git_url}.")
+            self.get_logger().info(f"Building LRR image {image_id} from git URL {self.git_url}.")
             try:
-                self.docker_client.images.get(self._get_image_name_from_global_run_id())
-                self.get_logger().info(f"Image {self._get_image_name_from_global_run_id()} already exists, skipping build.")
+                self.docker_client.images.get(image_id)
+                self.get_logger().info(f"Image {image_id} already exists, skipping build.")
             except docker.errors.ImageNotFound:
                 with tempfile.TemporaryDirectory() as tmpdir:
                     self.get_logger().info(f"Cloning {self.git_url} to {tmpdir}...")
@@ -309,25 +312,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if self.image:
                 image = self.image
             self._pull_docker_image_if_not_exists(image, force=False)
-            self.docker_client.images.get(image).tag(self._get_image_name_from_global_run_id())
+            self.docker_client.images.get(image).tag(image_id)
 
         # pull redis
         self._pull_docker_image_if_not_exists(DEFAULT_REDIS_DOCKER_TAG, force=False)
         # <<<<< IMAGE PREPARATION <<<<<
-
-        # TODO: these should be separated and put to a pre-setup validation stage, having this here
-        # interferes with staging commands.
-
-        # # check testing environment availability
-        # # raise a testing exception if these conditions are violated.
-        # container: docker.models.containers.Container
-        # for container in self.docker_client.containers.list(all=True):
-        #     if container.name in {self._get_lrr_container_name(), self._get_redis_container_name()}:
-        #         raise DeploymentException(f"Container {container.name} exists!")
-        # network: docker.models.networks.Network
-        # for network in self.docker_client.networks.list():
-        #     if network.name == self._get_network_name():
-        #         raise DeploymentException(f"Network {network.name} exists!")
 
         # prepare the network
         network_name = self._get_network_name()
@@ -405,7 +394,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.get_logger().info(f"LRR container exists: {self._get_lrr_container_name()}.")
             # in this situation, whether we restart the LRR container depends on whether or not the images used for both containers
             # match.
-            needs_recreate_lrr = self.lrr_container.image.id != self.docker_client.images.get(self._get_image_name_from_global_run_id()).id
+            needs_recreate_lrr = self.lrr_container.image.id != self.docker_client.images.get(image_id).id
             if needs_recreate_lrr:
                 self.get_logger().info("LRR Image hash has been updated: removing existing container.")
                 self.lrr_container.stop(timeout=1)
@@ -418,7 +407,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if create_lrr_container:
             self.get_logger().info(f"Creating LRR container: {self._get_lrr_container_name()}")
             self.lrr_container = self.docker_client.containers.create(
-                self._get_image_name_from_global_run_id(), hostname=lrr_container_name, name=lrr_container_name, detach=True, network=network_name, ports=lrr_ports, environment=lrr_environment,
+                image_id, hostname=lrr_container_name, name=lrr_container_name, detach=True, network=network_name, ports=lrr_ports, environment=lrr_environment,
                 volumes={
                     lrr_contents_vol_name: {"bind": "/home/koyomi/lanraragi/content", "mode": "rw"},
                     lrr_thumb_vol_name: {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"}
@@ -483,9 +472,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     def _get_redis_container_name(self) -> str:
         return f"{self.resource_prefix}redis_service"
-
-    def _get_lrr_image_name(self) -> str:
-        return f"integration_test_lanraragi:{self.global_run_id}"
 
     def _get_container_by_name(self, container_name: str) -> Optional[docker.models.containers.Container]:
         """
@@ -576,6 +562,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             build_path: The path to the build directory.
             force: Whether to force the build (e.g. even if the image already exists).
         """
+        image_id = self._get_image_name_from_global_run_id()
 
         if force:
             if not Path(build_path).exists():
@@ -586,21 +573,21 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.get_logger().info(f"Building LRR image; this can take a while ({dockerfile_path}).")
             build_start = time.time()
             if self.docker_api:
-                for lineb in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag=self._get_image_name_from_global_run_id()):
+                for lineb in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag=image_id):
                     if (data := json.loads(lineb.decode('utf-8').strip())) and (stream := data.get('stream')):
                         self.get_logger().info(stream.strip())
             else:
-                self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag=self._get_image_name_from_global_run_id())
+                self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag=image_id)
             build_time = time.time() - build_start
-            self.get_logger().info(f"LRR image {self._get_image_name_from_global_run_id()} build complete: time {build_time}s")
+            self.get_logger().info(f"LRR image {image_id} build complete: time {build_time}s")
             return
         else:
             try:
-                self.docker_client.images.get(self._get_image_name_from_global_run_id())
-                self.get_logger().info(f"Image {self._get_image_name_from_global_run_id()} already exists, skipping build.")
+                self.docker_client.images.get(image_id)
+                self.get_logger().info(f"Image {image_id} already exists, skipping build.")
                 return
             except docker.errors.ImageNotFound:
-                self.get_logger().info(f"Image {self._get_image_name_from_global_run_id()} not found, building.")
+                self.get_logger().info(f"Image {image_id} not found, building.")
                 self._build_docker_image(build_path, force=True)
                 return
 
