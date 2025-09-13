@@ -449,13 +449,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.lrr_container:
             self.lrr_container.stop(timeout=1)
             self.get_logger().info(f"Stopped container: {self._get_lrr_container_name()}")
-            self.lrr_container.remove(force=True)
-            self.get_logger().info(f"Removed container: {self._get_lrr_container_name()}")
         if self.redis_container:
             self.redis_container.stop(timeout=1)
             self.get_logger().info(f"Stopped container: {self._get_redis_container_name()}")
-            self.redis_container.remove(force=True)
-            self.get_logger().info(f"Removed container: {self._get_redis_container_name()}")
 
     @override
     def restart(self):
@@ -540,10 +536,19 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def _reset_docker_test_env(self, remove_data: bool=False):
         """
         Reset docker test environment (LRR and Redis containers, testing network) between tests.
+        Stops containers, then removes them. Then, removes the data (if applied). Finally removes
+        the network.
         
         If something goes wrong during setup, the environment will be reset and the data should be removed.
         """
         self.stop() # stop the containers first.
+
+        if self.lrr_container:
+            self.lrr_container.remove(force=True)
+            self.get_logger().info(f"Removed container: {self._get_lrr_container_name()}")
+        if self.redis_container:
+            self.redis_container.remove(force=True)
+            self.get_logger().info(f"Removed container: {self._get_redis_container_name()}")
 
         if remove_data:
             if self.lrr_contents_volume:
