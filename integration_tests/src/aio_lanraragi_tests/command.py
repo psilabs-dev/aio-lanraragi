@@ -26,6 +26,7 @@ The resource prefix for docker resources will be "staging_".
 
 import argparse
 import logging
+import time
 from typing import Optional
 
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
@@ -57,19 +58,21 @@ def main():
     docker_client = docker.from_env()
 
     if args.command == 'up':
+        # TODO: there is a bug where running up twice triggers one of setup's deploy exceptions (complaining about existing containers)
+        # have to think about how to deal with that...
         image: Optional[str] = args.image
         build: Optional[str] = args.build
         git_url: Optional[str] = args.git_url
         git_branch: Optional[str] = args.git_branch
         docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if args.docker_api else None
         environment = DockerLRRDeploymentContext(
-            build, image, git_url, git_branch, docker_client, docker_api=docker_api, logger=logger, global_run_id=1, is_allow_uploads=True
+            build, image, git_url, git_branch, docker_client, docker_api=docker_api, logger=logger, global_run_id=int(time.time() * 1000), is_allow_uploads=True
         )
         environment.setup("staging_", 1, with_api_key=True, with_nofunmode=True, lrr_debug_mode=True)
 
     elif args.command == 'down':
         environment = DockerLRRDeploymentContext(
-            None, None, None, None, docker_client, docker_api=None, logger=logger, global_run_id=1, is_allow_uploads=True
+            None, None, None, None, docker_client, docker_api=None, logger=logger, global_run_id=int(time.time() * 1000), is_allow_uploads=True
         )
         environment.resource_prefix = "staging_"
         environment.port_offset = 1
@@ -77,7 +80,7 @@ def main():
 
     elif args.command == 'restart':
         environment = DockerLRRDeploymentContext(
-            None, None, None, None, docker_client, docker_api=None, logger=logger, global_run_id=1, is_allow_uploads=True
+            None, None, None, None, docker_client, docker_api=None, logger=logger, global_run_id=int(time.time() * 1000), is_allow_uploads=True
         )
         environment.resource_prefix = "staging_"
         environment.port_offset = 1
