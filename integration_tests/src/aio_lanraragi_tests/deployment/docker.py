@@ -202,30 +202,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self._get_lrr_container().exec_run(["sh", "-c", 'chown -R koyomi: content'])
 
     @override
-    def restart(self):
-
-        # restart requires resources all available.
-        if not self.lrr_container:
-            raise DeploymentException(f"Missing LRR container: {self._get_lrr_container_name()}")
-        if not self.redis_container:
-            raise DeploymentException(f"Missing Redis container: {self._get_redis_container_name()}")
-        if not self.network:
-            raise DeploymentException(f"Missing network: {self._get_network_name()}")
-        if not self.lrr_contents_volume:
-            raise DeploymentException(f"Missing LRR contents volume: {self._get_lrr_contents_volume_name()}")
-        if not self.lrr_thumb_volume:
-            raise DeploymentException(f"Missing LRR thumb volume: {self._get_lrr_thumb_volume_name()}")
-        if not self.redis_volume:
-            raise DeploymentException(f"Missing Redis volume: {self._get_redis_volume_name()}")
-
-        self.stop_lrr(timeout=1)
-        self.stop_redis(timeout=1)
-        self.start_redis()
-        self.start_lrr()
-        self.get_logger().debug("Testing connection to LRR server.")
-        self.test_lrr_connection(self.get_lrr_port())
-
-    @override
     def start_lrr(self):
         return self._get_lrr_container().start()
     
@@ -451,6 +427,44 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.get_logger().info("LRR server is ready.")
 
     @override
+    def start(self, test_connection_max_retries: int=4):
+        # this can't really be replaced with setup stage, because during setup we do some work after redis startup 
+        # and before LRR startup.
+        self.get_logger().info(f"Starting container: {self._get_redis_container_name()}")
+        self.redis_container.start()
+        self.get_logger().info("Redis container started.")
+
+        self.start_lrr()
+        self.get_logger().debug("Testing connection to LRR server.")
+        self.test_lrr_connection(self.get_lrr_port(), test_connection_max_retries)
+        if self.is_allow_uploads:
+            resp = self.allow_uploads()
+            if resp.exit_code != 0:
+                self._reset_docker_test_env(remove_data=True)
+                raise DeploymentException(f"Failed to modify permissions for LRR contents: {resp}")
+        self.get_logger().info("LRR server is ready.")
+
+    @override
+    def stop(self):
+        if self.lrr_container:
+            self.lrr_container.stop(timeout=1)
+            self.get_logger().info(f"Stopped container: {self._get_lrr_container_name()}")
+            self.lrr_container.remove(force=True)
+            self.get_logger().info(f"Removed container: {self._get_lrr_container_name()}")
+        if self.redis_container:
+            self.redis_container.stop(timeout=1)
+            self.get_logger().info(f"Stopped container: {self._get_redis_container_name()}")
+            self.redis_container.remove(force=True)
+            self.get_logger().info(f"Removed container: {self._get_redis_container_name()}")
+
+    @override
+    def restart(self):
+        self.stop()
+        self.start()
+        self.get_logger().debug("Testing connection to LRR server.")
+        self.test_lrr_connection(self.get_lrr_port())
+
+    @override
     def teardown(self, remove_data: bool=False):
         self._reset_docker_test_env(remove_data=remove_data)
         self.get_logger().info("Cleanup complete.")
@@ -529,20 +543,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         
         If something goes wrong during setup, the environment will be reset and the data should be removed.
         """
-        if self.lrr_container:
-            self.lrr_container.stop(timeout=1)
-            self.get_logger().info(f"Stopped container: {self._get_lrr_container_name()}")
-            self.lrr_container.remove(force=True)
-            self.get_logger().info(f"Removed container: {self._get_lrr_container_name()}")
-        if self.redis_container:
-            self.redis_container.stop(timeout=1)
-            self.get_logger().info(f"Stopped container: {self._get_redis_container_name()}")
-            self.redis_container.remove(force=True)
-            self.get_logger().info(f"Removed container: {self._get_redis_container_name()}")
-        if hasattr(self, 'network') and self.network:
-            self.network.remove()
-            self.get_logger().info(f"Removed network: {self._get_network_name()}")
-        
+        self.stop() # stop the containers first.
+
         if remove_data:
             if self.lrr_contents_volume:
                 self.lrr_contents_volume.remove(force=True)
@@ -553,6 +555,10 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if self.redis_volume:
                 self.redis_volume.remove(force=True)
                 self.get_logger().info(f"Removed volume: {self._get_redis_volume_name()}")
+
+        if hasattr(self, 'network') and self.network:
+            self.network.remove()
+            self.get_logger().info(f"Removed network: {self._get_network_name()}")
 
     def _build_docker_image(self, build_path: Path, force: bool=False):
         """

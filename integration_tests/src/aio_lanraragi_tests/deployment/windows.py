@@ -79,6 +79,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         Teardowns do not necessarily guarantee port availability. Windows may
         keep a port non-bindable for a short period of time even with no visible owning process.
+
+        This setup logic is adapted from the LRR runfile, except we will start redis
+        and LRR individually, and inject configuration data between redis/LRR startups
+        to avoid having to restart LRR.
         """
         lrr_port = self.get_lrr_port()
         redis_port = self._get_redis_port()
@@ -126,6 +130,23 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.get_logger().info(f"Completed setup of LANraragi. LRR PID = {self.lrr_pid}; Redis PID = {self.redis_pid}.")
 
     @override
+    def start(self, test_connection_max_retries: int = 4):
+        self.start_redis()
+        self.start_lrr()
+
+    @override
+    def stop(self):
+        self.stop_lrr()
+        self.stop_redis()
+
+    @override
+    def restart(self):
+        self.get_logger().info("Restart require detected; restarting LRR and Redis...")
+        self.stop()
+        self.start()
+        self.get_logger().info("Restart complete.")
+
+    @override
     def teardown(self, remove_data: bool=False):
         """
         Forceful shutdown of LRR and Redis and remove the content path, preparing it for another test.
@@ -137,15 +158,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         if contents_path.exists() and remove_data:
             self.get_logger().info(f"Removing content path: {contents_path}")
             shutil.rmtree(contents_path)
-
-    @override
-    def restart(self):
-        self.get_logger().info("Restart require detected; restarting LRR and Redis...")
-        self.stop_lrr()
-        self.stop_redis()
-        self.start_redis()
-        self.start_lrr()
-        self.get_logger().info("Restart complete.")
 
     @override
     def start_lrr(self):

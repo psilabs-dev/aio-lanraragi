@@ -80,6 +80,18 @@ class AbstractLRRDeploymentContext(abc.ABC):
         """
     
     @abc.abstractmethod
+    def start(self, test_connection_max_retries: int=4):
+        """
+        Start an existing deployment.
+        """
+
+    @abc.abstractmethod
+    def stop(self):
+        """
+        Stop an existing deployment.
+        """
+
+    @abc.abstractmethod
     def restart(self):
         """
         Restart the deployment (does not remove data), and ensures the LRR server is running.
