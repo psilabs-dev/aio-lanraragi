@@ -24,7 +24,7 @@ def pytest_addoption(parser: pytest.Parser):
 
     Parameters
     ----------
-    build-path : `str`
+    build : `str`
         Docker image build path to LANraragi project root directory. Overrides the `--image` flag.
 
     image : `str`
