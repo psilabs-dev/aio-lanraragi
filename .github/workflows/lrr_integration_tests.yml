@@ -41,6 +41,7 @@ jobs:
         run: |
           cd integration_tests
           pip install .
+          playwright install
           
       - name: Run integration tests
         run: |
@@ -121,6 +122,7 @@ jobs:
         working-directory: aio-lanraragi/integration_tests
         run: |
           pip install .
+          playwright install
 
       - name: Run integration tests
         working-directory: aio-lanraragi/integration_tests
