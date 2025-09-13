@@ -87,31 +87,45 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def restart(self):
         self.stop_lrr()
+        self.stop_redis()
+        self.start_redis()
         self.start_lrr()
         self.get_logger().debug("Testing connection to LRR server.")
         self.test_lrr_connection(self.get_lrr_port())
 
     @override
     def start_lrr(self):
-        return self.lrr_container.start()
+        with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+            if (container := self.lrr_container) or (container := self._get_container_by_name(self._get_lrr_container_name())):
+                container = self.docker_client.containers.get(container.id)
+                container.start()
     
     @override
     def start_redis(self):
-        return self.redis_container.start()
+        with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+            if (container := self.redis_container) or (container := self._get_container_by_name(self._get_redis_container_name())):
+                container = self.docker_client.containers.get(container.id)
+                container.start()
 
     @override
     def stop_lrr(self, timeout: int=10):
         """
         Stop the LRR container (timeout in s)
         """
-        return self.lrr_container.stop(timeout=timeout)
+        with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+            if (container := self.lrr_container) or (container := self._get_container_by_name(self._get_lrr_container_name())):
+                container = self.docker_client.containers.get(container.id)
+                container.stop(timeout=timeout)
     
     @override
     def stop_redis(self, timeout: int=10):
         """
         Stop the redis container (timeout in s)
         """
-        return self.redis_container.stop(timeout=timeout)
+        with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+            if (container := self.redis_container) or (container := self._get_container_by_name(self._get_redis_container_name())):
+                container = self.docker_client.containers.get(container.id)
+                container.stop(timeout=timeout)
 
     @override
     def get_lrr_logs(self, tail: int=100) -> bytes:
@@ -313,6 +327,12 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def get_lrr_port(self) -> int:
         return DEFAULT_LRR_PORT + self.port_offset
 
+    def _get_network_by_name(self, name: str) -> docker.models.networks.Network:
+        return self.docker_client.networks.get(name)
+
+    def _get_container_by_name(self, name: str) -> docker.models.containers.Container:
+        return self.docker_client.containers.get(name)
+
     def _get_redis_port(self) -> int:
         return DEFAULT_REDIS_PORT + self.port_offset
 
@@ -322,19 +342,19 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         
         If something goes wrong during setup, the environment will be reset and the data should be removed.
         """
-        if self.lrr_container:
-            with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
-                container = self.docker_client.containers.get(self.lrr_container.id)
+        with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+            if (container := self.lrr_container) or (container := self._get_container_by_name(self._get_lrr_container_name())):
+                container = self.docker_client.containers.get(container.id)
                 container.stop(timeout=1)
                 container.remove(force=True)
-        if self.redis_container:
-            with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
-                container = self.docker_client.containers.get(self.redis_container.id)
+        with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+            if (container := self.redis_container) or (container := self._get_container_by_name(self._get_redis_container_name())):
+                container = self.docker_client.containers.get(container.id)
                 container.stop(timeout=1)
                 container.remove(force=True)
-        if hasattr(self, 'network') and self.network:
-            with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
-                self.docker_client.networks.get(self.network.id).remove()
+        with contextlib.suppress(docker.errors.NotFound, docker.errors.APIError):
+            if (hasattr(self, 'network') and (network := self.network)) or (network := self._get_network_by_name(self._get_network_name())):
+                network.remove()
         
         if remove_data:
             self._remove_volume_if_exists(self._get_lrr_contents_volume_name())
