@@ -191,7 +191,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         if is_port_available(lrr_port):
             self.start_lrr()
-            self.test_lrr_connection()
+            self.test_lrr_connection(lrr_port)
             self.logger.info(f"LRR service is established on port {lrr_port}.")
         else:
             self.logger.info(f"Found running LRR service on port {lrr_port}. Restarting...")
@@ -227,10 +227,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         lrr_port = self.lrr_port
         if is_port_available(lrr_port):
             self.start_lrr()
-            self.test_lrr_connection()
+            self.test_lrr_connection(lrr_port)
             self.logger.info(f"LRR service established on port {lrr_port}")
         else:
-            self.test_lrr_connection()
+            self.test_lrr_connection(lrr_port)
             self.logger.info(f"Running LRR service confirmed on port {lrr_port}, skipping startup.")
 
     @override
