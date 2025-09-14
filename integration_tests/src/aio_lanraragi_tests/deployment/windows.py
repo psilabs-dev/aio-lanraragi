@@ -28,7 +28,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         At the end of testing, the contents_dir should be removed.
         """
-        return self.windist_path / self.resource_prefix + "contents"
+        contents_dirname = self.resource_prefix + "contents"
+        return self.windist_path / contents_dirname
     
     @property
     def redis_dir(self) -> Path:
