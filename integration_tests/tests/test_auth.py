@@ -48,7 +48,7 @@ def environment(request: pytest.FixtureRequest) -> Generator[AbstractLRRDeployme
         case 'win32':
             windist: str = request.config.getoption("--windist")
             environment = WindowsLRRDeploymentContext(
-                windist,
+                windist, "test_", 10
             )
 
         case 'darwin' | 'linux':
@@ -64,7 +64,7 @@ def environment(request: pytest.FixtureRequest) -> Generator[AbstractLRRDeployme
             docker_client = docker.from_env()
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
             environment = DockerLRRDeploymentContext(
-                build_path, image, git_url, git_branch, docker_client, docker_api=docker_api,
+                build_path, image, git_url, git_branch, docker_client, "test_", 10, docker_api=docker_api,
                 global_run_id=global_run_id, is_allow_uploads=True
             )
 
@@ -197,7 +197,7 @@ async def test_api_auth_matrix(
     - GET /api/database/backup
     """
     # initialize the server.
-    environment.setup("test_", port_offset, with_api_key=False, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
+    environment.setup(with_api_key=False, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
 
     # generate the parameters list, then randomize it to remove ordering effect.
     test_params: List[ApiAuthMatrixParams] = []

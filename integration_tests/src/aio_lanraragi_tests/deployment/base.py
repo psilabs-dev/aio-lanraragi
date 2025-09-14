@@ -10,6 +10,17 @@ import requests
 class AbstractLRRDeploymentContext(abc.ABC):
 
     @property
+    def logger(self) -> logging.Logger:
+        """
+        Logger implementation assigned to a deployment.
+        """
+        return self._logger
+    
+    @logger.setter
+    def logger(self, logger: logging.Logger):
+        self._logger = logger
+
+    @property
     def resource_prefix(self) -> str:
         """
         String to be attached to the beginning of most provisioned deployment resources.
@@ -33,10 +44,6 @@ class AbstractLRRDeploymentContext(abc.ABC):
     @port_offset.setter
     def port_offset(self, new_port_offset: int):
         self._port_offset = new_port_offset
-
-    @abc.abstractmethod
-    def get_logger(self) -> logging.Logger:
-        ...
 
     @abc.abstractmethod
     def update_api_key(self, api_key: Optional[str]):
@@ -66,22 +73,31 @@ class AbstractLRRDeploymentContext(abc.ABC):
 
     @abc.abstractmethod
     def setup(
-        self, resource_prefix: str, port_offset: int,
-        with_api_key: bool=False, with_nofunmode: bool=False, lrr_debug_mode: bool=False,
+        self, with_api_key: bool=False, with_nofunmode: bool=False, lrr_debug_mode: bool=False,
         test_connection_max_retries: int=4
     ):
         """
         Main entrypoint to setting up a LRR environment.
 
         Args:
-            `resource_prefix`: prefix to use for resource names
-            `port_offset`: offset to use for port numbers
             `with_api_key`: whether to add an API key (default API key: "lanraragi") to the LRR environment
             `with_nofunmode`: whether to enable nofunmode in the LRR environment
             `lrr_debug_mode`: whether to enable debug mode for the LRR application
             `test_connection_max_retries`: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
     
+    @abc.abstractmethod
+    def start(self, test_connection_max_retries: int=4):
+        """
+        Start an existing deployment.
+        """
+
+    @abc.abstractmethod
+    def stop(self):
+        """
+        Stop an existing deployment.
+        """
+
     @abc.abstractmethod
     def restart(self):
         """
@@ -168,16 +184,16 @@ class AbstractLRRDeploymentContext(abc.ABC):
                     time_to_sleep = 2 ** (retry_count + 1)
 
                     if retry_count < test_connection_max_retries-3:
-                        self.get_logger().debug(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
+                        self.logger.debug(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
                     elif retry_count < test_connection_max_retries-2:
-                        self.get_logger().info(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
+                        self.logger.info(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
                     elif retry_count < test_connection_max_retries-1:
-                        self.get_logger().warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
+                        self.logger.warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
                     retry_count += 1
                     time.sleep(time_to_sleep)
                     continue
                 else:
-                    self.get_logger().error("Failed to connect to LRR server! Dumping logs and shutting down server.")
+                    self.logger.error("Failed to connect to LRR server! Dumping logs and shutting down server.")
                     self.display_lrr_logs()
                     self.teardown(remove_data=True)
                     raise DeploymentException("Failed to connect to the LRR server!")
@@ -195,4 +211,4 @@ class AbstractLRRDeploymentContext(abc.ABC):
             log_text = lrr_logs.decode('utf-8', errors='replace')
             for line in log_text.split('\n'):
                 if line.strip():
-                    self.get_logger().log(log_level, f"LRR: {line}")
+                    self.logger.log(log_level, f"LRR: {line}")
