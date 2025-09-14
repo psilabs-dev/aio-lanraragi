@@ -3,6 +3,7 @@ import logging
 import time
 from typing import Optional
 
+from aio_lanraragi_tests.common import DEFAULT_LRR_PORT, DEFAULT_REDIS_PORT
 from aio_lanraragi_tests.exceptions import DeploymentException
 import requests
 
@@ -44,6 +45,20 @@ class AbstractLRRDeploymentContext(abc.ABC):
     @port_offset.setter
     def port_offset(self, new_port_offset: int):
         self._port_offset = new_port_offset
+
+    @property
+    def lrr_port(self) -> int:
+        """
+        Port exposed for the given LRR application.
+        """
+        return DEFAULT_LRR_PORT + self.port_offset
+    
+    @property
+    def redis_port(self) -> int:
+        """
+        Port exposed for the given Redis database.
+        """
+        return DEFAULT_REDIS_PORT + self.port_offset
 
     @abc.abstractmethod
     def update_api_key(self, api_key: Optional[str]):
@@ -151,15 +166,6 @@ class AbstractLRRDeploymentContext(abc.ABC):
 
         Args:
             `tail`: max number of lines to keep from last line.
-        """
-
-    @abc.abstractmethod
-    def get_lrr_port(self) -> int:
-        """
-        Get the LRR port.
-
-        This should be an available method, because the client may need it
-        during test time.
         """
 
     def test_lrr_connection(self, port: int, test_connection_max_retries: int=4):

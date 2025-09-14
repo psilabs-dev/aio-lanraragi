@@ -13,7 +13,7 @@ from lanraragi.clients.client import LRRClient
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
-from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PORT
+from aio_lanraragi_tests.common import DEFAULT_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,10 @@ class ApiAuthMatrixParams(BaseModel):
     is_matching_api_key: bool = Field(..., description="Set to False if not is_api_key_configured_server or not is_api_key_configured_client")
 
 @pytest.fixture
+def resource_prefix() -> Generator[str, None, None]:
+    yield "test_"
+
+@pytest.fixture
 def port_offset() -> Generator[int, None, None]:
     yield 10
 
@@ -33,7 +37,7 @@ def is_lrr_debug_mode(request: pytest.FixtureRequest) -> Generator[bool, None, N
     yield request.config.getoption("--lrr-debug")
 
 @pytest.fixture
-def environment(request: pytest.FixtureRequest) -> Generator[AbstractLRRDeploymentContext, None, None]:
+def environment(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int) -> Generator[AbstractLRRDeploymentContext, None, None]:
     """
     Provides an uninitialized LRR environment for testing.
     """
@@ -48,7 +52,7 @@ def environment(request: pytest.FixtureRequest) -> Generator[AbstractLRRDeployme
         case 'win32':
             windist: str = request.config.getoption("--windist")
             environment = WindowsLRRDeploymentContext(
-                windist, "test_", 10
+                windist, resource_prefix, port_offset
             )
 
         case 'darwin' | 'linux':
@@ -64,7 +68,7 @@ def environment(request: pytest.FixtureRequest) -> Generator[AbstractLRRDeployme
             docker_client = docker.from_env()
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
             environment = DockerLRRDeploymentContext(
-                build_path, image, git_url, git_branch, docker_client, "test_", 10, docker_api=docker_api,
+                build_path, image, git_url, git_branch, docker_client, resource_prefix, port_offset, docker_api=docker_api,
                 global_run_id=global_run_id, is_allow_uploads=True
             )
 
@@ -84,12 +88,12 @@ def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
     yield asyncio.BoundedSemaphore(value=8)
 
 @pytest_asyncio.fixture
-async def lanraragi(port_offset: int) -> Generator[LRRClient, None, None]:
+async def lanraragi(environment: AbstractLRRDeploymentContext) -> Generator[LRRClient, None, None]:
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
     client = LRRClient(
-        lrr_host=f"http://localhost:{DEFAULT_LRR_PORT + port_offset}",
+        lrr_host=f"http://localhost:{environment.lrr_port}",
         lrr_api_key=DEFAULT_API_KEY,
         timeout=10
     )
