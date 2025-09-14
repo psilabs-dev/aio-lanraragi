@@ -92,13 +92,13 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self._redis_client = client
 
     def __init__(
-        self, windist_path: Path, resource_prefix: str, port_offset: int,
+        self, windist_path: str, resource_prefix: str, port_offset: int,
         logger: Optional[logging.Logger]=None
     ):
         self.resource_prefix = resource_prefix
         self.port_offset = port_offset
 
-        self.windist_path = windist_path
+        self.windist_path = Path(windist_path)
 
         if logger is None:
             logger = LOGGER
@@ -177,6 +177,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self._test_redis_connection()
             self.logger.info(f"Redis service is established on port {redis_port}.")
         else:
+            # TODO: this throws an exception if not redis on port or redis broken
             self._test_redis_connection()
             self.logger.info(f"Running Redis service confirmed on port {redis_port}, skipping startup.")
         if with_api_key:
@@ -205,12 +206,31 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def start(self, test_connection_max_retries: int = 4):
-        self.start_redis()
-        self._test_redis_connection()
+        """
+        Start LRR and Redis on Windows via runfile.
+
+        Unlike setup stage, if either services are running we won't do a restart,
+        similar to the docker compose behavior.
+        """
+        redis_port = self.redis_port
+        if is_port_available(redis_port):
+            self.start_redis()
+            self._test_redis_connection()
+            self.logger.info(f"Redis service is established on port {redis_port}.")
+        else:
+            # TODO: this throws an exception if not redis on port or redis broken
+            self._test_redis_connection()
+            self.logger.info(f"Running Redis service confirmed on port {redis_port}, skipping startup.")
         self.logger.info("Started Redis.")
-        self.start_lrr()
-        self.test_lrr_connection()
-        self.logger.info("Started LRR.")
+
+        lrr_port = self.lrr_port
+        if is_port_available(lrr_port):
+            self.start_lrr()
+            self.test_lrr_connection()
+            self.logger.info(f"LRR service established on port {lrr_port}")
+        else:
+            self.test_lrr_connection()
+            self.logger.info(f"Running LRR service confirmed on port {lrr_port}, skipping startup.")
 
     @override
     def stop(self):
@@ -392,26 +412,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def stop_redis(self, timeout: int = 10):
-        pid = self._get_redis_pid()
-        redis_port = self.redis_port
-
-        if not pid:
-            self.logger.info("No Redis PID found, skipping shutdown.")
-            return
-
-        output = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"])
-        if output.returncode != 0:
-            self.logger.error(f"Redis PID {pid} shutdown failed with exit code {output.returncode}")
-        else:
-            self.logger.debug(f"Redis PID {pid} shutdown output: {output.stdout}")
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if self._get_redis_pid() is None and is_port_available(redis_port):
-                self.logger.debug(f"Redis PID {pid} shutdown complete.")
-                return
-
-            time.sleep(0.2)
-        raise DeploymentException(f"Redis PID {pid} is still running after {timeout}s, forcing shutdown. Redis port {redis_port} is still occupied.")
+        self.redis_client.shutdown(now=True, force=True)
 
     @override
     def get_lrr_logs(self, tail: int=100) -> bytes:
@@ -447,7 +448,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.logger.warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
                 retry_count += 1
                 time.sleep(time_to_sleep)
-        self.logger.info("Redis connection established.")
 
     def _get_port_owner_pid(self, port: int) -> Optional[int]:
         cmd = f"Get-NetTCPConnection -LocalPort {port} | Select-Object -First 1 -ExpandProperty OwningProcess"
