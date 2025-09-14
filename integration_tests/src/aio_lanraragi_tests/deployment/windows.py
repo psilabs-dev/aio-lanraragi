@@ -36,11 +36,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.lrr_pid: Optional[int] = None
         self.redis: Optional[redis.Redis] = None
 
-
-    @override
-    def get_logger(self) -> logging.Logger:
-        return self.logger
-
     @override
     def update_api_key(self, api_key: Optional[str]):
         self.redis.select(2)
@@ -92,18 +87,18 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             raise FileNotFoundError(f"win-dist path {windist_path} not found.")
         
         # log the setup resource allocations for user to see
-        self.get_logger().info(f"Deploying Windows LRR with the following resources: LRR port {lrr_port}, Redis port {redis_port}, content path {self._get_contents_path()}.")
+        self.logger.info(f"Deploying Windows LRR with the following resources: LRR port {lrr_port}, Redis port {redis_port}, content path {self._get_contents_path()}.")
 
-        self.get_logger().info("Checking if ports are available.")
+        self.logger.info("Checking if ports are available.")
         if not is_port_available(lrr_port):
-            self.get_logger().warning(f"LRR port {lrr_port} is occupied; attempting to free it.")
+            self.logger.warning(f"LRR port {lrr_port} is occupied; attempting to free it.")
             self._ensure_port_free(lrr_port, service_name="LRR", timeout=15)
             if not is_port_available(lrr_port):
                 # What now.
                 raise DeploymentException(f"Port {lrr_port} is occupied.")
         if not is_port_available(redis_port):
             raise DeploymentException(f"Redis port {redis_port} is occupied.")
-        self.get_logger().info("Creating required directories...")
+        self.logger.info("Creating required directories...")
         self._get_contents_path().mkdir(parents=True, exist_ok=True)
         self._get_thumb_path().mkdir(parents=True, exist_ok=True)
 
@@ -111,23 +106,23 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.start_redis()
         # self._test_redis_connection()
         if with_api_key:
-            self.get_logger().info("Adding API key to Redis...")
+            self.logger.info("Adding API key to Redis...")
             self.update_api_key(DEFAULT_API_KEY)
         if with_nofunmode:
-            self.get_logger().info("Enabling NoFun mode...")
+            self.logger.info("Enabling NoFun mode...")
             self.enable_nofun_mode()
         if lrr_debug_mode:
-            self.get_logger().info("Enabling debug mode in LRR...")
+            self.logger.info("Enabling debug mode in LRR...")
             self.enable_lrr_debug_mode()
 
         # post LRR startup; if we start redis and LRR independently, 
         # then there's no need to restart the server.
         self.start_lrr()
-        self.get_logger().debug("Collecting PID info...")
+        self.logger.debug("Collecting PID info...")
         self.redis_pid = self._get_redis_pid()
         self.lrr_pid = self._get_lrr_pid()
 
-        self.get_logger().info(f"Completed setup of LANraragi. LRR PID = {self.lrr_pid}; Redis PID = {self.redis_pid}.")
+        self.logger.info(f"Completed setup of LANraragi. LRR PID = {self.lrr_pid}; Redis PID = {self.redis_pid}.")
 
     @override
     def start(self, test_connection_max_retries: int = 4):
@@ -141,10 +136,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def restart(self):
-        self.get_logger().info("Restart require detected; restarting LRR and Redis...")
+        self.logger.info("Restart require detected; restarting LRR and Redis...")
         self.stop()
         self.start()
-        self.get_logger().info("Restart complete.")
+        self.logger.info("Restart complete.")
 
     @override
     def teardown(self, remove_data: bool=False):
@@ -156,7 +151,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         contents_path = self._get_contents_path()
 
         if contents_path.exists() and remove_data:
-            self.get_logger().info(f"Removing content path: {contents_path}")
+            self.logger.info(f"Removing content path: {contents_path}")
             shutil.rmtree(contents_path)
 
     @override
@@ -173,10 +168,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             os.chdir(windist_path)
 
             if not self._get_logs_dir().exists():
-                self.get_logger().info(f"Logs directory {self._get_logs_dir()} does not exist; making...")
+                self.logger.info(f"Logs directory {self._get_logs_dir()} does not exist; making...")
                 self._get_logs_dir().mkdir(parents=True, exist_ok=False)
             if not self._get_lrr_temp_directory().exists():
-                self.get_logger().info(f"Temp directory {self._get_lrr_temp_directory()} does not exist; making...")
+                self.logger.info(f"Temp directory {self._get_lrr_temp_directory()} does not exist; making...")
                 self._get_lrr_temp_directory().mkdir(parents=True, exist_ok=False)
 
             lrr_env = os.environ.copy()
@@ -201,9 +196,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 perl_path, str(Path("script") / "launcher.pl"),
                 "-d", str(Path("script") / "lanraragi")
             ]
-            self.get_logger().info(f"(lrr_network={lrr_network}, lrr_data_directory={lrr_data_directory}, lrr_log_directory={lrr_log_directory}, lrr_temp_directory={lrr_temp_directory}, lrr_thumb_directory={lrr_thumb_directory}) running script {subprocess.list2cmdline(script)}")
+            self.logger.info(f"(lrr_network={lrr_network}, lrr_data_directory={lrr_data_directory}, lrr_log_directory={lrr_log_directory}, lrr_temp_directory={lrr_temp_directory}, lrr_thumb_directory={lrr_thumb_directory}) running script {subprocess.list2cmdline(script)}")
             lrr_process = subprocess.Popen(script, env=lrr_env)
-            self.get_logger().info(f"Started LRR process with PID {lrr_process.pid}.")
+            self.logger.info(f"Started LRR process with PID {lrr_process.pid}.")
             # confirm it has started.
             self.test_lrr_connection(self.get_lrr_port())
         finally:
@@ -223,7 +218,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             os.chdir(windist_path)
 
             if not self._get_logs_dir().exists():
-                self.get_logger().info(f"Logs directory {self._get_logs_dir()} does not exist; making...")
+                self.logger.info(f"Logs directory {self._get_logs_dir()} does not exist; making...")
                 self._get_logs_dir().mkdir(parents=True, exist_ok=False)
 
             redis_server_path = str(windist_path / "runtime" / "redis" / "redis-server.exe")
@@ -237,9 +232,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 "--logfile", str(redis_logfile_path),
                 "--port", str(self._get_redis_port()),
             ]
-            self.get_logger().info(f"(redis_dir={redis_dir}, redis_logfile_path={redis_logfile_path}) running script {subprocess.list2cmdline(script)}")
+            self.logger.info(f"(redis_dir={redis_dir}, redis_logfile_path={redis_logfile_path}) running script {subprocess.list2cmdline(script)}")
             redis_process = subprocess.Popen(script)
-            self.get_logger().info(f"Started redis service with PID {redis_process.pid}.")
+            self.logger.info(f"Started redis service with PID {redis_process.pid}.")
             # confirm it has started.
             self._test_redis_connection()
         finally:
@@ -263,43 +258,43 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         lrr_port = self.get_lrr_port()
         
         if pid:
-            self.get_logger().info(f"LRR PID {pid} found; killing...")
+            self.logger.info(f"LRR PID {pid} found; killing...")
             output = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"])
             if output.returncode != 0:
-                self.get_logger().error(f"LRR PID {pid} shutdown failed with exit code {output.returncode}")
+                self.logger.error(f"LRR PID {pid} shutdown failed with exit code {output.returncode}")
             else:
-                self.get_logger().debug(f"LRR PID {pid} shutdown output: {output.stdout}")
+                self.logger.debug(f"LRR PID {pid} shutdown output: {output.stdout}")
         else:
-            self.get_logger().warning("No LRR PID found; attempting to free port and kill matching processes.")
+            self.logger.warning("No LRR PID found; attempting to free port and kill matching processes.")
             owner_pid = self._get_port_owner_pid(lrr_port)
             if owner_pid:
-                self.get_logger().info(f"Killing process {owner_pid} for LRR port {lrr_port}...")
+                self.logger.info(f"Killing process {owner_pid} for LRR port {lrr_port}...")
                 subprocess.run(["taskkill", "/PID", str(owner_pid), "/F", "/T"])  # best-effort
-            self.get_logger().info("Killing perl.exe processes by path...")
+            self.logger.info("Killing perl.exe processes by path...")
             self._kill_lrr_perl_processes_by_path()
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self._get_lrr_pid() is None and is_port_available(lrr_port):
-                self.get_logger().debug("LRR shutdown complete...?")
+                self.logger.debug("LRR shutdown complete...?")
                 # could be a hoax, let's check again
                 time.sleep(1.0)
                 if self._get_lrr_pid() is None and is_port_available(lrr_port):
-                    self.get_logger().info("LRR shutdown complete.")
+                    self.logger.info("LRR shutdown complete.")
                     return
                 else:
-                    self.get_logger().warning(f"Nope, ANOTHER process seems to be owning LRR port {lrr_port} now.")
+                    self.logger.warning(f"Nope, ANOTHER process seems to be owning LRR port {lrr_port} now.")
                     continue
             new_owner = self._get_port_owner_pid(lrr_port)
             if new_owner:
-                self.get_logger().info(f"Yet another process seems to be owning LRR port {lrr_port}; killing...")
+                self.logger.info(f"Yet another process seems to be owning LRR port {lrr_port}; killing...")
                 subprocess.run(["taskkill", "/PID", str(new_owner), "/F", "/T"])
             time.sleep(0.2)
 
         self._ensure_port_free(lrr_port, service_name="LRR", timeout=60)
         if is_port_available(lrr_port):
-            self.get_logger().info("LRR shutdown complete after extended wait.")
+            self.logger.info("LRR shutdown complete after extended wait.")
         else:
-            self.get_logger().warning(f"Wow! LRR port {lrr_port} STILL. WON'T. LET. GO.")
+            self.logger.warning(f"Wow! LRR port {lrr_port} STILL. WON'T. LET. GO.")
         raise DeploymentException(f"LRR is still running or port {lrr_port} still occupied after {timeout}s.")
 
     @override
@@ -308,18 +303,18 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         redis_port = self._get_redis_port()
 
         if not pid:
-            self.get_logger().info("No Redis PID found, skipping shutdown.")
+            self.logger.info("No Redis PID found, skipping shutdown.")
             return
 
         output = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"])
         if output.returncode != 0:
-            self.get_logger().error(f"Redis PID {pid} shutdown failed with exit code {output.returncode}")
+            self.logger.error(f"Redis PID {pid} shutdown failed with exit code {output.returncode}")
         else:
-            self.get_logger().debug(f"Redis PID {pid} shutdown output: {output.stdout}")
+            self.logger.debug(f"Redis PID {pid} shutdown output: {output.stdout}")
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self._get_redis_pid() is None and is_port_available(redis_port):
-                self.get_logger().debug(f"Redis PID {pid} shutdown complete.")
+                self.logger.debug(f"Redis PID {pid} shutdown complete.")
                 return
 
             time.sleep(0.2)
@@ -374,7 +369,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     #     if not runfile.exists():
     #         raise FileNotFoundError(f"Runfile {runfile} not found.")
 
-    #     self.get_logger().debug("Building script.")
+    #     self.logger.debug("Building script.")
     #     script = [
     #         "powershell.exe",
     #         "-NoProfile",
@@ -387,7 +382,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     #         "-RedisPort", str(self._get_redis_port())
     #     ]
     #     script_s = subprocess.list2cmdline(script)
-    #     self.get_logger().info(f"Preparing to run script: {script_s}")
+    #     self.logger.info(f"Preparing to run script: {script_s}")
 
     #     process = subprocess.Popen(
     #         script,
@@ -405,7 +400,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     #             line = line.rstrip("\r\n")
     #             if line:
     #                 captured_lines.append(line)
-    #                 self.get_logger().info(line)
+    #                 self.logger.info(line)
     #         stream.close()
     #     t = threading.Thread(target=log_stream, args=(process.stdout,), daemon=True)
     #     t.start()
@@ -449,7 +444,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self._get_port_owner_pid(self._get_redis_port())
 
     def _test_redis_connection(self, max_retries: int=4):
-        self.get_logger().debug("Connecting to Redis...")
+        self.logger.debug("Connecting to Redis...")
         if not self.redis:
             self.redis = redis.Redis(host="127.0.0.1", port=self._get_redis_port(), decode_responses=True)
 
@@ -462,10 +457,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 if retry_count >= max_retries:
                     raise
                 time_to_sleep = 2 ** (retry_count + 1)
-                self.get_logger().warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
+                self.logger.warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
                 retry_count += 1
                 time.sleep(time_to_sleep)
-        self.get_logger().info("Redis connection established.")
+        self.logger.info("Redis connection established.")
 
     def _get_port_owner_pid(self, port: int) -> Optional[int]:
         cmd = f"Get-NetTCPConnection -LocalPort {port} | Select-Object -First 1 -ExpandProperty OwningProcess"
@@ -492,36 +487,36 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         )
         pids = [p.strip() for p in result.stdout.splitlines() if p.strip().isdigit()]
         for p in pids:
-            self.get_logger().debug(f"Killing perl process PID {p}...")
+            self.logger.debug(f"Killing perl process PID {p}...")
             subprocess.run(["taskkill", "/PID", p, "/F", "/T"])
-        self.get_logger().debug("Killing perl processes by path attempt complete.")
+        self.logger.debug("Killing perl processes by path attempt complete.")
 
     def _ensure_port_free(self, port: int, service_name: str, timeout: int = 15):
         """
         Ensure the given port is free by attempting to kill the owning process tree and waiting.
         If port is a suspected LRR port, also kill perl.exe processes by path.
         """
-        self.get_logger().info(f"Ensuring port {port} is free for {service_name}...")
+        self.logger.info(f"Ensuring port {port} is free for {service_name}...")
         if is_port_available(port):
-            self.get_logger().debug(f"{service_name} port {port} is already free.")
+            self.logger.debug(f"{service_name} port {port} is already free.")
             return
         owner_pid = self._get_port_owner_pid(port)
         if owner_pid:
-            self.get_logger().debug(f"Killing process {owner_pid} for {service_name} port {port}...")
+            self.logger.debug(f"Killing process {owner_pid} for {service_name} port {port}...")
             subprocess.run(["taskkill", "/PID", str(owner_pid), "/F", "/T"])
         if port == self.get_lrr_port() and not is_port_available(port):
-            self.get_logger().warning(f"LRR port {port} still occupied after best-effort cleanup; killing perl.exe processes by path.")
+            self.logger.warning(f"LRR port {port} still occupied after best-effort cleanup; killing perl.exe processes by path.")
             self._kill_lrr_perl_processes_by_path()
         deadline = time.time() + timeout
         while time.time() < deadline:
             if is_port_available(port):
-                self.get_logger().debug(f"{service_name} port {port} is now free...?")
+                self.logger.debug(f"{service_name} port {port} is now free...?")
                 time.sleep(1.0)
                 if is_port_available(port):
-                    self.get_logger().info(f"{service_name} port {port} is now free.")
+                    self.logger.info(f"{service_name} port {port} is now free.")
                     return
                 else:
-                    self.get_logger().warning(f"Oh you sneaky snake... ANOTHER process seems to be owning {service_name} port {port} now.")
+                    self.logger.warning(f"Oh you sneaky snake... ANOTHER process seems to be owning {service_name} port {port} now.")
                     continue
             time.sleep(0.2)
         raise DeploymentException(f"{service_name} port {port} is still occupied after {timeout}s.")

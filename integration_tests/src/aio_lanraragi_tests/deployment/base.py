@@ -10,6 +10,17 @@ import requests
 class AbstractLRRDeploymentContext(abc.ABC):
 
     @property
+    def logger(self) -> logging.Logger:
+        """
+        Logger implementation assigned to a deployment.
+        """
+        return self._logger
+    
+    @logger.setter
+    def logger(self, logger: logging.Logger):
+        self._logger = logger
+
+    @property
     def resource_prefix(self) -> str:
         """
         String to be attached to the beginning of most provisioned deployment resources.
@@ -33,10 +44,6 @@ class AbstractLRRDeploymentContext(abc.ABC):
     @port_offset.setter
     def port_offset(self, new_port_offset: int):
         self._port_offset = new_port_offset
-
-    @abc.abstractmethod
-    def get_logger(self) -> logging.Logger:
-        ...
 
     @abc.abstractmethod
     def update_api_key(self, api_key: Optional[str]):
@@ -177,16 +184,16 @@ class AbstractLRRDeploymentContext(abc.ABC):
                     time_to_sleep = 2 ** (retry_count + 1)
 
                     if retry_count < test_connection_max_retries-3:
-                        self.get_logger().debug(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
+                        self.logger.debug(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
                     elif retry_count < test_connection_max_retries-2:
-                        self.get_logger().info(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
+                        self.logger.info(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
                     elif retry_count < test_connection_max_retries-1:
-                        self.get_logger().warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
+                        self.logger.warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
                     retry_count += 1
                     time.sleep(time_to_sleep)
                     continue
                 else:
-                    self.get_logger().error("Failed to connect to LRR server! Dumping logs and shutting down server.")
+                    self.logger.error("Failed to connect to LRR server! Dumping logs and shutting down server.")
                     self.display_lrr_logs()
                     self.teardown(remove_data=True)
                     raise DeploymentException("Failed to connect to the LRR server!")
@@ -204,4 +211,4 @@ class AbstractLRRDeploymentContext(abc.ABC):
             log_text = lrr_logs.decode('utf-8', errors='replace')
             for line in log_text.split('\n'):
                 if line.strip():
-                    self.get_logger().log(log_level, f"LRR: {line}")
+                    self.logger.log(log_level, f"LRR: {line}")
