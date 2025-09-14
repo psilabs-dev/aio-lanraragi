@@ -7,10 +7,9 @@ For each testing pipeline, a corresponding LRR environment is set up and torn do
 import asyncio
 import logging
 from pathlib import Path
-import sys
 import tempfile
 from typing import Generator, List, Tuple
-import docker
+from aio_lanraragi_tests.deployment.factory import generate_deployment
 import numpy as np
 import pytest
 import pytest_asyncio
@@ -71,8 +70,6 @@ from lanraragi.models.tankoubon import (
 )
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
-from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 from aio_lanraragi_tests.common import compute_upload_checksum, DEFAULT_API_KEY
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import (
@@ -95,40 +92,10 @@ def port_offset() -> Generator[int, None, None]:
 
 @pytest.fixture(autouse=True)
 def environment(request: pytest.FixtureRequest, port_offset: int, resource_prefix: str):
-
-    global_run_id: int = request.config.global_run_id
-    is_lrr_debug_mode: bool = request.config.getoption("--lrr-debug") 
-
-    # TODO: this should be refactored.
-    environment: AbstractLRRDeploymentContext = None
-
-    # check operating system.
-    match sys.platform:
-        case 'win32':
-            windist: str = request.config.getoption("--windist")
-            environment = WindowsLRRDeploymentContext(
-                windist, resource_prefix, port_offset
-            )
-
-        case 'darwin' | 'linux':
-            # TODO: we're assuming macos is used as a development environment with docker installed,
-            # not a testing environment; for macos github runners, we would be using them
-            # to run homebrew integration tests.
-
-            build_path: str = request.config.getoption("--build")
-            image: str = request.config.getoption("--image")
-            git_url: str = request.config.getoption("--git-url")
-            git_branch: str = request.config.getoption("--git-branch")
-            use_docker_api: bool = request.config.getoption("--docker-api")
-            docker_client = docker.from_env()
-            docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
-            environment = DockerLRRDeploymentContext(
-                build_path, image, git_url, git_branch, docker_client, resource_prefix, port_offset, docker_api=docker_api,
-                global_run_id=global_run_id, is_allow_uploads=True
-            )
-
+    is_lrr_debug_mode: bool = request.config.getoption("--lrr-debug")
+    environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset)
     environment.setup(with_api_key=True, with_nofunmode=True, lrr_debug_mode=is_lrr_debug_mode)
-    request.session.lrr_environment = environment # Store environment in pytest session for access in hooks
+    request.session.lrr_environment = environment
     yield environment
     environment.teardown(remove_data=True)
 
