@@ -23,9 +23,12 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     @property
     def contents_dir(self) -> Path:
         """
-        Absolute path to the entire LRR application
+        Absolute path to the entire LRR application. For testing purposes,
+        contents_dir is determined by windist path + resource prefix.
+
+        At the end of testing, the contents_dir should be removed.
         """
-        return self._contents_dir
+        return self.windist_path / self.resource_prefix + "contents"
     
     @property
     def redis_dir(self) -> Path:
@@ -33,10 +36,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         Absolute path to the Redis application (according to runfile, is same as contents dir)
         """
         return self.contents_dir
-
-    @contents_dir.setter
-    def contents_dir(self, path: Path):
-        self._contents_dir = path.absolute()
 
     @property
     def thumb_dir(self) -> Path:
@@ -93,13 +92,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self._redis_client = client
 
     def __init__(
-        self, windist_path: str, resource_prefix: str, port_offset: int,
+        self, windist_path: Path, resource_prefix: str, port_offset: int,
         logger: Optional[logging.Logger]=None
     ):
         self.resource_prefix = resource_prefix
         self.port_offset = port_offset
 
-        self.windist_path = Path(windist_path)
+        self.windist_path = windist_path
+
         if logger is None:
             logger = LOGGER
         self.logger = logger
@@ -152,39 +152,51 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         windist_path = self.windist_path
         if not windist_path.exists():
             raise FileNotFoundError(f"win-dist path {windist_path} not found.")
-        
+
         # log the setup resource allocations for user to see
         self.logger.info(f"Deploying Windows LRR with the following resources: LRR port {lrr_port}, Redis port {redis_port}, content path {self.contents_dir}.")
 
-        # # this does NOT belong here.
-        # self.logger.info("Checking if ports are available.")
-        # if not is_port_available(lrr_port):
-        #     self.logger.warning(f"LRR port {lrr_port} is occupied; attempting to free it.")
-        #     self._ensure_port_free(lrr_port, service_name="LRR", timeout=15)
-        #     if not is_port_available(lrr_port):
-        #         # What now.
-        #         raise DeploymentException(f"Port {lrr_port} is occupied.")
-        # if not is_port_available(redis_port):
-        #     raise DeploymentException(f"Redis port {redis_port} is occupied.")
+        contents_dir = self.contents_dir
+        thumb_dir = self.thumb_dir
+        if contents_dir.exists():
+            self.logger.info(f"Contents directory exists: {contents_dir}")
+        else:
+            self.logger.info(f"Creating contents dir: {contents_dir}")
+            contents_dir.mkdir(parents=True, exist_ok=False)
+        if thumb_dir.exists():
+            self.logger.info(f"Thumb directory exists: {thumb_dir}")
+        else:
+            self.logger.info(f"Creating thumb directory: {thumb_dir}")
+            thumb_dir.mkdir(parents=True, exist_ok=False)
 
-        self.logger.info("Creating required directories...")
-        self.contents_dir.mkdir(parents=True, exist_ok=True)
-        self.thumb_dir.mkdir(parents=True, exist_ok=True)
-
-        self.start_redis()
+        # we need to handle cases where existing services are running.
+        # Unlike docker, we have no idea whether we can skip recreation of
+        # the LRR process, so we will always recreate it.
+        if is_port_available(redis_port):
+            self.start_redis()
+            self._test_redis_connection()
+            self.logger.info(f"Redis service is established on port {redis_port}.")
+        else:
+            self._test_redis_connection()
+            self.logger.info(f"Running Redis service confirmed on port {redis_port}, skipping startup.")
         if with_api_key:
-            self.logger.info("Adding API key to Redis...")
             self.update_api_key(DEFAULT_API_KEY)
         if with_nofunmode:
-            self.logger.info("Enabling NoFun mode...")
             self.enable_nofun_mode()
         if lrr_debug_mode:
-            self.logger.info("Enabling debug mode in LRR...")
             self.enable_lrr_debug_mode()
+        self.logger.info("Redis post-connect configuration complete.")
 
-        self.start_lrr()
-        self.test_lrr_connection()
-        self.logger.debug("Collecting PID info...")
+        if is_port_available(lrr_port):
+            self.start_lrr()
+            self.test_lrr_connection()
+            self.logger.info(f"LRR service is established on port {lrr_port}.")
+        else:
+            self.logger.info(f"Found running LRR service on port {lrr_port}. Restarting...")
+            self.stop_lrr()
+            self.start_lrr()
+            self.logger.info("LRR service restarted.")
+
         self.redis_pid = self._get_redis_pid()
         self.lrr_pid = self._get_lrr_pid()
 
