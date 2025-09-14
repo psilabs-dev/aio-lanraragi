@@ -1,6 +1,5 @@
 import logging
 import os
-import ctypes
 from pathlib import Path
 import redis
 import redis.exceptions
@@ -418,7 +417,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         port = self.lrr_port
 
         # we will try to shutdown LRR over the course of 2 seconds by 
-        # continuously monitoring the port and shutting down (first gracefully) whatever process that tries to use it.
+        # continuously monitoring the port and shutting down whatever process that tries to use it.
         # THEN, if port is still not available, move to kill perl.
         # and THEN, if port is STILL not available: just scream tbh.
         deadline = time.time() + timeout
@@ -428,25 +427,19 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         while time.time() < deadline:
             if (pid := self.lrr_pid) and (pid is not None):
                 if is_free_times:
-                    self.logger.info(f"Attempting graceful stop (Ctrl-C) for LRR PID {pid} (is_free_times reset from {is_free_times})")
+                    self.logger.info(f"Killing LRR process (is_free_times = {is_free_times} has been reset): {pid}")
                 else:
-                    self.logger.info(f"Attempting graceful stop (Ctrl-C) for LRR PID {pid}")
+                    self.logger.info(f"Killing LRR process: {pid}")
                 is_free_times = 0 # reset this counter if we have a newfound port claimer.
-
-                # given we have a PID: try CTRL+C broadcast, but if that doesn't work then do a kill.
-                if self._send_ctrl_c_to_pid(pid, wait_seconds=5.0):
-                    time.sleep(0.2)
+                script = [
+                    "taskkill", "/PID", str(pid), "/F", "/T"
+                ]
+                output = subprocess.run(script, capture_output=True, text=True)
+                if output.returncode != 0:
+                    raise DeploymentException(f"Failed to stop LRR process with script {subprocess.list2cmdline(script)} ({output.returncode}): STDERR={output.stderr}")
                 else:
-                    self.logger.warning(f"Graceful stop timed out for PID {pid}; force-killing...")
-                    script = [
-                        "taskkill", "/PID", str(pid), "/F", "/T"
-                    ]
-                    output = subprocess.run(script, capture_output=True, text=True)
-                    if output.returncode != 0:
-                        raise DeploymentException(f"Failed to stop LRR process with script {subprocess.list2cmdline(script)} ({output.returncode}): STDERR={output.stderr}")
-                    else:
-                        self.logger.debug(f"Killed LRR process {pid}. Output: {output.stdout}")
-                        time.sleep(0.2)
+                    self.logger.debug(f"Killed LRR process {pid}. Output: {output.stdout}")
+                    time.sleep(0.2)
             else:
                 if is_free_times >= free_times_threshold:
                     # second-to-last sanity check.
