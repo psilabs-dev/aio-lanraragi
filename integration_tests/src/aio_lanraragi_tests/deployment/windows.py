@@ -197,6 +197,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.start_lrr()
             self.logger.info("LRR service restarted.")
 
+        # TODO: do we need this?
         self.redis_pid = self._get_redis_pid()
         self.lrr_pid = self._get_lrr_pid()
 
@@ -206,33 +207,34 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def start(self, test_connection_max_retries: int = 4):
         self.start_redis()
         self._test_redis_connection()
+        self.logger.info("Started Redis.")
         self.start_lrr()
         self.test_lrr_connection()
+        self.logger.info("Started LRR.")
 
     @override
     def stop(self):
         self.stop_lrr()
+        self.logger.info("Stopped LRR.")
         self.stop_redis()
+        self.logger.info("Stopped Redis.")
 
     @override
     def restart(self):
-        self.logger.info("Restart require detected; restarting LRR and Redis...")
         self.stop()
         self.start()
-        self.logger.info("Restart complete.")
 
     @override
     def teardown(self, remove_data: bool=False):
         """
         Forceful shutdown of LRR and Redis and remove the content path, preparing it for another test.
         """
-        self.stop_lrr()
-        self.stop_redis()
         contents_dir = self.contents_dir
+        self.stop()
 
         if contents_dir.exists() and remove_data:
-            self.logger.info(f"Removing content path: {contents_dir}")
             shutil.rmtree(contents_dir)
+            self.logger.info(f"Removed contents directory: {contents_dir}")
 
     @override
     def start_lrr(self):
