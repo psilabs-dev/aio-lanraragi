@@ -19,7 +19,7 @@ from git import Repo
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
-from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PORT, DEFAULT_REDIS_PORT
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_REDIS_PORT
 
 DEFAULT_REDIS_DOCKER_TAG = "redis:7.2.4"
 DEFAULT_LANRARAGI_DOCKER_TAG = "difegue/lanraragi"
@@ -321,7 +321,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.info(f"Volume exists: {redis_volume_name}.")
 
         # prepare the redis container first.
-        redis_port = self._get_redis_port()
+        redis_port = self.redis_port
         redis_container_name = self._get_redis_container_name()
         redis_healthcheck = {
             "test": [ "CMD", "redis-cli", "--raw", "incr", "ping" ],
@@ -351,7 +351,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             )
 
         # then prepare the LRR container.
-        lrr_port = self.get_lrr_port()
+        lrr_port = self.lrr_port
         lrr_container_name = self._get_lrr_container_name()
         lrr_contents_vol_name = self._get_lrr_contents_volume_name()
         lrr_thumb_vol_name = self._get_lrr_thumb_volume_name()
@@ -414,7 +414,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         # start lrr
         self.start_lrr()
         self.logger.debug("Testing connection to LRR server.")
-        self.test_lrr_connection(self.get_lrr_port(), test_connection_max_retries)
+        self.test_lrr_connection(self.lrr_port, test_connection_max_retries)
         if self.is_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
@@ -432,7 +432,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         self.start_lrr()
         self.logger.debug("Testing connection to LRR server.")
-        self.test_lrr_connection(self.get_lrr_port(), test_connection_max_retries)
+        self.test_lrr_connection(self.lrr_port, test_connection_max_retries)
         if self.is_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
@@ -454,7 +454,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.stop()
         self.start()
         self.logger.debug("Testing connection to LRR server.")
-        self.test_lrr_connection(self.get_lrr_port())
+        self.test_lrr_connection(self.lrr_port)
 
     @override
     def teardown(self, remove_data: bool=False):
@@ -521,13 +521,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if container := self.lrr_container:
             return container
         raise DeploymentException("No LRR container found!")
-
-    @override
-    def get_lrr_port(self) -> int:
-        return DEFAULT_LRR_PORT + self.port_offset
-
-    def _get_redis_port(self) -> int:
-        return DEFAULT_REDIS_PORT + self.port_offset
 
     def _reset_docker_test_env(self, remove_data: bool=False):
         """

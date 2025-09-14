@@ -73,7 +73,7 @@ from lanraragi.models.tankoubon import (
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
-from aio_lanraragi_tests.common import compute_upload_checksum, DEFAULT_API_KEY, DEFAULT_LRR_PORT
+from aio_lanraragi_tests.common import compute_upload_checksum, DEFAULT_API_KEY
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import (
     CreatePageRequest,
@@ -86,11 +86,15 @@ from aio_lanraragi_tests.archive_generation.metadata import create_tag_generator
 logger = logging.getLogger(__name__)
 
 @pytest.fixture
+def resource_prefix() -> Generator[str, None, None]:
+    yield "test_"
+
+@pytest.fixture
 def port_offset() -> Generator[int, None, None]:
     yield 10
 
 @pytest.fixture(autouse=True)
-def session_setup_teardown(request: pytest.FixtureRequest, port_offset: int):
+def environment(request: pytest.FixtureRequest, port_offset: int, resource_prefix: str):
 
     global_run_id: int = request.config.global_run_id
     is_lrr_debug_mode: bool = request.config.getoption("--lrr-debug") 
@@ -103,7 +107,7 @@ def session_setup_teardown(request: pytest.FixtureRequest, port_offset: int):
         case 'win32':
             windist: str = request.config.getoption("--windist")
             environment = WindowsLRRDeploymentContext(
-                windist, "test_", 10,
+                windist, resource_prefix, port_offset
             )
 
         case 'darwin' | 'linux':
@@ -119,13 +123,13 @@ def session_setup_teardown(request: pytest.FixtureRequest, port_offset: int):
             docker_client = docker.from_env()
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
             environment = DockerLRRDeploymentContext(
-                build_path, image, git_url, git_branch, docker_client, "test_", 10, docker_api=docker_api,
+                build_path, image, git_url, git_branch, docker_client, resource_prefix, port_offset, docker_api=docker_api,
                 global_run_id=global_run_id, is_allow_uploads=True
             )
 
     environment.setup(with_api_key=True, with_nofunmode=True, lrr_debug_mode=is_lrr_debug_mode)
     request.session.lrr_environment = environment # Store environment in pytest session for access in hooks
-    yield
+    yield environment
     environment.teardown(remove_data=True)
 
 @pytest.fixture
@@ -139,12 +143,12 @@ def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
     yield asyncio.BoundedSemaphore(value=8)
 
 @pytest_asyncio.fixture
-async def lanraragi(port_offset: int) ->  Generator[LRRClient, None, None]:
+async def lanraragi(environment: AbstractLRRDeploymentContext) ->  Generator[LRRClient, None, None]:
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
     client = LRRClient(
-        lrr_host=f"http://localhost:{DEFAULT_LRR_PORT + port_offset}",
+        lrr_host=f"http://localhost:{environment.lrr_port}",
         lrr_api_key=DEFAULT_API_KEY,
         timeout=10
     )
@@ -1156,7 +1160,7 @@ async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
     # <<<<< GET MINION JOB DETAILS STAGE <<<<<
 
 @pytest.mark.asyncio
-async def test_concurrent_clients(port_offset: int):
+async def test_concurrent_clients(environment: AbstractLRRDeploymentContext):
     """
     Example test that shows how to use multiple client instances
     with a shared session for better performance.
@@ -1164,12 +1168,12 @@ async def test_concurrent_clients(port_offset: int):
     session = aiohttp.ClientSession()
     try:
         client1 = LRRClient(
-            lrr_host=f"http://localhost:{DEFAULT_LRR_PORT + port_offset}",
+            lrr_host=f"http://localhost:{environment.lrr_port}",
             lrr_api_key="lanraragi",
             session=session
         )
         client2 = LRRClient(
-            lrr_host=f"http://localhost:{DEFAULT_LRR_PORT + port_offset}",
+            lrr_host=f"http://localhost:{environment.lrr_port}",
             lrr_api_key="lanraragi",
             session=session
         )
