@@ -1,5 +1,6 @@
 import logging
 import os
+import ctypes
 from pathlib import Path
 import redis
 import redis.exceptions
@@ -417,7 +418,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         port = self.lrr_port
 
         # we will try to shutdown LRR over the course of 2 seconds by 
-        # continuously monitoring the port and shutting down whatever process that tries to use it.
+        # continuously monitoring the port and shutting down (first gracefully) whatever process that tries to use it.
         # THEN, if port is still not available, move to kill perl.
         # and THEN, if port is STILL not available: just scream tbh.
         deadline = time.time() + timeout
@@ -427,19 +428,25 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         while time.time() < deadline:
             if (pid := self.lrr_pid) and (pid is not None):
                 if is_free_times:
-                    self.logger.info(f"Killing LRR process (is_free_times = {is_free_times} has been reset): {pid}")
+                    self.logger.info(f"Attempting graceful stop (Ctrl-C) for LRR PID {pid} (is_free_times reset from {is_free_times})")
                 else:
-                    self.logger.info(f"Killing LRR process: {pid}")
+                    self.logger.info(f"Attempting graceful stop (Ctrl-C) for LRR PID {pid}")
                 is_free_times = 0 # reset this counter if we have a newfound port claimer.
-                script = [
-                    "taskkill", "/PID", str(pid), "/F", "/T"
-                ]
-                output = subprocess.run(script, capture_output=True, text=True)
-                if output.returncode != 0:
-                    raise DeploymentException(f"Failed to stop LRR process with script {subprocess.list2cmdline(script)} ({output.returncode}): STDERR={output.stderr}")
-                else:
-                    self.logger.debug(f"Killed LRR process {pid}. Output: {output.stdout}")
+
+                # given we have a PID: try CTRL+C broadcast, but if that doesn't work then do a kill.
+                if self._send_ctrl_c_to_pid(pid, wait_seconds=5.0):
                     time.sleep(0.2)
+                else:
+                    self.logger.warning(f"Graceful stop timed out for PID {pid}; force-killing...")
+                    script = [
+                        "taskkill", "/PID", str(pid), "/F", "/T"
+                    ]
+                    output = subprocess.run(script, capture_output=True, text=True)
+                    if output.returncode != 0:
+                        raise DeploymentException(f"Failed to stop LRR process with script {subprocess.list2cmdline(script)} ({output.returncode}): STDERR={output.stderr}")
+                    else:
+                        self.logger.debug(f"Killed LRR process {pid}. Output: {output.stdout}")
+                        time.sleep(0.2)
             else:
                 if is_free_times >= free_times_threshold:
                     # second-to-last sanity check.
@@ -506,6 +513,45 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         )
         pid = result.stdout.strip()
         return int(pid) if pid.isdigit() else None
+
+    def _send_ctrl_c_to_pid(self, pid: int, wait_seconds: float = 5.0) -> bool:
+        """
+        Attempt to gracefully stop a console process by sending Ctrl-C to its console.
+        Returns True if the process likely exited within wait_seconds, False otherwise.
+        """
+        self.logger.info(f"[send_ctrl_c_to_pid] CTRL+C signal send parameters: PID={pid}, wait_seconds={wait_seconds}")
+        kernel32 = ctypes.windll.kernel32
+        CTRL_C_EVENT = 0
+
+        kernel32.FreeConsole()
+        self.logger.info("[send_ctrl_c_to_pid] Detached existing console.")
+        attached = kernel32.AttachConsole(ctypes.c_uint(pid))
+        if not attached:
+            self.logger.info(f"[send_ctrl_c_to_pid] Failed to attach to console belonging to: {pid}")
+            return False
+        self.logger.info(f"[send_ctrl_c_to_pid] Attached to console belonging to: {pid}")
+
+        try:
+            self.logger.info(f"[send_ctrl_c_to_pid] Broadcasting CTRL+C to all processes attached to console of {pid}...")
+            kernel32.SetConsoleCtrlHandler(None, True)
+            if not kernel32.GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0):
+                self.logger.warning(f"[send_ctrl_c_to_pid] Broadcast was not delivered: {pid}")
+                return False
+
+            self.logger.info(f"[send_ctrl_c_to_pid] Broadcast successful; observing pid {pid}...")
+            deadline = time.time() + wait_seconds
+            while time.time() < deadline:
+                out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True)
+                if f" {pid} " not in out.stdout:
+                    self.logger.info("[send_ctrl_c_to_pid] shutdown observed.")
+                    return True
+                time.sleep(0.2)
+            self.logger.warning(f"[send_ctrl_c_to_pid] failed to shutdown PID {pid}.")
+            return False
+        finally:
+            kernel32.FreeConsole()
+            kernel32.SetConsoleCtrlHandler(None, False)
+            self.logger.info("[send_ctrl_c_to_pid] Cleaned up signaller.")
 
     # TODO: I hope we don't have to use this.
     def _kill_lrr_perl_processes_by_path(self):
