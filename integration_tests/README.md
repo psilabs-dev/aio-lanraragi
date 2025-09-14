@@ -6,7 +6,7 @@ Versioning of `integration_tests` is synced to that of `aio-lanraragi`.
 
 ## Usage
 
-Integration testing relies on a deployment environment. Currently two environments (Docker, Windows runfile) are supported.
+Integration testing relies on a deployment environment. Currently two environments (Docker, Windows runfile) are supported. Ensure port range 3010-3020 (LRR testing ports) and 6389-6399 (Redis testing ports) are available.
 
 ### Docker Deployment
 

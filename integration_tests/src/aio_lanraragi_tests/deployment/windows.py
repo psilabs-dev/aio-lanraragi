@@ -481,7 +481,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                     self.logger.warning(f"No owners found for occupied port: {port} ({is_free_times+1}/{free_times_threshold})")
                 time.sleep(tts)
 
-        raise DeploymentException(f"Failed to kill LRR process and provide port availability within {deadline}s!")
+        raise DeploymentException(f"Failed to kill LRR process and provide port availability within {timeout}s!")
 
     @override
     def stop_redis(self, timeout: int = 10):
@@ -529,6 +529,11 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger.info(f"[send_ctrl_c_to_pid] CTRL+C signal send parameters: PID={pid}, wait_seconds={wait_seconds}")
         kernel32 = ctypes.windll.kernel32
         CTRL_C_EVENT = 0
+
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True)
+        if f" {pid} " not in out.stdout:
+            self.logger.info(f"[send_ctrl_c_to_pid] PID {pid} already exited before signaling.")
+            return True
 
         kernel32.FreeConsole()
         self.logger.info("[send_ctrl_c_to_pid] Detached existing console.")
