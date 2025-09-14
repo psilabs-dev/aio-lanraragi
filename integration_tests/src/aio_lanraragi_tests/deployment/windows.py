@@ -67,7 +67,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @property
     def redis_conf(self) -> Path:
-        return self.windist_path / "runtime" / "redis" / "redis.conf"
+        return Path("runtime") / "redis" / "redis.conf"
 
     @property
     def redis_pid_path(self) -> Path:
