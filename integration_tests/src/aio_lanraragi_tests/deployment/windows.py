@@ -507,50 +507,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         pid = result.stdout.strip()
         return int(pid) if pid.isdigit() else None
 
-    def _send_ctrl_c_to_pid(self, pid: int, wait_seconds: float = 5.0) -> bool:
-        """
-        Attempt to gracefully stop a console process by sending Ctrl-C to its console.
-        Returns True if the process likely exited within wait_seconds, False otherwise.
-        """
-        self.logger.info(f"[send_ctrl_c_to_pid] CTRL+C signal send parameters: PID={pid}, wait_seconds={wait_seconds}")
-        kernel32 = ctypes.windll.kernel32
-        CTRL_C_EVENT = 0
-
-        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True)
-        if f" {pid} " not in out.stdout:
-            self.logger.info(f"[send_ctrl_c_to_pid] PID {pid} already exited before signaling.")
-            return True
-
-        kernel32.FreeConsole()
-        self.logger.info("[send_ctrl_c_to_pid] Detached existing console.")
-        attached = kernel32.AttachConsole(ctypes.c_uint(pid))
-        if not attached:
-            self.logger.info(f"[send_ctrl_c_to_pid] Failed to attach to console belonging to: {pid}")
-            return False
-        self.logger.info(f"[send_ctrl_c_to_pid] Attached to console belonging to: {pid}")
-
-        try:
-            self.logger.info(f"[send_ctrl_c_to_pid] Broadcasting CTRL+C to all processes attached to console of {pid}...")
-            kernel32.SetConsoleCtrlHandler(None, True)
-            if not kernel32.GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0):
-                self.logger.warning(f"[send_ctrl_c_to_pid] Broadcast was not delivered: {pid}")
-                return False
-
-            self.logger.info(f"[send_ctrl_c_to_pid] Broadcast successful; observing pid {pid}...")
-            deadline = time.time() + wait_seconds
-            while time.time() < deadline:
-                out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True)
-                if f" {pid} " not in out.stdout:
-                    self.logger.info("[send_ctrl_c_to_pid] shutdown observed.")
-                    return True
-                time.sleep(0.2)
-            self.logger.warning(f"[send_ctrl_c_to_pid] failed to shutdown PID {pid}.")
-            return False
-        finally:
-            kernel32.FreeConsole()
-            kernel32.SetConsoleCtrlHandler(None, False)
-            self.logger.info("[send_ctrl_c_to_pid] Cleaned up signaller.")
-
     # TODO: I hope we don't have to use this.
     def _kill_lrr_perl_processes_by_path(self):
         """
