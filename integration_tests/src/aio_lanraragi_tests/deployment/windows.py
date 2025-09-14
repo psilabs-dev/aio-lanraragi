@@ -199,11 +199,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.start_lrr()
             self.logger.info("LRR service restarted.")
 
-        # TODO: do we need this?
-        self.redis_pid = self._get_redis_pid()
-        self.lrr_pid = self._get_lrr_pid()
-
-        self.logger.info(f"Completed setup of LANraragi. LRR PID = {self.lrr_pid}; Redis PID = {self.redis_pid}.")
+        redis_pid = self._get_redis_pid()
+        lrr_pid = self._get_lrr_pid()
+        self.logger.info(f"Completed setup of LANraragi. LRR PID = {lrr_pid}; Redis PID = {redis_pid}.")
 
     @override
     def start(self, test_connection_max_retries: int = 4):
