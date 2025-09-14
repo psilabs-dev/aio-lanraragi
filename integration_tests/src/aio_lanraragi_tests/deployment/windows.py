@@ -355,59 +355,32 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def stop_lrr(self, timeout: int = 60):
         """
-        Stop the LRR server.
-
-        This will try to kill the LRR server by PID, then by port owner PID, 
-        then by perl.exe processes started from our win-dist runtime.
-
-        lrr_pid being None only means PID probe didn't find a listening owner
-        at that instant, does not guarantee that the port is bindable.
-
-        Taskkill only returns when we found a PID, if PID lookup fails, skips
-        kill and doesn't wait for port to be clear.
+        Stop the LRR server using the same strategy as Karen:
+        - Broadcast Ctrl+C to the console process group
+        - Wait up to 5s for perl.exe processes started from the win-dist runtime to exit
+        - Force-kill remaining perl.exe processes started from that path
         """
-        pid = self._get_lrr_pid()
-        lrr_port = self.lrr_port
-        
-        if pid:
-            self.logger.info(f"LRR PID {pid} found; killing...")
-            output = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"])
-            if output.returncode != 0:
-                self.logger.error(f"LRR PID {pid} shutdown failed with exit code {output.returncode}")
-            else:
-                self.logger.debug(f"LRR PID {pid} shutdown output: {output.stdout}")
-        else:
-            self.logger.warning("No LRR PID found; attempting to free port and kill matching processes.")
-            owner_pid = self._get_port_owner_pid(lrr_port)
-            if owner_pid:
-                self.logger.info(f"Killing process {owner_pid} for LRR port {lrr_port}...")
-                subprocess.run(["taskkill", "/PID", str(owner_pid), "/F", "/T"])  # best-effort
-            self.logger.info("Killing perl.exe processes by path...")
-            self._kill_lrr_perl_processes_by_path()
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if self._get_lrr_pid() is None and is_port_available(lrr_port):
-                self.logger.debug("LRR shutdown complete...?")
-                # could be a hoax, let's check again
-                time.sleep(1.0)
-                if self._get_lrr_pid() is None and is_port_available(lrr_port):
-                    self.logger.info("LRR shutdown complete.")
-                    return
-                else:
-                    self.logger.warning(f"Nope, ANOTHER process seems to be owning LRR port {lrr_port} now.")
-                    continue
-            new_owner = self._get_port_owner_pid(lrr_port)
-            if new_owner:
-                self.logger.info(f"Yet another process seems to be owning LRR port {lrr_port}; killing...")
-                subprocess.run(["taskkill", "/PID", str(new_owner), "/F", "/T"])
-            time.sleep(0.2)
-
-        self._ensure_port_free(lrr_port, service_name="LRR", timeout=60)
-        if is_port_available(lrr_port):
-            self.logger.info("LRR shutdown complete after extended wait.")
-        else:
-            self.logger.warning(f"Wow! LRR port {lrr_port} STILL. WON'T. LET. GO.")
-        raise DeploymentException(f"LRR is still running or port {lrr_port} still occupied after {timeout}s.")
+        perl_path = str((self.windist_path / "runtime" / "bin" / "perl.exe").absolute())
+        ps = (
+            "Add-Type -TypeDefinition @'"
+            "using System; using System.Runtime.InteropServices;"
+            "public static class Ctrl {"
+            "[DllImport(\"kernel32.dll\")] public static extern bool SetConsoleCtrlHandler(IntPtr HandlerRoutine, bool Add);"
+            "[DllImport(\"kernel32.dll\")] public static extern bool GenerateConsoleCtrlEvent(uint dwCtrlEvent, uint dwProcessGroupId);"
+            "}"
+            "'@;"
+            f"$perl='{'{}'.format(perl_path).replace("'","''")}';"
+            "$pids = Get-CimInstance Win32_Process -Filter \"Name = 'perl.exe'\" | Where-Object { $_.ExecutablePath -ieq $perl } | Select-Object -ExpandProperty ProcessId;"
+            "[Ctrl]::SetConsoleCtrlHandler([IntPtr]::Zero, $true) | Out-Null;"
+            "[Ctrl]::GenerateConsoleCtrlEvent(0, 0) | Out-Null;"
+            "Start-Sleep -Milliseconds 100;"
+            "foreach ($pid in $pids) {"
+            "  try { $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue; if ($proc) { $proc.WaitForExit(5000) } } catch {}"
+            "  $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue; if ($proc) { Start-Process -FilePath taskkill -ArgumentList \"/PID $pid /F /T\" -WindowStyle Hidden -NoNewWindow | Out-Null }"
+            "}"
+            "[Ctrl]::SetConsoleCtrlHandler([IntPtr]::Zero, $false) | Out-Null;"
+        )
+        subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps])
 
     @override
     def stop_redis(self, timeout: int = 10):
