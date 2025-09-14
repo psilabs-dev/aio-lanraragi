@@ -438,15 +438,22 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                     time.sleep(0.2)
                 else:
                     self.logger.warning(f"Graceful stop timed out for PID {pid}; force-killing...")
-                    script = [
-                        "taskkill", "/PID", str(pid), "/F", "/T"
-                    ]
-                    output = subprocess.run(script, capture_output=True, text=True)
-                    if output.returncode != 0:
-                        raise DeploymentException(f"Failed to stop LRR process with script {subprocess.list2cmdline(script)} ({output.returncode}): STDERR={output.stderr}")
+                    tasklist = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True)
+                    if f" {pid} " not in tasklist.stdout:
+                        self.logger.info(f"PID {pid} has already exited; skipping force-kill.")
                     else:
-                        self.logger.debug(f"Killed LRR process {pid}. Output: {output.stdout}")
-                        time.sleep(0.2)
+                        script = [
+                            "taskkill", "/PID", str(pid), "/F", "/T"
+                        ]
+                        output = subprocess.run(script, capture_output=True, text=True)
+                        if output.returncode != 0:
+                            if output.stderr and "not found" in output.stderr.lower():
+                                self.logger.info(f"PID {pid} not found during taskkill; assuming it already exited.")
+                            else:
+                                raise DeploymentException(f"Failed to stop LRR process with script {subprocess.list2cmdline(script)} ({output.returncode}): STDERR={output.stderr}")
+                        else:
+                            self.logger.debug(f"Killed LRR process {pid}. Output: {output.stdout}")
+                            time.sleep(0.2)
             else:
                 if is_free_times >= free_times_threshold:
                     # second-to-last sanity check.
