@@ -122,13 +122,18 @@ jobs:
         run: |
           pip install .
 
+      - name: Create staging directory
+        run: |
+          New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE\staging" -Force | Out-Null
+
       - name: Run integration tests
         working-directory: aio-lanraragi/integration_tests
         run: |
           $env:CI='true'
           pytest tests `
           --log-cli-level=INFO `
-          --windist "$env:GITHUB_WORKSPACE\\LANraragi\\win-dist" `
+          --windist "$env:GITHUB_WORKSPACE\LANraragi\win-dist" `
+          --staging "$env:GITHUB_WORKSPACE\staging" `
           --npseed 42 `
           --exitfirst
 
