@@ -14,47 +14,47 @@ on:
 
 jobs:
 
-  # integration-tests-ubuntu:
-  #   name: Integration Tests (Ubuntu)
-  #   runs-on: ubuntu-latest
-  #   timeout-minutes: 60
+  integration-tests-ubuntu:
+    name: Integration Tests (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     
-  #   permissions:
-  #     contents: read
-  #     packages: read
+    permissions:
+      contents: read
+      packages: read
     
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
         
-  #     - name: Set up Python
-  #       uses: actions/setup-python@v5
-  #       with:
-  #         python-version: '3.12'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
           
-  #     - name: Install main package (aio-lanraragi)
-  #       run: |
-  #         python -m pip install --upgrade pip
-  #         pip install ".[dev]"
+      - name: Install main package (aio-lanraragi)
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
           
-  #     - name: Move to integration_tests and install test library
-  #       run: |
-  #         cd integration_tests
-  #         pip install .
+      - name: Move to integration_tests and install test library
+        run: |
+          cd integration_tests
+          pip install .
           
-  #     - name: Run integration tests
-  #       run: |
-  #         cd integration_tests
-  #         export CI=true
-  #         pytest tests --log-cli-level=INFO \
-  #           --git-url=https://github.com/difegue/LANraragi.git \
-  #           --git-branch=dev \
-  #           --docker-api \
-  #           --npseed 42 \
-  #           --exitfirst
-  #       env:
-  #         # Ensure Docker daemon is accessible to Python docker SDK
-  #         DOCKER_HOST: unix:///var/run/docker.sock
+      - name: Run integration tests
+        run: |
+          cd integration_tests
+          export CI=true
+          pytest tests --log-cli-level=INFO \
+            --git-url=https://github.com/difegue/LANraragi.git \
+            --git-branch=dev \
+            --docker-api \
+            --npseed 42 \
+            --exitfirst
+        env:
+          # Ensure Docker daemon is accessible to Python docker SDK
+          DOCKER_HOST: unix:///var/run/docker.sock
   
   # windows integration tests
   # refer to https://github.com/Difegue/LANraragi/blob/dev/.github/workflows/push-continous-delivery.yml
@@ -62,71 +62,44 @@ jobs:
     name: Integration Tests (Windows)
     runs-on: windows-2025
     timeout-minutes: 60
-    environment: lrr
 
     permissions:
       contents: read
       packages: read
       
     steps:
-      # Using prebuilt windist from S3; build steps not required
-      
-      # Prepare win-dist from S3 artifact instead of uploading
-      # Required environment secrets (environment: lrr): AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET, S3_REGION
-      - name: Set S3 object key for windist zip
-        shell: pwsh
-        run: |
-          $s3Key = "lanraragi/windist/79/merge/LANraragi-win-20250915-001751-50c809b.zip"
-          "S3_OBJECT_KEY=$s3Key" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "ARCHIVE_NAME=$([System.IO.Path]::GetFileName($s3Key))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Checkout LANraragi repository
+        uses: actions/checkout@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.S3_REGION }}
+          repository: difegue/LANraragi
+          ref: dev
+          submodules: true
+          path: LANraragi
 
-      - name: Ensure AWS CLI is available
-        shell: pwsh
-        run: |
-          if (Get-Command aws -ErrorAction SilentlyContinue) {
-            aws --version
-          } else {
-            Write-Host "AWS CLI not found. Installing..."
-            $msi = "$env:RUNNER_TEMP\AWSCLIV2.msi"
-            Invoke-WebRequest -Uri "https://awscli.amazonaws.com/AWSCLIV2.msi" -OutFile $msi
-            Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn" -Wait
-            $awsPath = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
-            if (Test-Path $awsPath) {
-              & $awsPath --version
-              $env:PATH = "C:\Program Files\Amazon\AWSCLIV2;$env:PATH"
-              "PATH=$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Append
-            } else {
-              Write-Error "Failed to install AWS CLI."
-              exit 1
-            }
-          }
+      - name: Setup MSYS2 UCRT64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
 
-      - name: Download windist from S3
-        shell: pwsh
+      - name: Install deps
+        shell: msys2 {0}
+        working-directory: LANraragi
         run: |
-          if ([string]::IsNullOrWhiteSpace("${{ secrets.S3_BUCKET }}")) {
-            Write-Error "S3_BUCKET environment secret is not set."
-            exit 1
-          }
-          $download = Join-Path $env:GITHUB_WORKSPACE $env:ARCHIVE_NAME
-          $s3uri = "s3://${{ secrets.S3_BUCKET }}/$($env:S3_OBJECT_KEY)"
-          aws s3 cp "$s3uri" "$download" --only-show-errors
+          ./tools/build/windows/install-deps.sh
 
-      - name: Unzip windist to expected test site
-        shell: pwsh
+      - name: Build
+        shell: msys2 {0}
+        working-directory: LANraragi
         run: |
-          $dest = Join-Path $env:GITHUB_WORKSPACE "LANraragi\win-dist"
-          New-Item -ItemType Directory -Path $dest -Force | Out-Null
-          $zip = Join-Path $env:GITHUB_WORKSPACE $env:ARCHIVE_NAME
-          Expand-Archive -Path $zip -DestinationPath $dest -Force
-          Write-Host "Expanded to: $dest"
+          ./tools/build/windows/install.sh
+          ./tools/build/windows/cleanup.sh
+          ./tools/build/windows/create-dist.sh
+
+      - name: Enable UTF-8
+        working-directory: LANraragi
+        run: |
+          ./tools/build/windows/utf8-support.ps1
 
       - name: Checkout aio-lanraragi
         uses: actions/checkout@v4
@@ -163,7 +136,7 @@ jobs:
     if: always()
 
     needs:
-      # - integration-tests-ubuntu
+      - integration-tests-ubuntu
       - integration-tests-windows
     runs-on: ubuntu-latest
     steps:
