@@ -462,9 +462,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                             raise DeploymentException(f"Failed to provide port {port} availability after killing Perl processes!")
                 is_free_times += 1
                 if is_port_available(port):
-                    self.logger.info(f"Port available: {port} ({is_free_times+1}/{free_times_threshold})")
+                    self.logger.info(f"Port available: {port} ({is_free_times}/{free_times_threshold})")
                 else:
-                    self.logger.warning(f"No owners found for occupied port: {port} ({is_free_times+1}/{free_times_threshold})")
+                    self.logger.warning(f"No owners found for occupied port: {port} ({is_free_times}/{free_times_threshold})")
                 time.sleep(tts)
 
         raise DeploymentException(f"Failed to kill LRR process and provide port availability within {timeout}s!")
