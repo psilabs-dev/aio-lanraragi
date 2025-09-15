@@ -5,7 +5,7 @@ import pytest
 
 logger = logging.getLogger(__name__)
 
-@pytest.mark.experimental
+# @pytest.mark.experimental
 def test_deployment(request: pytest.FixtureRequest):
     """
     Tests multiple deployments.
