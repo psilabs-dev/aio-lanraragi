@@ -32,9 +32,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     /path/to/staging_dir/
         |- {resource_prefix}win-dist/
             |- ...
-        |- {resource_prefix}contents_dir/
+        |- {resource_prefix}contents/
             |- thumb/
             |- temp/
+        |- {resource_prefix}redis/          # dedicated redis directory (instead of using contents)
         |- {resource_prefix}log/
             |- lanraragi.log
             |- redis.log
@@ -78,7 +79,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Absolute path to the Redis application (according to runfile, is same as contents dir)
         """
-        return self.contents_dir
+        redis_dirname = self.resource_prefix + "redis"
+        return self.staging_dir / redis_dirname
 
     @property
     def thumb_dir(self) -> Path:
@@ -89,11 +91,13 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @property
     def logs_dir(self) -> Path:
-        return self.staging_dir / f"{self.resource_prefix}log"
+        logs_dir = self.resource_prefix + "log"
+        return self.staging_dir / logs_dir
     
     @property
     def pid_dir(self) -> Path:
-        return self.contents_dir / f"{self.resource_prefix}pid"
+        pid_dir = self.resource_prefix + "pid"
+        return self.staging_dir / pid_dir
 
     @property
     def temp_dir(self) -> Path:
@@ -131,7 +135,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Absolute path to the LRR distribution directory containing the runfile.
         """
-        return self.staging_dir / f"{self.resource_prefix}win-dist"
+        windist_dir = self.resource_prefix + "win-dist"
+        return self.staging_dir / windist_dir
 
     @property
     def original_windist_dir(self) -> Path:
@@ -469,14 +474,13 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             pid_filepath = self.redis_pid_path
             redis_dir = self.redis_dir
             redis_logfile_path = self.redis_log_path
-            contents_dir = self.contents_dir
 
             if not logs_dir.exists():
                 self.logger.info(f"Creating logs directory: {logs_dir}")
                 logs_dir.mkdir(parents=True, exist_ok=False)
-            if not contents_dir.exists():
-                self.logger.info(f"Creating contents directory: {contents_dir}")
-                contents_dir.mkdir(parents=True, exist_ok=False)
+            if not redis_dir.exists():
+                self.logger.info(f"Creating redis directory: {redis_dir}")
+                redis_dir.mkdir(parents=True, exist_ok=False)
 
             script = [
                 str(redis_server_path), str(self.redis_conf),
