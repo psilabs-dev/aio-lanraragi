@@ -409,19 +409,25 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         temp_dir = self.temp_dir
         self.stop()
 
-        if contents_dir.exists() and remove_data:
-            shutil.rmtree(contents_dir)
-            self.logger.info(f"Removed contents directory: {contents_dir}")
-            shutil.rmtree(log_dir)
-            self.logger.info(f"Removed logs directory: {log_dir}")
-            shutil.rmtree(pid_dir)
-            self.logger.info(f"Removed PID directory: {pid_dir}")
-            shutil.rmtree(windist_dir)
-            self.logger.info(f"Removed windist directory: {windist_dir}")
-            shutil.rmtree(redis_dir)
-            self.logger.info(f"Removed redis directory: {redis_dir}")
-            shutil.rmtree(temp_dir)
-            self.logger.info(f"Removed temp directory: {temp_dir}")
+        if remove_data:
+            if contents_dir.exists():
+                shutil.rmtree(contents_dir)
+                self.logger.info(f"Removed contents directory: {contents_dir}")
+            if log_dir.exists():
+                shutil.rmtree(log_dir)
+                self.logger.info(f"Removed logs directory: {log_dir}")
+            if pid_dir.exists():
+                shutil.rmtree(pid_dir)
+                self.logger.info(f"Removed PID directory: {pid_dir}")
+            if windist_dir.exists():
+                shutil.rmtree(windist_dir)
+                self.logger.info(f"Removed windist directory: {windist_dir}")
+            if redis_dir.exists():
+                shutil.rmtree(redis_dir)
+                self.logger.info(f"Removed redis directory: {redis_dir}")
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+                self.logger.info(f"Removed temp directory: {temp_dir}")
 
     @override
     def start_lrr(self):
