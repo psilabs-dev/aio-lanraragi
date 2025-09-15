@@ -19,7 +19,7 @@ from git import Repo
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
-from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_REDIS_PORT
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_REDIS_PORT, is_port_available
 
 DEFAULT_REDIS_DOCKER_TAG = "redis:7.2.4"
 DEFAULT_LANRARAGI_DOCKER_TAG = "difegue/lanraragi"
@@ -448,6 +448,20 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.redis_container:
             self.redis_container.stop(timeout=1)
             self.logger.info(f"Stopped container: {self._get_redis_container_name()}")
+
+        # ensure ports are usable.
+        deadline = time.time() + 65
+        tts = 0.25
+        while time.time() < deadline:
+            lrr_free = is_port_available(self.lrr_port)
+            redis_free = is_port_available(self.redis_port)
+            if lrr_free and redis_free:
+                break
+            time.sleep(tts)
+        if not is_port_available(self.lrr_port):
+            self.logger.warning(f"LRR port {self.lrr_port} not bindable after stop timeout.")
+        if not is_port_available(self.redis_port):
+            self.logger.warning(f"Redis port {self.redis_port} not bindable after stop timeout.")
 
     @override
     def restart(self):

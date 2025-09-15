@@ -55,7 +55,7 @@ jobs:
         env:
           # Ensure Docker daemon is accessible to Python docker SDK
           DOCKER_HOST: unix:///var/run/docker.sock
-  
+
   # windows integration tests
   # refer to https://github.com/Difegue/LANraragi/blob/dev/.github/workflows/push-continous-delivery.yml
   integration-tests-windows:
@@ -68,7 +68,26 @@ jobs:
       packages: read
       
     steps:
+      - name: Restore windist cache
+        id: cache-windist
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}\windist\win-dist.zip
+          key: windist-${{ runner.os }}-dev
+          restore-keys: |
+            windist-${{ runner.os }}-
+
+      - name: Unzip windist from cache
+        if: steps.cache-windist.outputs.cache-hit == 'true'
+        shell: pwsh
+        run: |
+          $dest = Join-Path $env:GITHUB_WORKSPACE "LANraragi\win-dist"
+          New-Item -ItemType Directory -Path $dest -Force | Out-Null
+          $zip = Join-Path $env:GITHUB_WORKSPACE "windist\win-dist.zip"
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+
       - name: Checkout LANraragi repository
+        if: steps.cache-windist.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: difegue/LANraragi
@@ -77,18 +96,21 @@ jobs:
           path: LANraragi
 
       - name: Setup MSYS2 UCRT64
+        if: steps.cache-windist.outputs.cache-hit != 'true'
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
           update: true
 
       - name: Install deps
+        if: steps.cache-windist.outputs.cache-hit != 'true'
         shell: msys2 {0}
         working-directory: LANraragi
         run: |
           ./tools/build/windows/install-deps.sh
 
       - name: Build
+        if: steps.cache-windist.outputs.cache-hit != 'true'
         shell: msys2 {0}
         working-directory: LANraragi
         run: |
@@ -97,9 +119,28 @@ jobs:
           ./tools/build/windows/create-dist.sh
 
       - name: Enable UTF-8
+        if: steps.cache-windist.outputs.cache-hit != 'true'
         working-directory: LANraragi
         run: |
           ./tools/build/windows/utf8-support.ps1
+
+      - name: Create windist zip for cache
+        if: steps.cache-windist.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $src = Join-Path $env:GITHUB_WORKSPACE "LANraragi\win-dist"
+          $dstDir = Join-Path $env:GITHUB_WORKSPACE "windist"
+          New-Item -ItemType Directory -Path $dstDir -Force | Out-Null
+          $zip = Join-Path $dstDir "win-dist.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path (Join-Path $src '*') -DestinationPath $zip
+
+      - name: Save windist cache
+        if: steps.cache-windist.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}\windist\win-dist.zip
+          key: ${{ steps.cache-windist.outputs.cache-primary-key }}
 
       - name: Checkout aio-lanraragi
         uses: actions/checkout@v4
@@ -122,13 +163,18 @@ jobs:
         run: |
           pip install .
 
+      - name: Create staging directory
+        run: |
+          New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE\staging" -Force | Out-Null
+
       - name: Run integration tests
         working-directory: aio-lanraragi/integration_tests
         run: |
           $env:CI='true'
           pytest tests `
           --log-cli-level=INFO `
-          --windist "$env:GITHUB_WORKSPACE\\LANraragi\\win-dist" `
+          --windist "$env:GITHUB_WORKSPACE\LANraragi\win-dist" `
+          --staging "$env:GITHUB_WORKSPACE\staging" `
           --npseed 42 `
           --exitfirst
 
