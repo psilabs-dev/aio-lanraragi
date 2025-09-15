@@ -6,6 +6,7 @@ import redis.exceptions
 import shutil
 import subprocess
 import time
+import stat
 from typing import Optional, override
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
@@ -411,21 +412,27 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         if remove_data:
             if contents_dir.exists():
+                self.remove_ro(contents_dir)
                 shutil.rmtree(contents_dir)
                 self.logger.info(f"Removed contents directory: {contents_dir}")
             if log_dir.exists():
+                self.remove_ro(log_dir)
                 shutil.rmtree(log_dir)
                 self.logger.info(f"Removed logs directory: {log_dir}")
             if pid_dir.exists():
+                self.remove_ro(pid_dir)
                 shutil.rmtree(pid_dir)
                 self.logger.info(f"Removed PID directory: {pid_dir}")
             if windist_dir.exists():
+                self.remove_ro(windist_dir)
                 shutil.rmtree(windist_dir)
                 self.logger.info(f"Removed windist directory: {windist_dir}")
             if redis_dir.exists():
+                self.remove_ro(redis_dir)
                 shutil.rmtree(redis_dir)
                 self.logger.info(f"Removed redis directory: {redis_dir}")
             if temp_dir.exists():
+                self.remove_ro(temp_dir)
                 shutil.rmtree(temp_dir)
                 self.logger.info(f"Removed temp directory: {temp_dir}")
 
@@ -665,3 +672,19 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.logger.info(f"Perl process {p} not found (already terminated).")
             else:
                 raise DeploymentException(f"Failed to stop perl LRR process ({output.returncode}): STDERR={output.stderr}")
+
+    def remove_ro(self, dir: Path):
+        """
+        Recursively clear Windows Read-only attributes so directories can be removed.
+        Safe to call on non-Windows as it only adjusts POSIX write bit.
+        """
+        dir.chmod(dir.stat().st_mode | stat.S_IWRITE)
+        for root, dirs, files in os.walk(dir, topdown=False):
+            root_path = Path(root)
+            for name in files:
+                p = root_path / name
+                p.chmod(p.stat().st_mode | stat.S_IWRITE)
+            for name in dirs:
+                p = root_path / name
+                p.chmod(p.stat().st_mode | stat.S_IWRITE)
+    
