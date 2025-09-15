@@ -61,6 +61,7 @@ jobs:
     name: Integration Tests (Windows)
     runs-on: windows-2025
     timeout-minutes: 60
+    environment: integration-tests-aws
 
     permissions:
       contents: read
