@@ -6,6 +6,7 @@ import redis.exceptions
 import shutil
 import subprocess
 import time
+import socket
 from typing import Optional, override
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
@@ -451,6 +452,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                         # nope, perl kill is needed.
                         # TODO: if we don't see these warning logs for a while, we should just remove them.
                         self.logger.warning(f"No owners of port {port} found, but port is not available.")
+                        # Port diagnostics to prove non-LISTENING/ownerless state before fallback purge
+                        self._log_port_diagnostics(port)
                         self._kill_lrr_perl_processes_by_path()
                         self.logger.info("Perl process purge complete.")
 
@@ -530,3 +533,56 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 raise DeploymentException(f"Failed to stop perl LRR process ({output.returncode}): STDERR={output.stderr}")
             else:
                 self.logger.info(f"Killed perl process {p}: STDOUT = {output.stdout}")
+
+    def _log_port_diagnostics(self, port: int):
+        """
+        Write diagnostic logs to demonstrate actual TCP state for the given port.
+        This captures:
+          - Get-NetTCPConnection entries with State and OwningProcess
+          - netstat -ano filtered lines
+          - A local TCP connect() probe result to 127.0.0.1:port
+        """
+        try:
+            ps_cmd = (
+                f"$p={port}; "
+                "Get-NetTCPConnection -LocalPort $p | "
+                "Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess | "
+                "ConvertTo-Json -Compress"
+            )
+            ps_result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command", ps_cmd],
+                capture_output=True, text=True
+            )
+            ps_stdout = ps_result.stdout.strip()
+            ps_stderr = ps_result.stderr.strip()
+            if ps_stdout:
+                self.logger.warning(f"Port {port} Get-NetTCPConnection: {ps_stdout}")
+            if ps_stderr:
+                self.logger.warning(f"Port {port} Get-NetTCPConnection STDERR: {ps_stderr}")
+        except Exception as e:
+            self.logger.error(f"Failed to run Get-NetTCPConnection diagnostics for port {port}: {e}")
+
+        try:
+            # Use cmd.exe findstr for consistency
+            netstat_result = subprocess.run(
+                ["cmd.exe", "/c", f"netstat -ano | findstr :{port} "],
+                capture_output=True, text=True
+            )
+            ns_stdout = netstat_result.stdout.strip()
+            ns_stderr = netstat_result.stderr.strip()
+            if ns_stdout:
+                # Multiple lines possible; keep in one log entry
+                self.logger.warning(f"Port {port} netstat -ano lines: {ns_stdout}")
+            if ns_stderr:
+                self.logger.warning(f"Port {port} netstat -ano STDERR: {ns_stderr}")
+        except Exception as e:
+            self.logger.error(f"Failed to run netstat diagnostics for port {port}: {e}")
+
+        # Local TCP connect probe (success => a listener exists; ECONNREFUSED => not listening)
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(1.0)
+                rc = sock.connect_ex(("127.0.0.1", port))
+                self.logger.warning(f"Port {port} connect_ex result: {rc}")
+        except Exception as e:
+            self.logger.error(f"Failed TCP connect_ex probe for port {port}: {e}")
