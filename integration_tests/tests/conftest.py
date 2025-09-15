@@ -41,7 +41,10 @@ def pytest_addoption(parser: pytest.Parser):
         Optional branch name of the corresponding git repository.
 
     windist : `str`
-        Path to the LRR app distribution bundle for Windows.
+        Path to the original LRR app distribution bundle for Windows.
+
+    staging : `str`
+        Path to the LRR staging directory (where all host-based testing and file RW happens).
 
     experimental : `bool = False`
         Run experimental tests. For example, to test a set of LANraragi APIs in
@@ -59,6 +62,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--git-branch", action="store", default=None, help="Branch to checkout; if not supplied, uses the main branch.")
     parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
     parser.addoption("--windist", action="store", default=None, help="Path to the LRR app distribution for Windows.")
+    parser.addoption("--staging", action="store", default=None, help="Path to the LRR staging directory (where all host-based testing and file RW happens).")
     parser.addoption("--lrr-debug", action="store_true", default=False, help="Enable debug mode for the LRR logs.")
     parser.addoption("--experimental", action="store_true", default=False, help="Run experimental tests.")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")

@@ -16,8 +16,9 @@ def generate_deployment(request: pytest.FixtureRequest, resource_prefix: str, po
     match sys.platform:
         case 'win32':
             windist: str = request.config.getoption("--windist")
+            staging_dir: str = request.config.getoption("--staging")
             environment = WindowsLRRDeploymentContext(
-                windist, resource_prefix, port_offset
+                windist, staging_dir, resource_prefix, port_offset
             )
 
         case 'darwin' | 'linux':

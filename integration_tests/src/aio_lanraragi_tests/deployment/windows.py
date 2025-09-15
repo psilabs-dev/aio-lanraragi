@@ -17,8 +17,50 @@ LOGGER = logging.getLogger(__name__)
 
 class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     """
-    Set up a LANraragi environment on Windows. Requires a win-dist path to be provided.
+    Set up a LANraragi environment on Windows. Requires a win-dist path and staging directory to be provided.
+
+    Staging directory is out of windist dir, and handles all the files that belong to this deployment.
+    This directory is supplied by the user, which should represent an isolated deployment environment.
+    The reason we need a staging directory, is that we want to reproduce the docker effect of an isolated
+    workspace, where each directory within this parent is a volume which can be cleaned up, giving us a 
+    volume inventory when running tests.
+
+    Staging dir will have the following structure. When tearing down and removing everything, will
+    remove all directories with the appropriate resource prefix.
+    ```
+    /path/to/original/win-dist/             # we won't try to touch this.
+    /path/to/staging_dir/
+        |- {resource_prefix}win-dist/
+            |- ...
+        |- {resource_prefix}contents_dir/
+            |- thumb/
+            |- temp/
+        |- {resource_prefix}log/
+            |- lanraragi.log
+            |- redis.log
+        |- {resource_prefix}pid/
+            |- redis.pid
+    ```
+
+    Then, we can open up concurrent testing like this:
+    ```
+    /path/to/staging_dir/
+        |- test_1_resources/
+        |- test_2_resources/
+        |- ...
+    ```
     """
+
+    @property
+    def staging_dir(self) -> Path:
+        """
+        The directory where everything can happen.
+        """
+        return self._staging_dir
+
+    @staging_dir.setter
+    def staging_dir(self, dir: Path):
+        self._staging_dir = dir.absolute()
 
     @property
     def contents_dir(self) -> Path:
@@ -29,7 +71,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         At the end of testing, the contents_dir should be removed.
         """
         contents_dirname = self.resource_prefix + "contents"
-        return self.windist_path / contents_dirname
+        return self.staging_dir / contents_dirname
     
     @property
     def redis_dir(self) -> Path:
@@ -47,8 +89,12 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @property
     def logs_dir(self) -> Path:
-        return self.contents_dir / "log"
+        return self.staging_dir / f"{self.resource_prefix}log"
     
+    @property
+    def pid_dir(self) -> Path:
+        return self.contents_dir / f"{self.resource_prefix}pid"
+
     @property
     def temp_dir(self) -> Path:
         return self.contents_dir / "temp"
@@ -63,7 +109,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     
     @property
     def redis_server_exe_path(self) -> Path:
-        return self.windist_path / "runtime" / "redis" / "redis-server.exe"
+        return self.windist_dir / "runtime" / "redis" / "redis-server.exe"
 
     @property
     def redis_conf(self) -> Path:
@@ -81,15 +127,19 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         return f"http://127.0.0.1:{self.lrr_port}"
 
     @property
-    def windist_path(self) -> Path:
+    def windist_dir(self) -> Path:
         """
         Absolute path to the LRR distribution directory containing the runfile.
         """
-        return self._windist_path
+        return self.staging_dir / f"{self.resource_prefix}win-dist"
+
+    @property
+    def original_windist_dir(self) -> Path:
+        return self._original_windist_dir
     
-    @windist_path.setter
-    def windist_path(self, path: Path):
-        self._windist_path = path.absolute()
+    @original_windist_dir.setter
+    def original_windist_dir(self, dir: Path):
+        self._original_windist_dir = dir.absolute()
 
     @property
     def redis_client(self) -> redis.Redis:
@@ -123,32 +173,33 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Path to perl executable.
         """
-        return self.windist_path / "runtime" / "bin" / "perl.exe"
+        return self.windist_dir / "runtime" / "bin" / "perl.exe"
 
     @property
     def runtime_bin_dir(self) -> Path:
-        return self.windist_path / "runtime" / "bin"
+        return self.windist_dir / "runtime" / "bin"
     
     @property
     def runtime_redis_dir(self) -> Path:
-        return self.windist_path / "runtime" / "redis"
+        return self.windist_dir / "runtime" / "redis"
     
     @property
     def lrr_launcherpl_path(self) -> Path:
-        return self.windist_path / "script" / "launcher.pl"
+        return self.windist_dir / "script" / "launcher.pl"
     
     @property
     def lrr_lanraragi_path(self) -> Path:
-        return self.windist_path / "script" / "lanraragi"
+        return self.windist_dir / "script" / "lanraragi"
 
     def __init__(
-        self, windist_path: str, resource_prefix: str, port_offset: int,
+        self, windist_path: str, staging_directory: str, resource_prefix: str, port_offset: int,
         logger: Optional[logging.Logger]=None
     ):
         self.resource_prefix = resource_prefix
         self.port_offset = port_offset
 
-        self.windist_path = Path(windist_path)
+        self.staging_dir = Path(staging_directory)
+        self.original_windist_dir = Path(windist_path)
 
         if logger is None:
             logger = LOGGER
@@ -189,6 +240,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     ):
         """
         Setup the LANraragi environment.
+        Copies original windist dir to the new temporary windist dir (if not already done).
 
         Teardowns do not necessarily guarantee port availability. Windows may
         keep a port non-bindable for a short period of time even with no visible owning process.
@@ -199,15 +251,30 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         lrr_port = self.lrr_port
         redis_port = self.redis_port
-        windist_path = self.windist_path
-        if not windist_path.exists():
-            raise FileNotFoundError(f"win-dist path {windist_path} not found.")
+        original_windist_dir = self.original_windist_dir
+        if not original_windist_dir.exists():
+            raise FileNotFoundError(f"win-dist path {original_windist_dir} not found.")
+        
+        # create the staging directory.
+        staging_dir = self.staging_dir
+        if not staging_dir.exists():
+            raise FileNotFoundError(f"Staging directory {staging_dir} not found.")
+
+        # copy the windist directory.
+        windist_dir = self.windist_dir
+        if not windist_dir.exists():
+            shutil.copy2(original_windist_dir, windist_dir)
+            self.logger.info(f"Copied original windist directory to {windist_dir}.")
 
         # log the setup resource allocations for user to see
         self.logger.info(f"Deploying Windows LRR with the following resources: LRR port {lrr_port}, Redis port {redis_port}, content path {self.contents_dir}.")
 
+        # create contents, thumb, temp.
         contents_dir = self.contents_dir
         thumb_dir = self.thumb_dir
+        temp_dir = self.temp_dir
+        log_dir = self.logs_dir
+        pid_dir = self.pid_dir
         if contents_dir.exists():
             self.logger.info(f"Contents directory exists: {contents_dir}")
         else:
@@ -218,6 +285,21 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         else:
             self.logger.info(f"Creating thumb directory: {thumb_dir}")
             thumb_dir.mkdir(parents=True, exist_ok=False)
+        if temp_dir.exists():
+            self.logger.info(f"Temp directory exists: {temp_dir}")
+        else:
+            self.logger.info(f"Creating temp dir: {temp_dir}")
+            temp_dir.mkdir(parents=True, exist_ok=False)
+        if log_dir.exists():
+            self.logger.info(f"Logs directory exists: {log_dir}")
+        else:
+            self.logger.info(f"Creating logs directory: {log_dir}")
+            log_dir.mkdir(parents=True, exist_ok=False)
+        if pid_dir.exists():
+            self.logger.info(f"PID directory exists: {pid_dir}")
+        else:
+            self.logger.info(f"Creating PID directory: {pid_dir}")
+            pid_dir.mkdir(parents=True, exist_ok=False)
 
         # we need to handle cases where existing services are running.
         # Unlike docker, we have no idea whether we can skip recreation of
@@ -298,11 +380,20 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         Forceful shutdown of LRR and Redis and remove the content path, preparing it for another test.
         """
         contents_dir = self.contents_dir
+        log_dir = self.logs_dir
+        pid_dir = self.pid_dir
+        windist_dir = self.windist_dir
         self.stop()
 
         if contents_dir.exists() and remove_data:
             shutil.rmtree(contents_dir)
             self.logger.info(f"Removed contents directory: {contents_dir}")
+            shutil.rmtree(log_dir)
+            self.logger.info(f"Removed logs directory: {contents_dir}")
+            shutil.rmtree(pid_dir)
+            self.logger.info(f"Removed PID directory: {contents_dir}")
+            shutil.rmtree(windist_dir)
+            self.logger.info(f"Removed windist directory: {contents_dir}")
 
     @override
     def start_lrr(self):
@@ -312,7 +403,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         cwd = os.getcwd()
 
         try:
-            windist_path = self.windist_path
+            windist_path = self.windist_dir
             if not windist_path.exists():
                 raise DeploymentException(f"Expected windist {windist_path} to exist.")
             os.chdir(windist_path)
@@ -368,7 +459,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         cwd = os.getcwd()
 
         try:
-            windist_path = self.windist_path.absolute()
+            windist_path = self.windist_dir.absolute()
             if not windist_path.exists():
                 raise DeploymentException(f"Expected windist {windist_path} to exist.")
             os.chdir(windist_path)
