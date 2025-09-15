@@ -56,9 +56,8 @@ jobs:
           # Ensure Docker daemon is accessible to Python docker SDK
           DOCKER_HOST: unix:///var/run/docker.sock
   
-  # windows integration tests
-  # refer to https://github.com/Difegue/LANraragi/blob/dev/.github/workflows/push-continous-delivery.yml
-  integration-tests-windows:
+  # windows integration tests with cached windist build in S3.
+  integration-tests-windows-s3:
     name: Integration Tests (Windows)
     runs-on: windows-2025
     timeout-minutes: 60
@@ -68,38 +67,60 @@ jobs:
       packages: read
       
     steps:
-      - name: Checkout LANraragi repository
-        uses: actions/checkout@v4
+      - name: Set S3 object key for windist zip
+        shell: pwsh
+        run: |
+          $s3Key = "win-dist.zip"
+          "S3_OBJECT_KEY=$s3Key" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ARCHIVE_NAME=$([System.IO.Path]::GetFileName($s3Key))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          repository: difegue/LANraragi
-          ref: dev
-          submodules: true
-          path: LANraragi
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.S3_REGION }}
 
-      - name: Setup MSYS2 UCRT64
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-
-      - name: Install deps
-        shell: msys2 {0}
-        working-directory: LANraragi
+      - name: Ensure AWS CLI is available
+        shell: pwsh
         run: |
-          ./tools/build/windows/install-deps.sh
+          if (Get-Command aws -ErrorAction SilentlyContinue) {
+            aws --version
+          } else {
+            Write-Host "AWS CLI not found. Installing..."
+            $msi = "$env:RUNNER_TEMP\AWSCLIV2.msi"
+            Invoke-WebRequest -Uri "https://awscli.amazonaws.com/AWSCLIV2.msi" -OutFile $msi
+            Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn" -Wait
+            $awsPath = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+            if (Test-Path $awsPath) {
+              & $awsPath --version
+              $env:PATH = "C:\Program Files\Amazon\AWSCLIV2;$env:PATH"
+              "PATH=$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Append
+            } else {
+              Write-Error "Failed to install AWS CLI."
+              exit 1
+            }
+          }
 
-      - name: Build
-        shell: msys2 {0}
-        working-directory: LANraragi
+      - name: Download windist from S3
+        shell: pwsh
         run: |
-          ./tools/build/windows/install.sh
-          ./tools/build/windows/cleanup.sh
-          ./tools/build/windows/create-dist.sh
+          if ([string]::IsNullOrWhiteSpace("${{ secrets.S3_BUCKET }}")) {
+            Write-Error "S3_BUCKET environment secret is not set."
+            exit 1
+          }
+          $download = Join-Path $env:GITHUB_WORKSPACE $env:ARCHIVE_NAME
+          $s3uri = "s3://${{ secrets.S3_BUCKET }}/$($env:S3_OBJECT_KEY)"
+          aws s3 cp "$s3uri" "$download" --only-show-errors
 
-      - name: Enable UTF-8
-        working-directory: LANraragi
+      - name: Unzip windist to expected test site
+        shell: pwsh
         run: |
-          ./tools/build/windows/utf8-support.ps1
+          $dest = Join-Path $env:GITHUB_WORKSPACE "LANraragi\win-dist"
+          New-Item -ItemType Directory -Path $dest -Force | Out-Null
+          $zip = Join-Path $env:GITHUB_WORKSPACE $env:ARCHIVE_NAME
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+          Write-Host "Expanded to: $dest"
 
       - name: Checkout aio-lanraragi
         uses: actions/checkout@v4
@@ -137,12 +158,94 @@ jobs:
           --npseed 42 `
           --exitfirst
 
+  # # windows integration tests
+  # # refer to https://github.com/Difegue/LANraragi/blob/dev/.github/workflows/push-continous-delivery.yml
+  # integration-tests-windows:
+  #   name: Integration Tests (Windows)
+  #   runs-on: windows-2025
+  #   timeout-minutes: 60
+
+  #   permissions:
+  #     contents: read
+  #     packages: read
+      
+  #   steps:
+  #     - name: Checkout LANraragi repository
+  #       uses: actions/checkout@v4
+  #       with:
+  #         repository: difegue/LANraragi
+  #         ref: dev
+  #         submodules: true
+  #         path: LANraragi
+
+  #     - name: Setup MSYS2 UCRT64
+  #       uses: msys2/setup-msys2@v2
+  #       with:
+  #         msystem: UCRT64
+  #         update: true
+
+  #     - name: Install deps
+  #       shell: msys2 {0}
+  #       working-directory: LANraragi
+  #       run: |
+  #         ./tools/build/windows/install-deps.sh
+
+  #     - name: Build
+  #       shell: msys2 {0}
+  #       working-directory: LANraragi
+  #       run: |
+  #         ./tools/build/windows/install.sh
+  #         ./tools/build/windows/cleanup.sh
+  #         ./tools/build/windows/create-dist.sh
+
+  #     - name: Enable UTF-8
+  #       working-directory: LANraragi
+  #       run: |
+  #         ./tools/build/windows/utf8-support.ps1
+
+  #     - name: Checkout aio-lanraragi
+  #       uses: actions/checkout@v4
+  #       with:
+  #         path: aio-lanraragi
+
+  #     - name: Setup Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.12'
+
+  #     - name: Install main package (aio-lanraragi)
+  #       working-directory: aio-lanraragi
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install ".[dev]"
+
+  #     - name: Install test library
+  #       working-directory: aio-lanraragi/integration_tests
+  #       run: |
+  #         pip install .
+
+  #     - name: Create staging directory
+  #       run: |
+  #         New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE\staging" -Force | Out-Null
+
+  #     - name: Run integration tests
+  #       working-directory: aio-lanraragi/integration_tests
+  #       run: |
+  #         $env:CI='true'
+  #         pytest tests `
+  #         --log-cli-level=INFO `
+  #         --windist "$env:GITHUB_WORKSPACE\LANraragi\win-dist" `
+  #         --staging "$env:GITHUB_WORKSPACE\staging" `
+  #         --npseed 42 `
+  #         --exitfirst
+
   check:
     if: always()
 
     needs:
       - integration-tests-ubuntu
-      - integration-tests-windows
+      - integration-tests-windows-s3
+      # - integration-tests-windows
     runs-on: ubuntu-latest
     steps:
       - name: Check if integration tests passed
