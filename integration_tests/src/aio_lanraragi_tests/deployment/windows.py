@@ -31,10 +31,18 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     /path/to/original/win-dist/             # we won't try to touch this.
     /path/to/staging_dir/
         |- {resource_prefix}win-dist/
-            |- ...
+            |- lib/
+            |- locales/
+            |- public/
+            |- runtime/
+            |- script/
+            |- templates/
+            |- lrr.conf
+            |- package.json
+            |- run.ps1
         |- {resource_prefix}contents/
             |- thumb/
-            |- temp/
+        |- {resource_prefix}temp/           # move temp out to avoid applying unnecessary Shinobu pressure
         |- {resource_prefix}redis/          # dedicated redis directory (instead of using contents)
         |- {resource_prefix}log/
             |- lanraragi.log
@@ -101,7 +109,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @property
     def temp_dir(self) -> Path:
-        return self.contents_dir / "temp"
+        temp_dir = self.resource_prefix + "temp"
+        return self.staging_dir / temp_dir
 
     @property
     def lrr_log_path(self) -> Path:
@@ -395,6 +404,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         pid_dir = self.pid_dir
         windist_dir = self.windist_dir
         redis_dir = self.redis_dir
+        temp_dir = self.temp_dir
         self.stop()
 
         if contents_dir.exists() and remove_data:
@@ -408,6 +418,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.info(f"Removed windist directory: {windist_dir}")
             shutil.rmtree(redis_dir)
             self.logger.info(f"Removed redis directory: {redis_dir}")
+            shutil.rmtree(temp_dir)
+            self.logger.info(f"Removed temp directory: {temp_dir}")
 
     @override
     def start_lrr(self):
