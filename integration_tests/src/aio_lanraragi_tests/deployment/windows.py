@@ -277,8 +277,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         # copy the windist directory.
         windist_dir = self.windist_dir
         if not windist_dir.exists():
-            shutil.copy2(original_windist_dir, windist_dir)
+            shutil.copytree(original_windist_dir, windist_dir)
             self.logger.info(f"Copied original windist directory to {windist_dir}.")
+        else:
+            self.logger.info(f"Copy of windist directory exists: {windist_dir}")
 
         # log the setup resource allocations for user to see
         self.logger.info(f"Deploying Windows LRR with the following resources: LRR port {lrr_port}, Redis port {redis_port}, content path {self.contents_dir}.")
