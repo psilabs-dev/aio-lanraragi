@@ -6,7 +6,6 @@ import redis.exceptions
 import shutil
 import subprocess
 import time
-import socket
 from typing import Optional, override
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
@@ -452,8 +451,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                         # nope, perl kill is needed.
                         # TODO: if we don't see these warning logs for a while, we should just remove them.
                         self.logger.warning(f"No owners of port {port} found, but port is not available.")
-                        # Port diagnostics to prove non-LISTENING/ownerless state before fallback purge
-                        self._log_port_diagnostics(port)
                         self._kill_lrr_perl_processes_by_path()
                         self.logger.info("Perl process purge complete.")
 
@@ -502,9 +499,15 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 time.sleep(time_to_sleep)
 
     def _get_port_owner_pid(self, port: int) -> Optional[int]:
-        cmd = f"Get-NetTCPConnection -LocalPort {port} | Select-Object -First 1 -ExpandProperty OwningProcess"
+        # Prefer LISTEN state owner to avoid TIME_WAIT rows (OwningProcess 0)
+        ps = (
+            f"$p={port}; "
+            "Get-NetTCPConnection -LocalPort $p | "
+            "Where-Object { ($_.State -eq 'Listen' -or $_.State -eq 2) -and ($_.LocalAddress -eq '127.0.0.1' -or $_.LocalAddress -eq '0.0.0.0') } | "
+            "Select-Object -First 1 -ExpandProperty OwningProcess"
+        )
         result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", cmd],
+            ["powershell.exe", "-NoProfile", "-Command", ps],
             capture_output=True, text=True
         )
         pid = result.stdout.strip()
@@ -526,63 +529,15 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             capture_output=True, text=True
         )
         pids = [p.strip() for p in result.stdout.splitlines() if p.strip().isdigit()]
+        if not pids:
+            self.logger.warning("No perl.exe processes found in win-dist runtime path to kill.")
+            return
         for p in pids:
-            # self.logger.debug(f"Killing perl process PID {p}...")
             output = subprocess.run(["taskkill", "/PID", p, "/F", "/T"], capture_output=True, text=True)
-            if output.returncode != 0:
-                raise DeploymentException(f"Failed to stop perl LRR process ({output.returncode}): STDERR={output.stderr}")
-            else:
+            if output.returncode == 0:
                 self.logger.info(f"Killed perl process {p}: STDOUT = {output.stdout}")
-
-    def _log_port_diagnostics(self, port: int):
-        """
-        Write diagnostic logs to demonstrate actual TCP state for the given port.
-        This captures:
-          - Get-NetTCPConnection entries with State and OwningProcess
-          - netstat -ano filtered lines
-          - A local TCP connect() probe result to 127.0.0.1:port
-        """
-        try:
-            ps_cmd = (
-                f"$p={port}; "
-                "Get-NetTCPConnection -LocalPort $p | "
-                "Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess | "
-                "ConvertTo-Json -Compress"
-            )
-            ps_result = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-Command", ps_cmd],
-                capture_output=True, text=True
-            )
-            ps_stdout = ps_result.stdout.strip()
-            ps_stderr = ps_result.stderr.strip()
-            if ps_stdout:
-                self.logger.warning(f"Port {port} Get-NetTCPConnection: {ps_stdout}")
-            if ps_stderr:
-                self.logger.warning(f"Port {port} Get-NetTCPConnection STDERR: {ps_stderr}")
-        except Exception as e:
-            self.logger.error(f"Failed to run Get-NetTCPConnection diagnostics for port {port}: {e}")
-
-        try:
-            # Use cmd.exe findstr for consistency
-            netstat_result = subprocess.run(
-                ["cmd.exe", "/c", f"netstat -ano | findstr :{port} "],
-                capture_output=True, text=True
-            )
-            ns_stdout = netstat_result.stdout.strip()
-            ns_stderr = netstat_result.stderr.strip()
-            if ns_stdout:
-                # Multiple lines possible; keep in one log entry
-                self.logger.warning(f"Port {port} netstat -ano lines: {ns_stdout}")
-            if ns_stderr:
-                self.logger.warning(f"Port {port} netstat -ano STDERR: {ns_stderr}")
-        except Exception as e:
-            self.logger.error(f"Failed to run netstat diagnostics for port {port}: {e}")
-
-        # Local TCP connect probe (success => a listener exists; ECONNREFUSED => not listening)
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(1.0)
-                rc = sock.connect_ex(("127.0.0.1", port))
-                self.logger.warning(f"Port {port} connect_ex result: {rc}")
-        except Exception as e:
-            self.logger.error(f"Failed TCP connect_ex probe for port {port}: {e}")
+            elif output.returncode == 128:
+                # Already terminated by a previous tree kill; not an error
+                self.logger.info(f"Perl process {p} not found (already terminated).")
+            else:
+                raise DeploymentException(f"Failed to stop perl LRR process ({output.returncode}): STDERR={output.stderr}")
