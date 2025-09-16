@@ -67,7 +67,7 @@ On test failures, pytest will attempt to collect the service logs from the runni
 
 See [pytest](https://docs.pytest.org/en/stable/#) docs for more test-related options.
 
-## Resource Management and Isolation during Test Deployments
+### Test-time Resource Management
 To prepare for potential distributed testing, we should ensure all resources provided by the test host during the lifecycle of a test session are available to one (and only one) test case. All such resources should be reclaimed at the end of tests, and at the end of a failed test or exception, *provided* they were produced during test-time. Examples of resources include: networks, volumes, containers, ports, build artifacts, processes, files, and directories.
 
 To streamline resource management, each test deployment is passed a `resource_prefix` and a `port_offset`. The former is prepended to the names of all named resources, while the latter is added to the default port values of service resources.

@@ -34,6 +34,14 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     """
     
     @property
+    def lrr_image_name(self) -> str:
+        return "lanraragi:" + str(self.global_run_id)
+
+    @property
+    def redis_container_name(self) -> str:
+        return self.resource_prefix + "redis_service"
+
+    @property
     def redis_container(self) -> Optional[docker.models.containers.Container]:
         """
         Returns the redis container from attribute if it exists.
@@ -44,13 +52,17 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         with contextlib.suppress(AttributeError):
             container = self._redis_container
         if container is None:
-            container = self._get_container_by_name(self._get_redis_container_name())
+            container = self._get_container_by_name(self.redis_container_name)
         self._redis_container = container
         return container
     
     @redis_container.setter
     def redis_container(self, container: docker.models.containers.Container):
         self._redis_container = container
+
+    @property
+    def lrr_container_name(self) -> str:
+        return self.resource_prefix + "lanraragi_service"
 
     @property
     def lrr_container(self) -> Optional[docker.models.containers.Container]:
@@ -63,7 +75,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         with contextlib.suppress(AttributeError):
             container = self._lrr_container
         if container is None:
-            container = self._get_container_by_name(self._get_lrr_container_name())
+            container = self._get_container_by_name(self.lrr_container_name)
         self._lrr_container = container
         return container
 
@@ -71,6 +83,10 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def lrr_container(self, container: docker.models.containers.Container):
         self._lrr_container = container
     
+    @property
+    def network_name(self) -> str:
+        return self.resource_prefix + "network"
+
     @property
     def network(self) -> Optional[docker.models.networks.Network]:
         """
@@ -82,7 +98,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         with contextlib.suppress(AttributeError):
             network = self._network
         if network is None:
-            network = self._get_network_by_name(self._get_network_name())
+            network = self._get_network_by_name(self.network_name)
         self._network = network
         return network
     
@@ -90,6 +106,10 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def network(self, network: docker.models.networks.Network):
         self._network = network
     
+    @property
+    def lrr_contents_volume_name(self) -> str:
+        return self.resource_prefix + "lanraragi_contents"
+
     @property
     def lrr_contents_volume(self) -> Optional[docker.models.volumes.Volume]:
         """
@@ -101,13 +121,17 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         with contextlib.suppress(AttributeError):
             volume = self._lrr_contents_volume
         if volume is None:
-            volume = self._get_volume_by_name(self._get_lrr_contents_volume_name())
+            volume = self._get_volume_by_name(self.lrr_contents_volume_name)
         self._lrr_contents_volume = volume
         return volume
 
     @lrr_contents_volume.setter
     def lrr_contents_volume(self, volume: docker.models.volumes.Volume):
         self._lrr_contents_volume = volume
+
+    @property
+    def lrr_thumb_volume_name(self) -> str:
+        return self.resource_prefix + "lanraragi_thumb"
 
     @property
     def lrr_thumb_volume(self) -> Optional[docker.models.volumes.Volume]:
@@ -120,13 +144,17 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         with contextlib.suppress(AttributeError):
             volume = self._lrr_thumb_volume
         if volume is None:
-            volume = self._get_volume_by_name(self._get_lrr_thumb_volume_name())
+            volume = self._get_volume_by_name(self.lrr_thumb_volume_name)
         self._lrr_thumb_volume = volume
         return volume
 
     @lrr_thumb_volume.setter
     def lrr_thumb_volume(self, volume: docker.models.volumes.Volume):
         self._lrr_thumb_volume = volume
+
+    @property
+    def redis_volume_name(self) -> str:
+        return self.resource_prefix + "redis_volume"
 
     @property
     def redis_volume(self) -> Optional[docker.models.volumes.Volume]:
@@ -139,7 +167,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         with contextlib.suppress(AttributeError):
             volume = self._redis_volume
         if volume is None:
-            volume = self._get_volume_by_name(self._get_redis_volume_name())
+            volume = self._get_volume_by_name(self.redis_volume_name)
         self._redis_volume = volume
         return volume
 
@@ -172,52 +200,52 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def update_api_key(self, api_key: Optional[str]):
         if api_key is None:
-            return self._get_redis_container().exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHDEL LRR_CONFIG apikey\nEOF'])
+            return self._exec_redis_cli("SELECT 2\nHDEL LRR_CONFIG apikey")
         else:
-            return self._get_redis_container().exec_run(["bash", "-c", f'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG apikey {api_key}\nEOF'])
+            return self._exec_redis_cli(f"SELECT 2\nHSET LRR_CONFIG apikey {api_key}")
 
     @override
     def enable_nofun_mode(self):
-        return self._get_redis_container().exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG nofunmode 1\nEOF'])
+        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG nofunmode 1")
 
     @override
     def disable_nofun_mode(self):
-        return self._get_redis_container().exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG nofunmode 0\nEOF'])
+        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG nofunmode 0")
 
     @override
     def enable_lrr_debug_mode(self):
-        return self._get_redis_container().exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG enable_devmode 1\nEOF'])
+        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG enable_devmode 1")
     
     @override
     def disable_lrr_debug_mode(self):
-        return self._get_redis_container().exec_run(["bash", "-c", 'redis-cli <<EOF\nSELECT 2\nHSET LRR_CONFIG enable_devmode 0\nEOF'])
+        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG enable_devmode 0")
 
     # by default LRR contents directory is owned by root.
     # to make it writable by the koyomi user, we need to change the ownership.
     def allow_uploads(self):
-        return self._get_lrr_container().exec_run(["sh", "-c", 'chown -R koyomi: content'])
+        return self.lrr_container.exec_run(["sh", "-c", 'chown -R koyomi: content'])
 
     @override
     def start_lrr(self):
-        return self._get_lrr_container().start()
+        return self.lrr_container.start()
     
     @override
     def start_redis(self):
-        return self._get_redis_container().start()
+        return self.redis_container.start()
 
     @override
     def stop_lrr(self, timeout: int=10):
         """
         Stop the LRR container (timeout in s)
         """
-        return self._get_lrr_container().stop(timeout=timeout)
+        return self.lrr_container.stop(timeout=timeout)
     
     @override
     def stop_redis(self, timeout: int=10):
         """
         Stop the redis container (timeout in s)
         """
-        self._get_redis_container().stop(timeout=timeout)
+        self.redis_container.stop(timeout=timeout)
 
     @override
     def get_lrr_logs(self, tail: int=100) -> bytes:
@@ -258,10 +286,10 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         # log the setup resource allocations for user to see
         # the docker image is not included, haven't decided how to classify it yet.
-        self.logger.info(f"Deploying Docker LRR with the following resources: LRR container {self._get_lrr_container_name()}, Redis container {self._get_redis_container_name()}, LRR contents volume {self._get_lrr_contents_volume_name()}, LRR thumb volume {self._get_lrr_thumb_volume_name()}, redis volume {self._get_redis_volume_name()}, network {self._get_network_name()}")
+        self.logger.info(f"Deploying Docker LRR with the following resources: LRR container {self.lrr_container_name}, Redis container {self.redis_container_name}, LRR contents volume {self.lrr_contents_volume_name}, LRR thumb volume {self.lrr_thumb_volume_name}, redis volume {self.redis_volume_name}, network {self.network_name}")
 
         # >>>>> IMAGE PREPARATION >>>>>
-        image_id = self._get_image_name_from_global_run_id()
+        image_id = self.lrr_image_name
         if self.build_path:
             self.logger.info(f"Building LRR image {image_id} from build path {self.build_path}.")
             self._build_docker_image(self.build_path, force=False)
@@ -291,7 +319,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         # <<<<< IMAGE PREPARATION <<<<<
 
         # prepare the network
-        network_name = self._get_network_name()
+        network_name = self.network_name
         if not self.network:
             self.logger.info(f"Creating network: {network_name}.")
             self.network = self.docker_client.networks.create(network_name, driver="bridge")
@@ -299,21 +327,21 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.info(f"Network exists: {network_name}.")
 
         # prepare volumes
-        contents_volume_name = self._get_lrr_contents_volume_name()
+        contents_volume_name = self.lrr_contents_volume_name
         if not self.lrr_contents_volume:
             self.logger.info(f"Creating volume: {contents_volume_name}")
             self.lrr_contents_volume = self.docker_client.volumes.create(name=contents_volume_name)
         else:
             self.logger.info(f"Volume exists: {contents_volume_name}.")
 
-        thumb_volume_name = self._get_lrr_thumb_volume_name()
+        thumb_volume_name = self.lrr_thumb_volume_name
         if not self.lrr_thumb_volume:
             self.logger.info(f"Creating volume: {thumb_volume_name}")
             self.lrr_thumb_volume = self.docker_client.volumes.create(name=thumb_volume_name)
         else:
             self.logger.info(f"Volume exists: {thumb_volume_name}.")
         
-        redis_volume_name = self._get_redis_volume_name()
+        redis_volume_name = self.redis_volume_name
         if not self.redis_volume:
             self.logger.info(f"Creating volume: {redis_volume_name}")
             self.redis_volume = self.docker_client.volumes.create(name=redis_volume_name)
@@ -322,7 +350,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         # prepare the redis container first.
         redis_port = self.redis_port
-        redis_container_name = self._get_redis_container_name()
+        redis_container_name = self.redis_container_name
         redis_healthcheck = {
             "test": [ "CMD", "redis-cli", "--raw", "incr", "ping" ],
             "start_period": 1000000 * 1000 # 1s
@@ -331,12 +359,12 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             "6379/tcp": redis_port
         }
         if self.redis_container:
-            self.logger.info(f"Redis container exists: {self._get_redis_container_name()}.")
+            self.logger.info(f"Redis container exists: {self.redis_container_name}.")
             # if such a container exists, assume it is already configured with the correct volumes and networks
             # which we have already done so in previous steps. We may also skip the "need-restart" checks,
             # since redis is not the image we're testing here and the volumes are what carry data.
         else:
-            self.logger.info(f"Creating redis container: {self._get_redis_container_name()}")
+            self.logger.info(f"Creating redis container: {self.redis_container_name}")
             self.redis_container = self.docker_client.containers.create(
                 DEFAULT_REDIS_DOCKER_TAG,
                 name=redis_container_name,
@@ -352,9 +380,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         # then prepare the LRR container.
         lrr_port = self.lrr_port
-        lrr_container_name = self._get_lrr_container_name()
-        lrr_contents_vol_name = self._get_lrr_contents_volume_name()
-        lrr_thumb_vol_name = self._get_lrr_thumb_volume_name()
+        lrr_container_name = self.lrr_container_name
+        lrr_contents_vol_name = self.lrr_contents_volume_name
+        lrr_thumb_vol_name = self.lrr_thumb_volume_name
         lrr_ports = {
             "3000/tcp": lrr_port
         }
@@ -363,7 +391,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         ]
         create_lrr_container = False
         if self.lrr_container:
-            self.logger.info(f"LRR container exists: {self._get_lrr_container_name()}.")
+            self.logger.info(f"LRR container exists: {self.lrr_container_name}.")
             # in this situation, whether we restart the LRR container depends on whether or not the images used for both containers
             # match.
             needs_recreate_lrr = self.lrr_container.image.id != self.docker_client.images.get(image_id).id
@@ -377,7 +405,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         else:
             create_lrr_container = True
         if create_lrr_container:
-            self.logger.info(f"Creating LRR container: {self._get_lrr_container_name()}")
+            self.logger.info(f"Creating LRR container: {self.lrr_container_name}")
             self.lrr_container = self.docker_client.containers.create(
                 image_id, hostname=lrr_container_name, name=lrr_container_name, detach=True, network=network_name, ports=lrr_ports, environment=lrr_environment,
                 volumes={
@@ -388,7 +416,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.info("LRR container created.")
 
         # start redis
-        self.logger.info(f"Starting container: {self._get_redis_container_name()}")
+        self.logger.info(f"Starting container: {self.redis_container_name}")
         self.redis_container.start()
         self.logger.info("Redis container started.")
         self.logger.debug("Running Redis post-startup configuration.")
@@ -426,7 +454,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def start(self, test_connection_max_retries: int=4):
         # this can't really be replaced with setup stage, because during setup we do some work after redis startup 
         # and before LRR startup.
-        self.logger.info(f"Starting container: {self._get_redis_container_name()}")
+        self.logger.info(f"Starting container: {self.redis_container_name}")
         self.redis_container.start()
         self.logger.info("Redis container started.")
 
@@ -444,12 +472,13 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def stop(self):
         if self.lrr_container:
             self.lrr_container.stop(timeout=1)
-            self.logger.info(f"Stopped container: {self._get_lrr_container_name()}")
+            self.logger.info(f"Stopped container: {self.lrr_container_name}")
         if self.redis_container:
             self.redis_container.stop(timeout=1)
-            self.logger.info(f"Stopped container: {self._get_redis_container_name()}")
+            self.logger.info(f"Stopped container: {self.redis_container_name}")
 
         # ensure ports are usable.
+        # TODO: why does this take so long?
         deadline = time.time() + 65
         tts = 0.25
         while time.time() < deadline:
@@ -465,33 +494,32 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def restart(self):
-        self.stop()
-        self.start()
+        """
+        Basically stop and start, except we don't do the check on port availability.
+        """
+        if self.lrr_container:
+            self.lrr_container.stop(timeout=1)
+            self.logger.info(f"Stopped container: {self.lrr_container_name}")
+        if self.redis_container:
+            self.redis_container.stop(timeout=1)
+            self.logger.info(f"Stopped container: {self.redis_container_name}")
+        self.logger.info(f"Starting container: {self.redis_container_name}")
+        self.redis_container.start()
+        self.logger.info("Redis container started.")
+        self.start_lrr()
         self.logger.debug("Testing connection to LRR server.")
         self.test_lrr_connection(self.lrr_port)
+        if self.is_allow_uploads:
+            resp = self.allow_uploads()
+            if resp.exit_code != 0:
+                self._reset_docker_test_env(remove_data=True)
+                raise DeploymentException(f"Failed to modify permissions for LRR contents: {resp}")
+        self.logger.info("LRR server is ready.")
 
     @override
     def teardown(self, remove_data: bool=False):
         self._reset_docker_test_env(remove_data=remove_data)
         self.logger.info("Cleanup complete.")
-
-    def _get_lrr_contents_volume_name(self) -> str:
-        return f"{self.resource_prefix}lanraragi_contents"
-
-    def _get_lrr_thumb_volume_name(self) -> str:
-        return f"{self.resource_prefix}lanraragi_thumb"
-
-    def _get_redis_volume_name(self) -> str:
-        return f"{self.resource_prefix}redis_data"
-
-    def _get_network_name(self) -> str:
-        return f"{self.resource_prefix}network"
-
-    def _get_lrr_container_name(self) -> str:
-        return f"{self.resource_prefix}lanraragi_service"
-
-    def _get_redis_container_name(self) -> str:
-        return f"{self.resource_prefix}redis_service"
 
     def _get_container_by_name(self, container_name: str) -> Optional[docker.models.containers.Container]:
         """
@@ -520,21 +548,14 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             return container
         return None
 
-    def _get_redis_container(self) -> docker.models.containers.Container:
+    def _exec_redis_cli(self, command: str) -> docker.models.containers.ExecResult:
         """
-        Returns Redis container if it exists, or else raise a Deployment exception.
+        Executes a command on the redis container.
         """
-        if container := self.redis_container:
-            return container
-        raise DeploymentException("No redis container found!")
-    
-    def _get_lrr_container(self) -> docker.models.containers.Container:
-        """
-        Returns Redis container if it exists, or else raise a Deployment exception.
-        """
-        if container := self.lrr_container:
-            return container
-        raise DeploymentException("No LRR container found!")
+        container = self.redis_container
+        if container is None:
+            raise DeploymentException("No redis container found!")
+        return container.exec_run(["bash", "-c", f'redis-cli <<EOF\n{command}\nEOF'])
 
     def _reset_docker_test_env(self, remove_data: bool=False):
         """
@@ -548,25 +569,25 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         if self.lrr_container:
             self.lrr_container.remove(force=True)
-            self.logger.info(f"Removed container: {self._get_lrr_container_name()}")
+            self.logger.info(f"Removed container: {self.lrr_container_name}")
         if self.redis_container:
             self.redis_container.remove(force=True)
-            self.logger.info(f"Removed container: {self._get_redis_container_name()}")
+            self.logger.info(f"Removed container: {self.redis_container_name}")
 
         if remove_data:
             if self.lrr_contents_volume:
                 self.lrr_contents_volume.remove(force=True)
-                self.logger.info(f"Removed volume: {self._get_lrr_contents_volume_name()}")
+                self.logger.info(f"Removed volume: {self.lrr_contents_volume_name}")
             if self.lrr_thumb_volume:
                 self.lrr_thumb_volume.remove(force=True)
-                self.logger.info(f"Removed volume: {self._get_lrr_thumb_volume_name()}")
+                self.logger.info(f"Removed volume: {self.lrr_thumb_volume_name}")
             if self.redis_volume:
                 self.redis_volume.remove(force=True)
-                self.logger.info(f"Removed volume: {self._get_redis_volume_name()}")
+                self.logger.info(f"Removed volume: {self.redis_volume_name}")
 
         if hasattr(self, 'network') and self.network:
             self.network.remove()
-            self.logger.info(f"Removed network: {self._get_network_name()}")
+            self.logger.info(f"Removed network: {self.network_name}")
 
     def _build_docker_image(self, build_path: Path, force: bool=False):
         """
@@ -576,7 +597,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             build_path: The path to the build directory.
             force: Whether to force the build (e.g. even if the image already exists).
         """
-        image_id = self._get_image_name_from_global_run_id()
+        image_id = self.lrr_image_name
 
         if force:
             if not Path(build_path).exists():
@@ -627,11 +648,3 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.logger.debug(f"{image} not found, pulling.")
                 self.docker_client.images.pull(image)
                 return
-
-    def _get_image_name_from_global_run_id(self) -> str:
-        """
-        Get the unique name for the image for this global pytest run.
-
-        Allows for docker deployment context to build once and reuse for multiple tests.
-        """
-        return f"lanraragi:{self.global_run_id}"
