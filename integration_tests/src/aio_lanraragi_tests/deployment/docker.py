@@ -200,25 +200,25 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def update_api_key(self, api_key: Optional[str]):
         if api_key is None:
-            return self._exec_redis_cli("SELECT 2\nHDEL LRR_CONFIG apikey\nEOF")
+            return self._exec_redis_cli("SELECT 2\nHDEL LRR_CONFIG apikey")
         else:
-            return self._exec_redis_cli(f"SELECT 2\nHSET LRR_CONFIG apikey {api_key}\nEOF")
+            return self._exec_redis_cli(f"SELECT 2\nHSET LRR_CONFIG apikey {api_key}")
 
     @override
     def enable_nofun_mode(self):
-        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG nofunmode 1\nEOF")
+        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG nofunmode 1")
 
     @override
     def disable_nofun_mode(self):
-        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG nofunmode 0\nEOF")
+        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG nofunmode 0")
 
     @override
     def enable_lrr_debug_mode(self):
-        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG enable_devmode 1\nEOF")
+        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG enable_devmode 1")
     
     @override
     def disable_lrr_debug_mode(self):
-        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG enable_devmode 0\nEOF")
+        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG enable_devmode 0")
 
     # by default LRR contents directory is owned by root.
     # to make it writable by the koyomi user, we need to change the ownership.
