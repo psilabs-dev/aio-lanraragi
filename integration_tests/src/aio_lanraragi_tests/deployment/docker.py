@@ -494,10 +494,27 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def restart(self):
-        self.stop()
-        self.start()
+        """
+        Basically stop and start, except we don't do the check on port availability.
+        """
+        if self.lrr_container:
+            self.lrr_container.stop(timeout=1)
+            self.logger.info(f"Stopped container: {self.lrr_container_name}")
+        if self.redis_container:
+            self.redis_container.stop(timeout=1)
+            self.logger.info(f"Stopped container: {self.redis_container_name}")
+        self.logger.info(f"Starting container: {self.redis_container_name}")
+        self.redis_container.start()
+        self.logger.info("Redis container started.")
+        self.start_lrr()
         self.logger.debug("Testing connection to LRR server.")
         self.test_lrr_connection(self.lrr_port)
+        if self.is_allow_uploads:
+            resp = self.allow_uploads()
+            if resp.exit_code != 0:
+                self._reset_docker_test_env(remove_data=True)
+                raise DeploymentException(f"Failed to modify permissions for LRR contents: {resp}")
+        self.logger.info("LRR server is ready.")
 
     @override
     def teardown(self, remove_data: bool=False):
