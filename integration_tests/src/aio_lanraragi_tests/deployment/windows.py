@@ -1,3 +1,7 @@
+"""
+Windows LRR deployment module.
+"""
+
 from contextlib import AbstractContextManager
 import logging
 import os
@@ -18,16 +22,24 @@ from aio_lanraragi_tests.common import DEFAULT_API_KEY
 
 LOGGER = logging.getLogger(__name__)
 
-class _WindowsConsoleContextManager(AbstractContextManager):
+class _WindowsConsole(AbstractContextManager):
     """
     Context manager for windows console. Do not directly attach a process in scope, this will result in
     unaccounted-for orphaned attachments throughout the test runs.
+
+    Within a `_WindowsConsoleContextManager` scope, the following are provided:
+    - an attachment to a requested (or new) Windows console
+    - immunity to CTRL events
+    - ability to send CTRL signals to a target PID
     
-    Should obviously not be run on non-Windows systems.
+    Should obviously not be run on non-Windows systems, and since this is private we will not be checking.
     """
 
     @property
     def attach_to_pid(self) -> Optional[int]:
+        """
+        PID (if any) whose console we plan to attach to.
+        """
         return self._attach_to_pid
     
     @attach_to_pid.setter
@@ -36,6 +48,10 @@ class _WindowsConsoleContextManager(AbstractContextManager):
     
     @property
     def had_console(self) -> bool:
+        """
+        True if current process already had a console before entering context.
+        Used to know whether we must restore that original state on exit.
+        """
         return self._had_console
 
     @had_console.setter
@@ -44,6 +60,10 @@ class _WindowsConsoleContextManager(AbstractContextManager):
     
     @property
     def detached_parent(self) -> bool:
+        """
+        True if we freed our console to make room for attaching to the target's console.
+        On Windows, you must `FreeConsole` before `AttachConsole`.
+        """
         return self._detached_parent
 
     @detached_parent.setter
@@ -52,6 +72,10 @@ class _WindowsConsoleContextManager(AbstractContextManager):
     
     @property
     def allocated_console(self) -> bool:
+        """
+        True if we allocated a brand-new console during `__enter__`.
+        If so, `__exit__` will free it.
+        """
         return self._allocated_console
 
     @allocated_console.setter
@@ -264,14 +288,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         PID for the LRR process. If not cached, tries to get it via the expected port.
         """
-        return self._get_port_owner_pid(self.lrr_port)
+        return _get_port_owner_pid(self.lrr_port)
     
     @property
     def redis_pid(self) -> Optional[int]:
         """
         PID for the Redis process (which is just the owner of the Redis port).
         """
-        return self._get_port_owner_pid(self.redis_port)
+        return _get_port_owner_pid(self.redis_port)
 
     @property
     def perl_exe_path(self) -> Path:
@@ -583,7 +607,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             # does not share the test runner console.
             CREATE_NEW_PROCESS_GROUP: int = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
             CREATE_NEW_CONSOLE: int = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
-            with _WindowsConsoleContextManager():
+            with _WindowsConsole():
                 lrr_process = subprocess.Popen(
                     script,
                     env=lrr_env,
@@ -652,27 +676,24 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.info(f"Confirmed port availability on port: {port}")
             return
         elif pid := self.lrr_pid:
-            self.logger.info("Gracefully shutting down LRR application.")
-            with _WindowsConsoleContextManager(attach_to_pid=pid) as windows_console:
+            with _WindowsConsole(attach_to_pid=pid) as windows_console:
                 windows_console.send_ctrl_break_to_pid(pid)
+            self.logger.info(f"Shutting down LRR (pid={pid}) with CTRL_BREAK_EVENT; waiting...")
             while time.time() < deadline:
                 if is_port_available(port):
                     self.logger.info(f"Confirmed LRR port availability: {port}")
                     return
-                elif pid := self.lrr_pid: # assume PID is never 0 (which is reserved).
-                    self.logger.info(f"Port {port} occupied by PID {pid}; sleeping.")
-                else:
-                    self.logger.info(f"No owner for occupied port: {port}")
                 time.sleep(1)
+            self.logger.warning('LRR port still occupied after graceful shutdown.')
         else:
             # case: port is not available, but no PID found: proceed to kill by perl process.
             self.logger.warning(f"No owners found for occupied port: {port}")
         del deadline
 
-        # We have the following cases to handle (port not available)
+        # We have the following cases to handle (port not available) after graceful shutdown:
         # 1. Port is still occupied by PID.
         # 2. Port is occupied but we don't know owner.
-        self.logger.warning("LRR port still occupied after graceful shutdown; moving to hard shutdown.")
+        self.logger.info("Attempting to kill LRR process...")
         is_free_times = 0 # add a counter to track revived port claimers.
         free_times_threshold = 4
         tts = 0.5
@@ -751,21 +772,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 retry_count += 1
                 time.sleep(time_to_sleep)
 
-    def _get_port_owner_pid(self, port: int) -> Optional[int]:
-        # Prefer LISTEN state owner to avoid TIME_WAIT rows (OwningProcess 0)
-        ps = (
-            f"$p={port}; "
-            "Get-NetTCPConnection -LocalPort $p | "
-            "Where-Object { ($_.State -eq 'Listen' -or $_.State -eq 2) -and ($_.LocalAddress -eq '127.0.0.1' -or $_.LocalAddress -eq '0.0.0.0') } | "
-            "Select-Object -First 1 -ExpandProperty OwningProcess"
-        )
-        result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", ps],
-            capture_output=True, text=True
-        )
-        pid = result.stdout.strip()
-        return int(pid) if pid.isdigit() else None
-
     # TODO: I hope we don't have to use this.
     def _kill_lrr_perl_processes_by_path(self):
         """
@@ -808,4 +814,18 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             for name in dirs:
                 p = root_path / name
                 p.chmod(p.stat().st_mode | stat.S_IWRITE)
-    
+
+def _get_port_owner_pid(port: int) -> Optional[int]:
+    # Prefer LISTEN state owner to avoid TIME_WAIT rows (OwningProcess 0)
+    ps = (
+        f"$p={port}; "
+        "Get-NetTCPConnection -LocalPort $p | "
+        "Where-Object { ($_.State -eq 'Listen' -or $_.State -eq 2) -and ($_.LocalAddress -eq '127.0.0.1' -or $_.LocalAddress -eq '0.0.0.0') } | "
+        "Select-Object -First 1 -ExpandProperty OwningProcess"
+    )
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-Command", ps],
+        capture_output=True, text=True
+    )
+    pid = result.stdout.strip()
+    return int(pid) if pid.isdigit() else None
