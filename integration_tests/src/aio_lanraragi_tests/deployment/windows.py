@@ -1,6 +1,8 @@
+from contextlib import AbstractContextManager
 import logging
 import os
 from pathlib import Path
+import ctypes
 import redis
 import redis.exceptions
 import shutil
@@ -15,6 +17,89 @@ from aio_lanraragi_tests.exceptions import DeploymentException
 from aio_lanraragi_tests.common import DEFAULT_API_KEY
 
 LOGGER = logging.getLogger(__name__)
+
+class _WindowsConsoleContextManager(AbstractContextManager):
+    """
+    Context manager for windows console. Do not directly attach a process in scope, this will result in
+    unaccounted-for orphaned attachments throughout the test runs.
+    
+    Should obviously not be run on non-Windows systems.
+    """
+
+    @property
+    def attach_to_pid(self) -> Optional[int]:
+        return self._attach_to_pid
+    
+    @attach_to_pid.setter
+    def attach_to_pid(self, pid: int):
+        self._attach_to_pid = pid
+    
+    @property
+    def had_console(self) -> bool:
+        return self._had_console
+
+    @had_console.setter
+    def had_console(self, value: bool):
+        self._had_console = value
+    
+    @property
+    def detached_parent(self) -> bool:
+        return self._detached_parent
+
+    @detached_parent.setter
+    def detached_parent(self, value: bool):
+        self._detached_parent = value
+    
+    @property
+    def allocated_console(self) -> bool:
+        return self._allocated_console
+
+    @allocated_console.setter
+    def allocated_console(self, value: bool):
+        self._allocated_console = value
+
+    def __init__(self, attach_to_pid: Optional[int] = None):
+        self.attach_to_pid = attach_to_pid
+        self.had_console = False
+        self.detached_parent = False
+        self.allocated_console = False
+
+    def __enter__(self):
+        k32 = ctypes.windll.kernel32
+        get_console_window = k32.GetConsoleWindow
+        get_console_window.restype = ctypes.c_void_p
+
+        self.had_console = bool(get_console_window())
+        if self.attach_to_pid is not None and self.had_console:
+            k32.FreeConsole()
+            self.detached_parent = True
+
+        if self.attach_to_pid is not None:
+            attached = bool(k32.AttachConsole(ctypes.c_uint(self.attach_to_pid)))
+            if (not attached) and (not self.had_console) and k32.AllocConsole():
+                self.allocated_console = True
+        else:
+            if not self.had_console and k32.AllocConsole():
+                self.allocated_console = True
+        k32.SetConsoleCtrlHandler(None, True)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        k32 = ctypes.windll.kernel32
+        k32.SetConsoleCtrlHandler(None, False)
+        if self.allocated_console or self.attach_to_pid is not None:
+            k32.FreeConsole()
+        if self.detached_parent:
+            ATTACH_PARENT_PROCESS = ctypes.c_uint(0xFFFFFFFF)  # (DWORD)-1
+            k32.AttachConsole(ATTACH_PARENT_PROCESS.value)
+        return False
+
+    def send_ctrl_break_to_pid(self, pid: int):
+        k32 = ctypes.windll.kernel32
+        CTRL_BREAK_EVENT = 1
+        target = ctypes.c_uint(pid or 0)
+        k32.GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, target)
+        time.sleep(0.5)
 
 class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     """
@@ -50,6 +135,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             |- redis.log
         |- {resource_prefix}pid/
             |- redis.pid
+            |- server.pid
     ```
 
     Then, we can open up concurrent testing like this:
@@ -131,7 +217,11 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @property
     def redis_pid_path(self) -> Path:
-        return self.logs_dir / "redis.pid"
+        return self.pid_dir / "redis.pid"
+
+    @property
+    def server_pid_path(self) -> Path:
+        return self.pid_dir / "server.pid"
 
     @property
     def lrr_address(self) -> str:
@@ -412,27 +502,27 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         if remove_data:
             if contents_dir.exists():
-                self.remove_ro(contents_dir)
+                self._remove_ro(contents_dir)
                 shutil.rmtree(contents_dir)
                 self.logger.info(f"Removed contents directory: {contents_dir}")
             if log_dir.exists():
-                self.remove_ro(log_dir)
+                self._remove_ro(log_dir)
                 shutil.rmtree(log_dir)
                 self.logger.info(f"Removed logs directory: {log_dir}")
             if pid_dir.exists():
-                self.remove_ro(pid_dir)
+                self._remove_ro(pid_dir)
                 shutil.rmtree(pid_dir)
                 self.logger.info(f"Removed PID directory: {pid_dir}")
             if windist_dir.exists():
-                self.remove_ro(windist_dir)
+                self._remove_ro(windist_dir)
                 shutil.rmtree(windist_dir)
                 self.logger.info(f"Removed windist directory: {windist_dir}")
             if redis_dir.exists():
-                self.remove_ro(redis_dir)
+                self._remove_ro(redis_dir)
                 shutil.rmtree(redis_dir)
                 self.logger.info(f"Removed redis directory: {redis_dir}")
             if temp_dir.exists():
-                self.remove_ro(temp_dir)
+                self._remove_ro(temp_dir)
                 shutil.rmtree(temp_dir)
                 self.logger.info(f"Removed temp directory: {temp_dir}")
 
@@ -487,7 +577,18 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 "-d", str(self.lrr_lanraragi_path)
             ]
             self.logger.info(f"(lrr_network={lrr_network}, lrr_data_directory={lrr_data_directory}, lrr_log_directory={lrr_log_directory}, lrr_temp_directory={lrr_temp_directory}, lrr_thumb_directory={lrr_thumb_directory}) running script {subprocess.list2cmdline(script)}")
-            lrr_process = subprocess.Popen(script, env=lrr_env)
+
+            # Ensure we have a console so the child inherits it (or gets its own), and create a new
+            # process group so we can signal with CTRL_BREAK later. Also create a new console so LRR
+            # does not share the test runner console.
+            CREATE_NEW_PROCESS_GROUP: int = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+            CREATE_NEW_CONSOLE: int = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
+            with _WindowsConsoleContextManager():
+                lrr_process = subprocess.Popen(
+                    script,
+                    env=lrr_env,
+                    creationflags=CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE,
+                )
             self.logger.info(f"Started LRR process with PID: {lrr_process.pid}.")
         finally:
             os.chdir(cwd)
@@ -546,17 +647,38 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         kill and doesn't wait for port to be clear.
         """
         port = self.lrr_port
-
-        # we will try to shutdown LRR over the course of 2 seconds by 
-        # continuously monitoring the port and shutting down whatever process that tries to use it.
-        # THEN, if port is still not available, move to kill perl.
-        # and THEN, if port is STILL not available: just scream tbh.
         deadline = time.time() + timeout
+        if is_port_available(port):
+            self.logger.info(f"Confirmed port availability on port: {port}")
+            return
+        elif pid := self.lrr_pid:
+            self.logger.info("Gracefully shutting down LRR application.")
+            with _WindowsConsoleContextManager(attach_to_pid=pid) as windows_console:
+                windows_console.send_ctrl_break_to_pid(pid)
+            while time.time() < deadline:
+                if is_port_available(port):
+                    self.logger.info(f"Confirmed LRR port availability: {port}")
+                    return
+                elif pid := self.lrr_pid: # assume PID is never 0 (which is reserved).
+                    self.logger.info(f"Port {port} occupied by PID {pid}; sleeping.")
+                else:
+                    self.logger.info(f"No owner for occupied port: {port}")
+                time.sleep(1)
+        else:
+            # case: port is not available, but no PID found: proceed to kill by perl process.
+            self.logger.warning(f"No owners found for occupied port: {port}")
+        del deadline
+
+        # We have the following cases to handle (port not available)
+        # 1. Port is still occupied by PID.
+        # 2. Port is occupied but we don't know owner.
+        self.logger.warning("LRR port still occupied after graceful shutdown; moving to hard shutdown.")
         is_free_times = 0 # add a counter to track revived port claimers.
         free_times_threshold = 4
         tts = 0.5
+        deadline = time.time() + timeout
         while time.time() < deadline:
-            if (pid := self.lrr_pid) and (pid is not None):
+            if pid := self.lrr_pid:
                 if is_free_times:
                     self.logger.info(f"Killing LRR process (is_free_times = {is_free_times} has been reset): {pid}")
                 else:
@@ -673,10 +795,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             else:
                 raise DeploymentException(f"Failed to stop perl LRR process ({output.returncode}): STDERR={output.stderr}")
 
-    def remove_ro(self, dir: Path):
+    def _remove_ro(self, dir: Path):
         """
         Recursively clear Windows Read-only attributes so directories can be removed.
-        Safe to call on non-Windows as it only adjusts POSIX write bit.
         """
         dir.chmod(dir.stat().st_mode | stat.S_IWRITE)
         for root, dirs, files in os.walk(dir, topdown=False):
