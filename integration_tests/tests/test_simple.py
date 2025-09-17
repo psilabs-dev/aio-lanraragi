@@ -200,7 +200,7 @@ async def upload_archive(
                 retry_count += 1
                 continue
             except Exception as exception:
-                logger.error("Unhandled exception occurred while uploading archive!", exception)
+                logger.error("Unhandled exception occurred while uploading archive! %s", exception)
                 raise exception
 
 async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[DeleteArchiveResponse, LanraragiErrorResponse]:
