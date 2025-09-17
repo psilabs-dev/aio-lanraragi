@@ -62,6 +62,12 @@ An `ApiClient` represents a logical client for a collection of related APIs. The
 
 The `LRRClient` is a higher abstraction than `ApiContextManager` which also provides API clients for easy access in a context.
 
+### Version Policy
+
+"aio-lanraragi" will use major/minor/patch versions but stay on "0.x.x" for now.
+
+Version update is necessary only if there is change to the `src/` code (comments, styling and documentation don't count). Changes to integration tests will not require version updates.
+
 ## Scope
 
 "aio-lanraragi" is designed to abstract away the boilerplate of interfacing with a LANraragi server in Python, to allow the user to focus on application business logic, rather than the HTTP/API protocols. This includes:
