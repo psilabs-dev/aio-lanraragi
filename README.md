@@ -82,3 +82,10 @@ The scope of this library is to implement LANraragi-related API functionality wh
 In other words, **scripting** does not fall under the library's responsibility.
 
 Until a feasable client-server version-handling strategy is implemented, support for only the **most current** API specification falls under the scope of the project. Request/response changes across version updates, bug fixes, corrections, tests, and slight code practice alignments also fall within the scope of this project.
+
+<!-- how to do a release for dummies
+
+    git tag -a v0.1.4 -m "version-message"
+    git push origin v0.1.4
+
+ -->

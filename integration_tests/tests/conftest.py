@@ -1,11 +1,11 @@
 import logging
+import time
 from typing import Any, List
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 import pytest
 from _pytest.nodes import Item
 from _pytest.reports import TestReport
 from _pytest.runner import CallInfo
-
-from aio_lanraragi_tests.lrr_docker import LRREnvironment
 
 logger = logging.getLogger(__name__)
 
@@ -16,39 +16,57 @@ DEFAULT_NETWORK_NAME = "default-network"
 
 def pytest_addoption(parser: pytest.Parser):
     """
-    Set up a self-contained docker environment for LANraragi integration testing.
+    Set up a self-contained environment for LANraragi integration testing.
     New containers/networks will be created on each session. If an exception or invalid
     event occurred, an attempt will be made to clean up all test objects.
 
+    If running on a Windows machine, the `--windows-runfile` flag must be provided.
+
     Parameters
     ----------
-    build_path : `str`
-        Path to LANraragi project root directory. Overrides the `--image` flag.
-    
+    build : `str`
+        Docker image build path to LANraragi project root directory. Overrides the `--image` flag.
+
     image : `str`
-        Tag of LANraragi image to use. Defaults to "difegue/lanraragi".
+        Docker image tag to use for LANraragi image. Defaults to "difegue/lanraragi".
 
     docker-api : `bool = False`
         Use Docker API client. Requires privileged access to the Docker daemon, 
         but allows you to see build outputs.
 
     git-url : `str`
-        URL of LANraragi git repository to build an image from.
+        URL of LANraragi git repository to build a Docker image from.
 
     git-branch : `str`
         Optional branch name of the corresponding git repository.
-    
+
+    windist : `str`
+        Path to the original LRR app distribution bundle for Windows.
+
+    staging : `str`
+        Path to the LRR staging directory (where all host-based testing and file RW happens).
+
     experimental : `bool = False`
         Run experimental tests. For example, to test a set of LANraragi APIs in
         active development, but are yet merged upstream.
+
+    failing : `bool = False`
+        Run tests that are known to fail.
+
+    npseed : `int = 42`
+        Seed (in numpy) to set for any randomized behavior.
     """
     parser.addoption("--build", action="store", default=None, help="Path to docker build context for LANraragi.")
-    parser.addoption("--image", action="store", default=DEFAULT_LANRARAGI_TAG, help="LANraragi image to use.")
+    parser.addoption("--image", action="store", default=None, help="LANraragi image to use.")
     parser.addoption("--git-url", action="store", default=None, help="Link to a LANraragi git repository (e.g. fork or branch).")
     parser.addoption("--git-branch", action="store", default=None, help="Branch to checkout; if not supplied, uses the main branch.")
     parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
+    parser.addoption("--windist", action="store", default=None, help="Path to the LRR app distribution for Windows.")
+    parser.addoption("--staging", action="store", default=None, help="Path to the LRR staging directory (where all host-based testing and file RW happens).")
+    parser.addoption("--lrr-debug", action="store_true", default=False, help="Enable debug mode for the LRR logs.")
     parser.addoption("--experimental", action="store_true", default=False, help="Run experimental tests.")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
+    parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
 
 def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
@@ -72,6 +90,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: List[pytest.Item
             if 'failing' in item.keywords:
                 item.add_marker(skip_failing)
 
+def pytest_sessionstart(session: pytest.Session):
+    """
+    Configure a global run ID for a pytest session.
+    """
+    session.config.global_run_id = int(time.time() * 1000)
+
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item: Item, call: CallInfo[Any]):
     """
@@ -83,7 +107,7 @@ def pytest_runtest_makereport(item: Item, call: CallInfo[Any]):
     outcome = yield
     report: TestReport = outcome.get_result()
     if report.when == "call" and report.failed:
-        logger.info(f"Test failed: {item.nodeid}")
+        logger.info(f"Test failed: dumping logs... ({item.nodeid})")
 
         # # TODO: don't delete this tutorial; will probably use this in the future. (9/6/25)
         # # Log exception details from the report
@@ -127,8 +151,10 @@ def pytest_runtest_makereport(item: Item, call: CallInfo[Any]):
         
         try:
             if hasattr(item.session, 'lrr_environment'):
-                environment: LRREnvironment = item.session.lrr_environment
+                environment: AbstractLRRDeploymentContext = item.session.lrr_environment
+                logger.error("\n\n >>>>> LRR LOGS >>>>>")
                 environment.display_lrr_logs()
+                logger.error("<<<<< LRR LOGS <<<<<\n\n")
             else:
                 logger.warning("LRR environment not available in session for failure debugging")
         except Exception as e:
