@@ -5,15 +5,17 @@ For each testing pipeline, a corresponding LRR environment is set up and torn do
 """
 
 import asyncio
+import errno
 import logging
 from pathlib import Path
 import tempfile
-from typing import Generator, List, Tuple
+from typing import Generator, List, Optional, Tuple
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 import numpy as np
 import pytest
 import pytest_asyncio
 import aiohttp
+import aiohttp.client_exceptions
 from urllib.parse import urlparse, parse_qs
 
 from lanraragi.clients.client import LRRClient
@@ -199,9 +201,26 @@ async def upload_archive(
                 await asyncio.sleep(tts)
                 retry_count += 1
                 continue
-            except Exception as exception:
-                logger.error("Unhandled exception occurred while uploading archive! %s", exception)
-                raise exception
+            except aiohttp.client_exceptions.ClientConnectorError as client_connector_error:
+                inner_os_error: OSError = client_connector_error.os_error
+                os_errno: Optional[int] = getattr(inner_os_error, "errno", None)
+                os_winerr: Optional[int] = getattr(inner_os_error, "winerror", None)
+
+                # 1225: ERROR_CONNECTION_REFUSED
+                # 10061: WSAECONNREFUSED
+                if os_errno != errno.ECONNREFUSED and os_winerr not in (1225, 10061):
+                    raise client_connector_error
+
+                if retry_count >= max_retries:
+                    error = LanraragiErrorResponse(error=str(client_connector_error), status=408)
+                    return None, error
+                tts = 2 ** retry_count
+                logger.warning(f"Encountered refused connection while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})...")
+                await asyncio.sleep(tts)
+                retry_count += 1
+                continue
+
+            # just raise whatever else comes up because we should handle them explicitly anyways
 
 async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[DeleteArchiveResponse, LanraragiErrorResponse]:
     retry_count = 0
