@@ -30,11 +30,16 @@ def _process_get_archive_metadata_response(content: str) -> GetArchiveMetadataRe
     pagecount = response_j.get("pagecount")
     progress = response_j.get("progress")
     tags = response_j.get("tags")
+    summary = response_j.get("summary")
     lastreadtime = response_j.get("lastreadtime")
     title = response_j.get("title")
     filename = response_j.get("filename")
+    extension = response_j.get("extension")
     return GetArchiveMetadataResponse(
-        arcid=arcid, isnew=isnew, pagecount=pagecount, progress=progress, tags=tags, lastreadtime=lastreadtime, title=title, filename=filename
+        arcid=arcid, isnew=isnew, pagecount=pagecount,
+        progress=progress, tags=tags, lastreadtime=lastreadtime,
+        title=title, filename=filename, extension=extension,
+        summary=summary
     )
 
 def _process_get_archive_categories_response(content: str) -> GetArchiveCategoriesResponse:
