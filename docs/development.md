@@ -16,6 +16,8 @@ This document covers setting up a development environment and testing basics.
 
 An installation of Python. My recommendation is to develop with a tool which supports environment isolation; some good choices include [virtualenv](https://virtualenv.pypa.io/en/latest/), [pyenv](https://github.com/pyenv/pyenv), [uv](https://docs.astral.sh/uv/), or [conda](https://anaconda.org/anaconda/conda); use what you're comfortable with.
 
+Docker is required only if you plan to run integration tests with the Docker deployment. In this case, a Docker Python client will interface with the API to perform container actions for integration testing.
+
 ## Environment Setup
 
 Add developer dependencies (includes ruff, tox, pytest and so on), and install "aio-lanraragi" in editable mode:
