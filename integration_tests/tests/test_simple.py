@@ -168,7 +168,7 @@ async def get_bookmark_category_detail(client: LRRClient, semaphore: asyncio.Sem
 
 async def upload_archive(
     client: LRRClient, save_path: Path, filename: str, semaphore: asyncio.Semaphore, checksum: str=None, title: str=None, tags: str=None,
-    max_retries: int=4
+    max_retries: int=10
 ) -> Tuple[UploadArchiveResponse, LanraragiErrorResponse]:
     async with semaphore:
         with open(save_path, 'rb') as f:  # noqa: ASYNC230
