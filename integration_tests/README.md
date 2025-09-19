@@ -4,6 +4,8 @@ This directory contains the API/integration testing package for "aio-lanraragi".
 
 Versioning of `integration_tests` is synced to that of `aio-lanraragi`.
 
+For information on setting up a developer environment for testing, refer to [development](/docs/development.md).
+
 ## Usage
 
 Integration testing relies on a deployment environment. Currently two environments (Docker, Windows runfile) are supported. Ensure port range 3010-3020 (LRR testing ports) and 6389-6399 (Redis testing ports) are available.
