@@ -5,7 +5,8 @@ An asynchronous Python API client for [LANraragi](https://github.com/Difegue/LAN
 ```sh
 pip install aio-lanraragi
 ```
-A working understanding of Python's async framework is needed.
+
+For development documentation, see [development](/docs/development.md). For integration testing documentation, see [integration tests README](/integration_tests/README.md).
 
 ## Usage
 
@@ -43,15 +44,9 @@ Since aiohttp is used under the hood, you may install optional libraries (namely
 pip install "aiohttp[speedups]"
 ```
 
-## Development
-
-```sh
-pip install "aio-lanraragi[dev]"
-```
-
 Only [officially documented APIs](https://sugoi.gitbook.io/lanraragi/api-documentation) will be supported. Undocumented API calls may be invoked at the `ApiContextManager` layer by library users. Under-development APIs shall be decorated with an `@experimental` tag in library and during testing. Deprecated APIs shall be decorated with a `@deprecated` tag.
 
-### Library Description
+## Library Description
 All request/response classes are under the "src/lanraragi/models" directory, and inherit the `LanraragiRequest` and `LanraragiResponse` base class, respectively.
 
 The `ApiContextManager` is an asynchronous HTTP context manager and handle the HTTP interaction with LANraragi.
@@ -62,7 +57,7 @@ An `ApiClient` represents a logical client for a collection of related APIs. The
 
 The `LRRClient` is a higher abstraction than `ApiContextManager` which also provides API clients for easy access in a context.
 
-### Version Policy
+## Version Policy
 
 "aio-lanraragi" will use major/minor/patch versions but stay on "0.x.x" for now.
 
