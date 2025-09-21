@@ -50,8 +50,7 @@ jobs:
             --git-url=https://github.com/difegue/LANraragi.git \
             --git-branch=dev \
             --docker-api \
-            --npseed 42 \
-            --exitfirst
+            --npseed 42
         env:
           # Ensure Docker daemon is accessible to Python docker SDK
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -175,8 +174,7 @@ jobs:
           --log-cli-level=INFO `
           --windist "$env:GITHUB_WORKSPACE\LANraragi\win-dist" `
           --staging "$env:GITHUB_WORKSPACE\staging" `
-          --npseed 42 `
-          --exitfirst
+          --npseed 42
 
   check:
     if: always()
