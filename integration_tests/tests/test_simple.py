@@ -117,7 +117,7 @@ async def lanraragi(environment: AbstractLRRDeploymentContext) ->  Generator[LRR
     Provides a LRRClient for testing with proper async cleanup.
     """
     client = LRRClient(
-        lrr_host=f"http://localhost:{environment.lrr_port}",
+        lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
         lrr_api_key=DEFAULT_API_KEY,
         timeout=10
     )
@@ -1154,12 +1154,12 @@ async def test_concurrent_clients(environment: AbstractLRRDeploymentContext):
     session = aiohttp.ClientSession()
     try:
         client1 = LRRClient(
-            lrr_host=f"http://localhost:{environment.lrr_port}",
+            lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
             lrr_api_key="lanraragi",
             session=session
         )
         client2 = LRRClient(
-            lrr_host=f"http://localhost:{environment.lrr_port}",
+            lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
             lrr_api_key="lanraragi",
             session=session
         )
