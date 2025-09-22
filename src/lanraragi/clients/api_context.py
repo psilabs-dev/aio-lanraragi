@@ -27,6 +27,40 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
     multiple concurrent API calls.
     """
 
+    @property
+    def logger(self) -> logging.Logger:
+        return self._logger
+
+    @logger.setter
+    def logger(self, logger: logging.Logger):
+        self._logger = logger
+
+    @property
+    def lrr_host(self) -> str:
+        """
+        LANraragi host address.
+
+        Examples:
+        - `"http://localhost:3000"`
+        - `"https://lanraragi.example"`
+        """
+        return self._lrr_host
+    
+    @lrr_host.setter
+    def lrr_host(self, lrr_host: str):
+        self._lrr_host = lrr_host
+    
+    @property
+    def lrr_api_key(self) -> str:
+        """
+        Unencoded API key for LANraragi
+        """
+        return self._lrr_api_key
+    
+    @lrr_api_key.setter
+    def lrr_api_key(self, lrr_api_key: str):
+        self._lrr_api_key = lrr_api_key
+
     def __init__(
             self,
             lrr_host: str, lrr_api_key: str,
@@ -46,6 +80,11 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         self.initialize_api_groups()
 
     def initialize_api_groups(self):
+        """
+        A stub to be overridden by LRRClient to be used at post-construct time,
+        as auth data created during construct-time will be passed down to child
+        clients.
+        """
         return
 
     def update_api_key(self, api_key: Optional[str]):

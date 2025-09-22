@@ -40,6 +40,9 @@ class LRRClient(ApiContextManager):
 
     @property
     def archive_api(self) -> _ArchiveApiClient:
+        """
+        https://sugoi.gitbook.io/lanraragi/api-documentation/archive-api
+        """
         return self._archive_api
     @archive_api.setter
     def archive_api(self, value: _ArchiveApiClient):
@@ -47,6 +50,9 @@ class LRRClient(ApiContextManager):
 
     @property
     def category_api(self) -> _CategoryApiClient:
+        """
+        https://sugoi.gitbook.io/lanraragi/api-documentation/category-api
+        """
         return self._category_api
     @category_api.setter
     def category_api(self, value: _CategoryApiClient):
@@ -54,6 +60,9 @@ class LRRClient(ApiContextManager):
 
     @property
     def database_api(self) -> _DatabaseApiClient:
+        """
+        https://sugoi.gitbook.io/lanraragi/api-documentation/database-api
+        """
         return self._database_api
     @database_api.setter
     def database_api(self, value: _DatabaseApiClient):
@@ -61,6 +70,9 @@ class LRRClient(ApiContextManager):
 
     @property
     def minion_api(self) -> _MinionApiClient:
+        """
+        https://sugoi.gitbook.io/lanraragi/api-documentation/minion-api
+        """
         return self._minion_api
     @minion_api.setter
     def minion_api(self, value: _MinionApiClient):
@@ -68,6 +80,9 @@ class LRRClient(ApiContextManager):
 
     @property
     def misc_api(self) -> _MiscApiClient:
+        """
+        https://sugoi.gitbook.io/lanraragi/api-documentation/miscellaneous-other-api
+        """
         return self._misc_api
     @misc_api.setter
     def misc_api(self, value: _MiscApiClient):
@@ -75,6 +90,9 @@ class LRRClient(ApiContextManager):
 
     @property
     def shinobu_api(self) -> _ShinobuApiClient:
+        """
+        https://sugoi.gitbook.io/lanraragi/api-documentation/shinobu-api
+        """
         return self._shinobu_api
     @shinobu_api.setter
     def shinobu_api(self, value: _ShinobuApiClient):
@@ -82,6 +100,9 @@ class LRRClient(ApiContextManager):
 
     @property
     def search_api(self) -> _SearchApiClient:
+        """
+        https://sugoi.gitbook.io/lanraragi/api-documentation/search-api
+        """
         return self._search_api
     @search_api.setter
     def search_api(self, value: _SearchApiClient):
@@ -89,6 +110,9 @@ class LRRClient(ApiContextManager):
 
     @property
     def tankoubon_api(self) -> _TankoubonApiClient:
+        """
+        https://sugoi.gitbook.io/lanraragi/api-documentation/tankoubon-api
+        """
         return self._tankoubon_api
     @tankoubon_api.setter
     def tankoubon_api(self, value: _TankoubonApiClient):
