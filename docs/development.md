@@ -68,6 +68,10 @@ You might want to install the usual VSCode Python extensions like Pylance, as we
 
 Additionally, VSCode supports workspaces, so it helps to create a workspace which includes both the LANraragi source code, as well as aio-lanraragi.
 
+## Architecture
+
+Any request or response from `LRRClient` API calls must inherit the `LanraragiRequest` and `LanraragiResponse` class, respectively.
+
 ## Unit Testing
 
 Testing is mainly done with `pytest`, though you can also use `tox` to test multiple Python versions.

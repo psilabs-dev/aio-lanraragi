@@ -119,13 +119,13 @@ class UpdateArchiveThumbnailRequest(LanraragiRequest):
 class UpdateArchiveThumbnailResponse(LanraragiResponse):
     new_thumbnail: str = Field(...)
 
-class UpdateArchiveMetadataRequest(BaseModel):
+class UpdateArchiveMetadataRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
     title: Optional[str] = Field(None)
     tags: Optional[str] = Field(None)
     summary: Optional[str] = Field(None)
 
-class DeleteArchiveRequest(BaseModel):
+class DeleteArchiveRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
 
 class DeleteArchiveResponse(LanraragiResponse):
