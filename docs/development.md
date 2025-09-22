@@ -96,7 +96,7 @@ pytest tests
 or if you are using `uv`, run:
 
 ```sh
-uv pip install -e ./integration_tests
+uv pip install -e ./integration_tests   # IMPORTANT: include "./"
 uv run pytest integration_tests/tests
 ```
 
