@@ -99,6 +99,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         else:
             self.headers["Authorization"] = _build_auth_header(api_key)
 
+    # TODO: this is becoming a mess, need better handling.
     async def _get_session(self) -> aiohttp.ClientSession:
         if not self.session:
             timeout: Optional[aiohttp.ClientTimeout] = None

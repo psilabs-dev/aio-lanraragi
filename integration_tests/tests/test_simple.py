@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 import tempfile
 from typing import Generator, List, Optional, Tuple
+from aio_lanraragi_tests.client import IntegrationTestLRRClient
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 import numpy as np
 import pytest
@@ -116,7 +117,7 @@ async def lanraragi(environment: AbstractLRRDeploymentContext) ->  Generator[LRR
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
-    client = LRRClient(
+    client = IntegrationTestLRRClient(
         lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
         lrr_api_key=DEFAULT_API_KEY,
         timeout=10

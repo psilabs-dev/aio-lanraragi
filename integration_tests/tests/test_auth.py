@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from aio_lanraragi_tests.client import IntegrationTestLRRClient
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 import numpy as np
 from typing import Generator, List
@@ -55,7 +56,7 @@ async def lanraragi(environment: AbstractLRRDeploymentContext) -> Generator[LRRC
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
-    client = LRRClient(
+    client = IntegrationTestLRRClient(
         lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
         lrr_api_key=DEFAULT_API_KEY,
         timeout=10
