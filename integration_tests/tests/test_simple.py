@@ -10,7 +10,6 @@ import logging
 from pathlib import Path
 import tempfile
 from typing import Generator, List, Optional, Tuple
-from aio_lanraragi_tests.client import IntegrationTestLRRClient
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 import numpy as np
 import pytest
@@ -117,15 +116,17 @@ async def lanraragi(environment: AbstractLRRDeploymentContext) ->  Generator[LRR
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
-    client = IntegrationTestLRRClient(
+    connector = aiohttp.TCPConnector(limit=8, limit_per_host=8, keepalive_timeout=30)
+    client = LRRClient(
         lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
         lrr_api_key=DEFAULT_API_KEY,
-        timeout=10
+        connector=connector
     )
     try:
         yield client
     finally:
         await client.close()
+        await connector.close()
 
 async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
     async with semaphore:
@@ -144,7 +145,7 @@ async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyn
             try:
                 status, content = await client.download_file(url, client.headers, params=params)
             except asyncio.TimeoutError:
-                timeout_msg = f"Request timed out after {client.session.timeout.total}s"
+                timeout_msg = f"Request timed out after {client.client_session.timeout.total}s"
                 logger.error(f"Failed to get page {page_api} (timeout): {timeout_msg}")
                 return (None, _build_err_response(timeout_msg, 500))
             if status == 200:
@@ -1157,12 +1158,12 @@ async def test_concurrent_clients(environment: AbstractLRRDeploymentContext):
         client1 = LRRClient(
             lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
             lrr_api_key="lanraragi",
-            session=session
+            client_session=session
         )
         client2 = LRRClient(
             lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
             lrr_api_key="lanraragi",
-            session=session
+            client_session=session
         )
         results = await asyncio.gather(
             client1.misc_api.get_server_info(),

@@ -1,7 +1,7 @@
 import asyncio
 import logging
-from aio_lanraragi_tests.client import IntegrationTestLRRClient
 from aio_lanraragi_tests.deployment.factory import generate_deployment
+import aiohttp
 import numpy as np
 from typing import Generator, List
 from pydantic import BaseModel, Field
@@ -56,15 +56,17 @@ async def lanraragi(environment: AbstractLRRDeploymentContext) -> Generator[LRRC
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
-    client = IntegrationTestLRRClient(
+    connector = aiohttp.TCPConnector(limit=8, limit_per_host=8, keepalive_timeout=30)
+    client = LRRClient(
         lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
         lrr_api_key=DEFAULT_API_KEY,
-        timeout=10
+        connector=connector
     )
     try:
         yield client
     finally:
         await client.close()
+        await connector.close()
 
 async def sample_test_api_auth_matrix(
     is_nofunmode: bool, is_api_key_configured_server: bool, is_api_key_configured_client: bool,

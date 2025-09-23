@@ -565,15 +565,18 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         
         If something goes wrong during setup, the environment will be reset and the data should be removed.
         """
-        self.stop() # stop the containers first.
-
+        if self.lrr_container:
+            self.lrr_container.stop(timeout=1)
+            self.logger.info(f"Stopped container: {self.lrr_container_name}")
+        if self.redis_container:
+            self.redis_container.stop(timeout=1)
+            self.logger.info(f"Stopped container: {self.redis_container_name}")
         if self.lrr_container:
             self.lrr_container.remove(force=True)
             self.logger.info(f"Removed container: {self.lrr_container_name}")
         if self.redis_container:
             self.redis_container.remove(force=True)
             self.logger.info(f"Removed container: {self.redis_container_name}")
-
         if remove_data:
             if self.lrr_contents_volume:
                 self.lrr_contents_volume.remove(force=True)
