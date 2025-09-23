@@ -92,8 +92,8 @@ jobs:
       - name: Run unit tests
         working-directory: aio-lanraragi
         run: |
-          pytest tests --log-cli-level=INFO \
-            tests/
+          pytest tests --log-cli-level=INFO `
+            tests\
 
       - name: Restore windist cache
         id: cache-windist
