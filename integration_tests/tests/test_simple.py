@@ -72,7 +72,7 @@ from lanraragi.models.tankoubon import (
 )
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.common import compute_upload_checksum, DEFAULT_API_KEY
+from aio_lanraragi_tests.common import compute_upload_checksum
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import (
     CreatePageRequest,
@@ -117,11 +117,7 @@ async def lanraragi(environment: AbstractLRRDeploymentContext) ->  Generator[LRR
     Provides a LRRClient for testing with proper async cleanup.
     """
     connector = aiohttp.TCPConnector(limit=8, limit_per_host=8, keepalive_timeout=30)
-    client = LRRClient(
-        lrr_base_url=f"http://127.0.0.1:{environment.lrr_port}",
-        lrr_api_key=DEFAULT_API_KEY,
-        connector=connector
-    )
+    client = environment.lrr_client(connector=connector)
     try:
         yield client
     finally:

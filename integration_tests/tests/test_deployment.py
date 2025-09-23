@@ -1,9 +1,7 @@
-from aio_lanraragi_tests.common import DEFAULT_API_KEY, is_port_available
+from aio_lanraragi_tests.common import is_port_available
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 import pytest
-
-from lanraragi.clients.client import LRRClient
 
 def test_two_deployment_toggling(request: pytest.FixtureRequest):
     """
@@ -64,8 +62,8 @@ async def test_two_deployment_basic_api(request: pytest.FixtureRequest):
         env_2.setup(lrr_debug_mode=is_lrr_debug_mode, with_api_key=True)
 
         async with (
-            LRRClient(f"http://127.0.0.1:{env_1.lrr_port}", DEFAULT_API_KEY) as lrr_1,
-            LRRClient(f"http://127.0.0.1:{env_2.lrr_port}", DEFAULT_API_KEY) as lrr_2
+            env_1.lrr_client() as lrr_1,
+            env_2.lrr_client() as lrr_2,
         ):
             for lrr in [lrr_1, lrr_2]:
                 _, error = await lrr.archive_api.get_all_archives()

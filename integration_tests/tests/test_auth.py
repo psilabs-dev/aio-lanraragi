@@ -57,11 +57,7 @@ async def lanraragi(environment: AbstractLRRDeploymentContext) -> Generator[LRRC
     Provides a LRRClient for testing with proper async cleanup.
     """
     connector = aiohttp.TCPConnector(limit=8, limit_per_host=8, keepalive_timeout=30)
-    client = LRRClient(
-        lrr_base_url=f"http://127.0.0.1:{environment.lrr_port}",
-        lrr_api_key=DEFAULT_API_KEY,
-        connector=connector
-    )
+    client = environment.lrr_client(connector=connector)
     try:
         yield client
     finally:

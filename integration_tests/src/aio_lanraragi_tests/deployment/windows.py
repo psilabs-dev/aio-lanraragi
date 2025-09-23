@@ -336,6 +336,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def update_api_key(self, api_key: Optional[str]):
+        self.lrr_api_key = api_key
         self.redis_client.select(2)
         if api_key is None:
             self.redis_client.hdel("LRR_CONFIG", "apikey")

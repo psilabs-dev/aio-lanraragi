@@ -36,6 +36,15 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         self._logger = logger
 
     @property
+    def headers(self) -> Dict[str, str]:
+        """
+        LRR request headers. Is either an empty dict or contains authentication.
+        """
+        if not hasattr(self, "_headers"):
+            self._headers = {}
+        return self._headers
+
+    @property
     def lrr_base_url(self) -> str:
         """
         Base URL for the LANraragi service.
@@ -52,14 +61,19 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         self._lrr_base_url = lrr_base_url
     
     @property
-    def lrr_api_key(self) -> str:
+    def lrr_api_key(self) -> Optional[str]:
         """
         Unencoded API key for LANraragi
         """
         return self._lrr_api_key
 
     @lrr_api_key.setter
-    def lrr_api_key(self, lrr_api_key: str):
+    def lrr_api_key(self, lrr_api_key: Optional[str]):
+        if lrr_api_key is not None:
+            self.headers["Authorization"] = _build_auth_header(lrr_api_key)
+        else:
+            if "Authorization" in self.headers:
+                del self.headers["Authorization"]
         self._lrr_api_key = lrr_api_key
 
     @property
@@ -84,7 +98,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
 
     def __init__(
             self,
-            lrr_base_url: str, lrr_api_key: str,
+            lrr_base_url: str, lrr_api_key: Optional[str]=None,
             ssl: bool=True,
             client_session: Optional[aiohttp.ClientSession]=None,
             connector: Optional[aiohttp.BaseConnector]=None,
@@ -100,7 +114,6 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         self.logger = logger
         self.lrr_base_url = lrr_base_url
         self.lrr_api_key = lrr_api_key
-        self.headers = {"Authorization": _build_auth_header(lrr_api_key)}
 
         # aiohttp-specific properties
         # if client session is configured by user, it overrides all other configurations.

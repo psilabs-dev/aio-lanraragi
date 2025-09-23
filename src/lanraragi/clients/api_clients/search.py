@@ -40,7 +40,7 @@ class _SearchApiClient(_ApiClient):
                     params[key] = str(value).lower()
                 else:
                     params[key] = value
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers, params=params)
         if status == 200:
             return (_process_search_archive_index_response(content), None)
         return (None, _build_err_response(content, status))
@@ -66,7 +66,7 @@ class _SearchApiClient(_ApiClient):
                     params[key] = str(value).lower()
                 else:
                     params[key] = value
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers, params=params)
         if status == 200:
             return (_process_get_random_archives_response(content), None)
         return (None, _build_err_response(content, status))
@@ -76,7 +76,7 @@ class _SearchApiClient(_ApiClient):
         DELETE /api/search/cache
         """
         url = self.api_context.build_url("/api/search/cache")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
         if status == 200:
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))

@@ -17,7 +17,7 @@ class _DatabaseApiClient(_ApiClient):
         url = self.api_context.build_url("/api/database/stats")
         params = {}
         params["minweight"] = request.minweight
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers, params=params)
         if status == 200:
             return (_process_get_database_stats_response(content), None)
         return (None, _build_err_response(content, status))
@@ -27,7 +27,7 @@ class _DatabaseApiClient(_ApiClient):
         POST /api/database/clean
         """
         url = self.api_context.build_url("/api/database/clean")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
             deleted = response_j.get("deleted")
@@ -40,7 +40,7 @@ class _DatabaseApiClient(_ApiClient):
         POST /api/database/drop
         """
         url = self.api_context.build_url("/api/database/drop")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers)
         if status == 200:
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))
@@ -50,7 +50,7 @@ class _DatabaseApiClient(_ApiClient):
         GET /api/database/backup
         """
         url = self.api_context.build_url("/api/database/backup")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             return (_process_get_database_backup_response(content), None)
         return (None, _build_err_response(content, status))
@@ -60,7 +60,7 @@ class _DatabaseApiClient(_ApiClient):
         DELETE /api/database/isnew
         """
         url = self.api_context.build_url("/api/database/isnew")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
         if status == 200:
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))

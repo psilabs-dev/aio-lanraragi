@@ -13,7 +13,7 @@ class _ShinobuApiClient(_ApiClient):
         GET /api/shinobu
         """
         url = self.api_context.build_url("/api/shinobu")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
             is_alive = response_j["is_alive"]
@@ -30,7 +30,7 @@ class _ShinobuApiClient(_ApiClient):
         POST /api/shinobu/stop
         """
         url = self.api_context.build_url("/api/shinobu/stop")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers)
         if status == 200:
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))
@@ -40,7 +40,7 @@ class _ShinobuApiClient(_ApiClient):
         POST /api/shinobu/restart
         """
         url = self.api_context.build_url("/api/shinobu/restart")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
             new_pid = response_j["new_pid"]

@@ -199,6 +199,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def update_api_key(self, api_key: Optional[str]):
+        self.lrr_api_key = api_key
         if api_key is None:
             return self._exec_redis_cli("SELECT 2\nHDEL LRR_CONFIG apikey")
         else:
