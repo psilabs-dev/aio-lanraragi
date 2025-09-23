@@ -19,7 +19,7 @@ from git import Repo
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
-from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_REDIS_PORT, is_port_available
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_REDIS_PORT
 
 DEFAULT_REDIS_DOCKER_TAG = "redis:7.2.4"
 DEFAULT_LANRARAGI_DOCKER_TAG = "difegue/lanraragi"
@@ -471,27 +471,25 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def stop(self):
+        """
+        Stops the LRR and Redis docker containers.
+
+        WARNING: stopping container does NOT necessarily make the corresponding ports available.
+        It is possible that the docker daemon still reserves the port, and may not free it until
+        the underlying network configurations are updated, which can take up to a minute. See:
+        
+        - https://docs.docker.com/engine/network/packet-filtering-firewalls
+        - https://stackoverflow.com/questions/63467759/close-docker-port-when-container-is-stopped
+
+        All this is to say, do not use port availability as an indicator that a container is 
+        successfully stopped.
+        """
         if self.lrr_container:
             self.lrr_container.stop(timeout=1)
             self.logger.info(f"Stopped container: {self.lrr_container_name}")
         if self.redis_container:
             self.redis_container.stop(timeout=1)
             self.logger.info(f"Stopped container: {self.redis_container_name}")
-
-        # ensure ports are usable.
-        # TODO: why does this take so long?
-        deadline = time.time() + 65
-        tts = 0.25
-        while time.time() < deadline:
-            lrr_free = is_port_available(self.lrr_port)
-            redis_free = is_port_available(self.redis_port)
-            if lrr_free and redis_free:
-                break
-            time.sleep(tts)
-        if not is_port_available(self.lrr_port):
-            self.logger.warning(f"LRR port {self.lrr_port} not bindable after stop timeout.")
-        if not is_port_available(self.redis_port):
-            self.logger.warning(f"Redis port {self.redis_port} not bindable after stop timeout.")
 
     @override
     def restart(self):

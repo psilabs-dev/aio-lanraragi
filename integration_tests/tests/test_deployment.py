@@ -12,17 +12,7 @@ def test_two_deployment_toggling(request: pytest.FixtureRequest):
     env_2 = generate_deployment(request, "test_2_", 11)
 
     if isinstance(env_1, DockerLRRDeploymentContext):
-        # TODO: in a dockerized deployment, asserting that a stopped container must be followed by
-        # port availability is too strict of a condition, because the docker daemon may reserve
-        # the port and may not free it until underlying network configurations are updated, which
-        # can take up to a minute. See:
-        # 
-        # - https://docs.docker.com/engine/network/packet-filtering-firewalls
-        # - https://stackoverflow.com/questions/63467759/close-docker-port-when-container-is-stopped
-        # 
-        # Also, the whole point of this is to ensure that starting/stopping the environment *does*
-        # indeed start/stop the env as advertised. Trying to check this with a docker environment
-        # (a tool designed for orchestration) is a rather useless exercise to do imo.
+        # see DockerLRRDeploymentContext.stop documentation.
         pytest.skip("Port availability condition too strict in Docker environment.")
 
     try:
