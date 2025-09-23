@@ -205,15 +205,20 @@ async def upload_archive(
                 os_winerr: Optional[int] = getattr(inner_os_error, "winerror", None)
 
                 # 1225: ERROR_CONNECTION_REFUSED
+                # 10054: An existing connection was forcibly closed by the remote host
                 # 10061: WSAECONNREFUSED
-                if os_errno != errno.ECONNREFUSED and os_winerr not in (1225, 10061):
+                if os_errno != errno.ECONNREFUSED and os_winerr not in (1225, 10054, 10061):
                     raise client_connector_error
 
                 if retry_count >= max_retries:
                     error = LanraragiErrorResponse(error=str(client_connector_error), status=408)
                     return None, error
                 tts = 2 ** retry_count
-                logger.warning(f"Encountered refused connection while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})...")
+                logger.warning(
+                    f"Encountered refused connection while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})"
+                    + "" if not os_errno else f"; os_errno={os_errno}"
+                    + "" if not os_winerr else f"; os_winerr=\"{os_winerr}\""
+                )
                 await asyncio.sleep(tts)
                 retry_count += 1
                 continue
