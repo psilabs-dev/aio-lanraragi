@@ -64,20 +64,20 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
     @property
     def owns_client_session(self) -> bool:
         """
-        Whether this context owns its aiohttp.ClientSession resource,
-        and whether the resource should be closed on context exit.
+        Readonly property set on instantiation, which indicates whether this context
+        owns its aiohttp.ClientSession resource.
 
-        Readonly property that is set on instantiation.
+        If owned, the resource must be closed on context exit.
         """
         return self._owns_client_session
     
     @property
     def owns_connector(self) -> bool:
         """
-        Whether this context owns its aiohttp.BaseConnector resource,
-        and whether the resource should be closed on context exit.
+        Readonly property set on instantiation, which indicates whether this context
+        owns its aiohttp.BaseConnector resource.
 
-        Readonly property that is set on instantiation.
+        If owned, the resource must be closed on context exit.
         """
         return self._owns_connector
 
@@ -90,10 +90,9 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
             logger: Optional[logging.Logger]=None
     ):
         """
-        Instantiates an ApiContextManager instance.
-
-        Anything not owned by the client will *not* be closed by it.
-        Any finer configuration overrides any coarser configuration.
+        Instantiates an ApiContextManager instance and context.
+        Any resource not provided by the user will be created and owned by
+        the context. On context exit, these resources will be closed.
         """
         if not logger:
             logger = logging.getLogger(__name__)
