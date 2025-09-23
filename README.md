@@ -1,6 +1,6 @@
 # aio-lanraragi
 
-An asynchronous Python API client for [LANraragi](https://github.com/Difegue/LANraragi), written with [aiohttp](https://github.com/aio-libs/aiohttp) and [pydantic](https://github.com/pydantic/pydantic) for type validation. The project is a work in progress.
+An asynchronous Python API client for [LANraragi](https://github.com/Difegue/LANraragi), written with [aiohttp](https://github.com/aio-libs/aiohttp) and [pydantic](https://github.com/pydantic/pydantic) for type validation. The project is a work in progress (and subject to potential breaking changes on patch version).
 
 Installation with pip:
 
