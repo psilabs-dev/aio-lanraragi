@@ -45,6 +45,19 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         return self._headers
 
     @property
+    def lrr_host(self) -> str:
+        """
+        Base URL for LANraragi service.
+        TODO: deprecated in favor of `lrr_base_url`.
+        """
+        return self.lrr_base_url
+
+    @lrr_host.setter
+    def lrr_host(self, lrr_host: str):
+        # TODO: deprecated in favor of `lrr_base_url`.
+        self.lrr_base_url = lrr_host
+
+    @property
     def lrr_base_url(self) -> str:
         """
         Base URL for the LANraragi service.
@@ -100,6 +113,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
             self,
             lrr_base_url: str, lrr_api_key: Optional[str]=None,
             ssl: bool=True,
+            session: Optional[aiohttp.ClientSession]=None,
             client_session: Optional[aiohttp.ClientSession]=None,
             connector: Optional[aiohttp.BaseConnector]=None,
             logger: Optional[logging.Logger]=None
@@ -118,6 +132,8 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         # aiohttp-specific properties
         # if client session is configured by user, it overrides all other configurations.
         # on context exit, the client (and its attributes) will NOT be cleaned.
+
+        client_session = session if session else None # TODO: remove.
         if client_session:
             self.client_session = client_session
             self.connector = None
