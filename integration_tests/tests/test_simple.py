@@ -10,7 +10,6 @@ import logging
 from pathlib import Path
 import tempfile
 from typing import Generator, List, Optional, Tuple
-from aio_lanraragi_tests.client import IntegrationTestLRRClient
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 import numpy as np
 import pytest
@@ -117,14 +116,17 @@ async def lanraragi(environment: AbstractLRRDeploymentContext) ->  Generator[LRR
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
-    client = IntegrationTestLRRClient(
+    connector = aiohttp.TCPConnector(limit=8, limit_per_host=8, keepalive_timeout=30)
+    client = LRRClient(
         lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
         lrr_api_key=DEFAULT_API_KEY,
+        connector=connector
     )
     try:
         yield client
     finally:
         await client.close()
+        await connector.close()
 
 async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
     async with semaphore:
