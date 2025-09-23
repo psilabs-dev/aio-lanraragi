@@ -59,7 +59,6 @@ async def lanraragi(environment: AbstractLRRDeploymentContext) -> Generator[LRRC
     client = IntegrationTestLRRClient(
         lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
         lrr_api_key=DEFAULT_API_KEY,
-        timeout=10
     )
     try:
         yield client
