@@ -36,19 +36,20 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         self._logger = logger
 
     @property
-    def lrr_host(self) -> str:
+    def lrr_base_url(self) -> str:
         """
-        LANraragi host address.
+        Base URL for the LANraragi service.
 
         Examples:
-        - `"http://localhost:3000"`
+        - `"http://127.0.0.1:3000"`
         - `"https://lanraragi.example"`
+        - `"https://website.com/lanraragi"`
         """
-        return self._lrr_host
+        return self._lrr_base_url
     
-    @lrr_host.setter
-    def lrr_host(self, lrr_host: str):
-        self._lrr_host = lrr_host
+    @lrr_base_url.setter
+    def lrr_base_url(self, lrr_base_url: str):
+        self._lrr_base_url = lrr_base_url
     
     @property
     def lrr_api_key(self) -> str:
@@ -83,7 +84,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
 
     def __init__(
             self,
-            lrr_host: str, lrr_api_key: str,
+            lrr_base_url: str, lrr_api_key: str,
             ssl: bool=True,
             client_session: Optional[aiohttp.ClientSession]=None,
             connector: Optional[aiohttp.BaseConnector]=None,
@@ -97,7 +98,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         if not logger:
             logger = logging.getLogger(__name__)
         self.logger = logger
-        self.lrr_host = lrr_host
+        self.lrr_base_url = lrr_base_url
         self.lrr_api_key = lrr_api_key
         self.headers = {"Authorization": _build_auth_header(lrr_api_key)}
 
@@ -202,7 +203,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         - `client.build_url("/api/search")`
         - `client.build_url("/api/archives")`
         """
-        return f"{self.lrr_host}{api}"
+        return f"{self.lrr_base_url}{api}"
 
     @override
     async def __aenter__(self: _ApiContextManagerLike) -> _ApiContextManagerLike:

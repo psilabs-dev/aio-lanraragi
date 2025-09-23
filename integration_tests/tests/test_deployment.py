@@ -69,9 +69,9 @@ async def test_two_deployment_basic_api(request: pytest.FixtureRequest):
         ):
             for lrr in [lrr_1, lrr_2]:
                 _, error = await lrr.archive_api.get_all_archives()
-                assert not error, f"Failed to get all archives on address {lrr.lrr_host} (status {error.status}): {error.error}"
+                assert not error, f"Failed to get all archives on address {lrr.lrr_base_url} (status {error.status}): {error.error}"
                 _, error = await lrr.shinobu_api.get_shinobu_status()
-                assert not error, f"Failed to get shinobu status on address {lrr.lrr_host} (status {error.status}): {error.error}"
+                assert not error, f"Failed to get shinobu status on address {lrr.lrr_base_url} (status {error.status}): {error.error}"
 
     finally:
         env_1.teardown(remove_data=True)

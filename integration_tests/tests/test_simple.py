@@ -118,7 +118,7 @@ async def lanraragi(environment: AbstractLRRDeploymentContext) ->  Generator[LRR
     """
     connector = aiohttp.TCPConnector(limit=8, limit_per_host=8, keepalive_timeout=30)
     client = LRRClient(
-        lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
+        lrr_base_url=f"http://127.0.0.1:{environment.lrr_port}",
         lrr_api_key=DEFAULT_API_KEY,
         connector=connector
     )
@@ -1156,12 +1156,12 @@ async def test_concurrent_clients(environment: AbstractLRRDeploymentContext):
     session = aiohttp.ClientSession()
     try:
         client1 = LRRClient(
-            lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
+            lrr_base_url=f"http://127.0.0.1:{environment.lrr_port}",
             lrr_api_key="lanraragi",
             client_session=session
         )
         client2 = LRRClient(
-            lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
+            lrr_base_url=f"http://127.0.0.1:{environment.lrr_port}",
             lrr_api_key="lanraragi",
             client_session=session
         )
