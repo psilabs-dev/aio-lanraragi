@@ -136,7 +136,8 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         # on context exit, the client (and its attributes) will NOT be cleaned.
 
         self._session_lock = asyncio.Lock()
-        client_session = session if session else None # TODO: https://github.com/psilabs-dev/aio-lanraragi/issues/106
+        # Prefer explicit client_session; keep deprecated `session` for backward compatibility
+        client_session = session if session else client_session # TODO: https://github.com/psilabs-dev/aio-lanraragi/issues/106
         if client_session:
             self.client_session = client_session
             self.connector = None
@@ -196,6 +197,8 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         
         # only one session can be created and owned by the context manager at any given time.
         async with self._session_lock:
+            if self.client_session:
+                return self.client_session
             if self.connector:
                 self.client_session = aiohttp.ClientSession(connector=self.connector, connector_owner=False)
             elif self.ssl is not None:

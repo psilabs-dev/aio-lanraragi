@@ -6,11 +6,14 @@ For each testing pipeline, a corresponding LRR environment is set up and torn do
 
 import asyncio
 import errno
+import gc
 import logging
 from pathlib import Path
 import sys
 import tempfile
+import tracemalloc
 from typing import Generator, List, Optional, Tuple
+import warnings
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 import numpy as np
 import pytest
@@ -84,6 +87,14 @@ from aio_lanraragi_tests.archive_generation.archive import write_archives_to_dis
 from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
 
 LOGGER = logging.getLogger(__name__)
+
+@pytest.fixture(autouse=True, scope="session")
+def fail_on_leaks():
+    warnings.simplefilter("error", ResourceWarning)
+    warnings.simplefilter("error", category=pytest.PytestUnraisableExceptionWarning)
+    tracemalloc.start()
+    yield
+    gc.collect()
 
 @pytest.fixture
 def resource_prefix() -> Generator[str, None, None]:
