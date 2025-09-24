@@ -206,10 +206,16 @@ async def upload_archive(
                 os_errno: Optional[int] = getattr(inner_os_error, "errno", None)
                 os_winerr: Optional[int] = getattr(inner_os_error, "winerror", None)
 
+                if os_errno != errno.ECONNREFUSED:
+                    logger.error(f"Unhandled error number: {os_errno}.")
+                    raise client_connector_error
+
+                # 64: The specified networ name is no longer available
                 # 1225: ERROR_CONNECTION_REFUSED
                 # 10054: An existing connection was forcibly closed by the remote host
                 # 10061: WSAECONNREFUSED
-                if os_errno != errno.ECONNREFUSED and os_winerr not in (1225, 10054, 10061):
+                if os_winerr not in (64, 1225, 10054, 10061):
+                    logger.error(f"Encountered unhandled WinError {os_winerr} while uploading {filename}.")
                     raise client_connector_error
 
                 if retry_count >= max_retries:
