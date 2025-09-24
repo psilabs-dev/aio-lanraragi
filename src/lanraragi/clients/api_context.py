@@ -135,6 +135,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         # if client session is configured by user, it overrides all other configurations.
         # on context exit, the client (and its attributes) will NOT be cleaned.
 
+        self._session_lock = asyncio.Lock()
         client_session = session if session else None # TODO: https://github.com/psilabs-dev/aio-lanraragi/issues/106
         if client_session:
             self.client_session = client_session
@@ -192,12 +193,15 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
 
         if self.client_session:
             return self.client_session
-        if self.connector:
-            self.client_session = aiohttp.ClientSession(connector=self.connector, connector_owner=False)
-        elif self.ssl is not None:
-            self.client_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self.ssl))
-        else:
-            self.client_session = aiohttp.ClientSession()
+        
+        # only one session can be created and owned by the context manager at any given time.
+        async with self._session_lock:
+            if self.connector:
+                self.client_session = aiohttp.ClientSession(connector=self.connector, connector_owner=False)
+            elif self.ssl is not None:
+                self.client_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self.ssl))
+            else:
+                self.client_session = aiohttp.ClientSession()
         return self.client_session
 
     async def close(self):
