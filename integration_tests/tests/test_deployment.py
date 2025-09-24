@@ -1,15 +1,18 @@
+import logging
 from aio_lanraragi_tests.common import is_port_available
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 import pytest
+
+LOGGER = logging.getLogger(__name__)
 
 def test_two_deployment_toggling(request: pytest.FixtureRequest):
     """
     Tests bringing two deployments up and down.
     """
     is_lrr_debug_mode: bool = request.config.getoption("--lrr-debug")
-    env_1 = generate_deployment(request, "test_1_", 10)
-    env_2 = generate_deployment(request, "test_2_", 11)
+    env_1 = generate_deployment(request, "test_1_", 10, logger=LOGGER)
+    env_2 = generate_deployment(request, "test_2_", 11, logger=LOGGER)
 
     if isinstance(env_1, DockerLRRDeploymentContext):
         # see DockerLRRDeploymentContext.stop documentation.

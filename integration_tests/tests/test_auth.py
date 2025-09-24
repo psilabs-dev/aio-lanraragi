@@ -13,7 +13,7 @@ from lanraragi.clients.client import LRRClient
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.common import DEFAULT_API_KEY
 
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 class ApiAuthMatrixParams(BaseModel):
     # used by test_api_auth_matrix.
@@ -36,7 +36,7 @@ def is_lrr_debug_mode(request: pytest.FixtureRequest) -> Generator[bool, None, N
 
 @pytest.fixture
 def environment(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int) -> Generator[AbstractLRRDeploymentContext, None, None]:
-    environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset)
+    environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
     request.session.lrr_environment = environment
     yield environment
     environment.teardown(remove_data=True)
@@ -190,7 +190,7 @@ async def test_api_auth_matrix(
 
     # execute tests with randomized order of configurations.
     for i, test_param in enumerate(test_params):
-        logger.info(f"Test configuration ({i+1}/{num_tests}): is_nofunmode={test_param.is_nofunmode}, is_apikey_configured_server={test_param.is_api_key_configured_server}, is_apikey_configured_client={test_param.is_api_key_configured_client}, is_matching_api_key={test_param.is_matching_api_key}")
+        LOGGER.info(f"Test configuration ({i+1}/{num_tests}): is_nofunmode={test_param.is_nofunmode}, is_apikey_configured_server={test_param.is_api_key_configured_server}, is_apikey_configured_client={test_param.is_api_key_configured_client}, is_matching_api_key={test_param.is_matching_api_key}")
         await sample_test_api_auth_matrix(
             test_param.is_nofunmode, test_param.is_api_key_configured_server, test_param.is_api_key_configured_client,
             test_param.is_matching_api_key, environment, lanraragi

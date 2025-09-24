@@ -1,3 +1,4 @@
+import logging
 import sys
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
@@ -5,7 +6,10 @@ from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 import docker
 import pytest
 
-def generate_deployment(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int) -> AbstractLRRDeploymentContext:
+def generate_deployment(
+    request: pytest.FixtureRequest, resource_prefix: str, port_offset: int,
+    logger: logging.Logger=None
+) -> AbstractLRRDeploymentContext:
     """
     Create and return an appropriate, uninitialized deployment according to the pytest request arguments.
     """
@@ -18,7 +22,8 @@ def generate_deployment(request: pytest.FixtureRequest, resource_prefix: str, po
             windist: str = request.config.getoption("--windist")
             staging_dir: str = request.config.getoption("--staging")
             environment = WindowsLRRDeploymentContext(
-                windist, staging_dir, resource_prefix, port_offset
+                windist, staging_dir, resource_prefix, port_offset,
+                logger=logger
             )
 
         case 'darwin' | 'linux':
@@ -35,7 +40,8 @@ def generate_deployment(request: pytest.FixtureRequest, resource_prefix: str, po
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
             environment = DockerLRRDeploymentContext(
                 build_path, image, git_url, git_branch, docker_client, resource_prefix, port_offset, docker_api=docker_api,
-                global_run_id=global_run_id, is_allow_uploads=True
+                global_run_id=global_run_id, is_allow_uploads=True,
+                logger=logger
             )
 
     return environment
