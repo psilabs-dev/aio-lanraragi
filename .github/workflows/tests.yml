@@ -95,14 +95,20 @@ jobs:
           pytest tests --log-cli-level=INFO `
             tests\
 
+      - name: Get windist cache key
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $sha = gh api repos/difegue/LANraragi/branches/dev --jq '.commit.sha'
+          "WINDIST_KEY=windist-${{ runner.os }}-$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Restore windist cache
         id: cache-windist
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}\windist\win-dist.zip
-          key: windist-${{ runner.os }}-dev
-          restore-keys: |
-            windist-${{ runner.os }}-
+          key: ${{ env.WINDIST_KEY }}
 
       - name: Unzip windist from cache
         if: steps.cache-windist.outputs.cache-hit == 'true'
@@ -167,7 +173,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ github.workspace }}\windist\win-dist.zip
-          key: ${{ steps.cache-windist.outputs.cache-primary-key }}
+          key: ${{ env.WINDIST_KEY }}
 
       - name: Install test library
         working-directory: aio-lanraragi/integration_tests
