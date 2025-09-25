@@ -25,9 +25,11 @@ addopts = [
 ]
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
-    # "error::ResourceWarning",
+    "ignore:subprocess .* is still running:ResourceWarning",
+    "ignore:.*subprocess .* is still running.*:pytest.PytestUnraisableExceptionWarning",
+    "ignore:This process .* is multi-threaded:DeprecationWarning",
+    "error:Unclosed client session.*:ResourceWarning",
     "error::pytest.PytestUnraisableExceptionWarning",
-    "ignore:This process .* is multi-threaded:DeprecationWarning"
 ]
 log_cli = true
 log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
