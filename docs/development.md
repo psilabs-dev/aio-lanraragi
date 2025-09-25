@@ -83,6 +83,8 @@ uv run pytest tests/            # if you're using uv
 
 Note that when running `uv`, your current working directory matters, and the above command must be run at project root.
 
+Resources should be carefully managed, and unclosed client sessions are a hard error, as configured into pytest in unit and integration tests.
+
 ## Integration Testing
 
 Integration testing is an important part of this client library, and it has its own supporting library. To install dependencies, go to `integraion_tests` and install them (to your environment):
