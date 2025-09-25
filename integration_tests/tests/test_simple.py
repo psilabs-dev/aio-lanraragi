@@ -319,15 +319,16 @@ def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Gen
     responses = write_archives_to_disk(requests)
     return responses
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Warmup only required for Windows testing environments.")
+@pytest.mark.skipif(sys.platform != "win32", reason="Cache priming required only for flaky Windows testing environments.")
 @pytest.mark.asyncio
 @pytest.mark.xfail
-async def test_warmup(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
+async def test_xfail_catch_flakes(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
-    Warm up the server/prime cache by uploading 100 archives.
+    This xfail test case serves no integration testing purpose, other than to prime the cache of flaky testing hosts
+    and reduce the chances of subsequent test case failures caused by network flakes, such as remote host connection
+    closures or connection refused errors resulting from high client request pressure to unprepared host.
 
-    In Windows github runners, this test is expected to fail at times with server refused errors.
-    However, it should be the first (and only) test case to catch such refusal errors.
+    Therefore, occasional test case failures here are expected and ignored.
     """
     num_archives = 100
 
