@@ -221,7 +221,7 @@ async def upload_archive(
                     LOGGER.error(f"Unhandled error number: {os_errno}.")
                     raise client_connector_error
 
-                # 64: The specified networ name is no longer available
+                # 64: The specified network name is no longer available
                 # 1225: ERROR_CONNECTION_REFUSED
                 # 10054: An existing connection was forcibly closed by the remote host
                 # 10061: WSAECONNREFUSED
