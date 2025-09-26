@@ -9,14 +9,11 @@ We add a flake tank at the front, and rerun test cases in Windows on flake error
 
 import asyncio
 import errno
-import gc
 import logging
 from pathlib import Path
 import sys
 import tempfile
-import tracemalloc
 from typing import Generator, List, Optional, Set, Tuple
-import warnings
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 import numpy as np
 import pytest
