@@ -501,9 +501,8 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore, 
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for response, error in gathered:
@@ -706,9 +705,8 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for response, error in gathered:
@@ -834,9 +832,8 @@ async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for response, error in gathered:
@@ -964,9 +961,8 @@ async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, 
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for response, error in gathered:
@@ -1037,9 +1033,8 @@ async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore,
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for response, error in gathered:
@@ -1140,9 +1135,8 @@ async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npge
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for response, error in gathered:
@@ -1209,9 +1203,8 @@ async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for response, error in gathered:
