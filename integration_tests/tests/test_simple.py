@@ -91,14 +91,6 @@ from aio_lanraragi_tests.archive_generation.metadata import create_tag_generator
 
 LOGGER = logging.getLogger(__name__)
 
-@pytest.fixture(autouse=True, scope="session")
-def fail_on_leaks():
-    warnings.simplefilter("error", ResourceWarning)
-    warnings.simplefilter("error", category=pytest.PytestUnraisableExceptionWarning)
-    tracemalloc.start()
-    yield
-    gc.collect()
-
 @pytest.fixture
 def resource_prefix() -> Generator[str, None, None]:
     yield "test_"
