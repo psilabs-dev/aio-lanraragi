@@ -13,6 +13,7 @@ dependencies = [
     "pillow",
     "pytest",
     "pytest-asyncio",
+    "pytest-rerunfailures",
     "redis"
 ]
 

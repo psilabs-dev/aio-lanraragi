@@ -240,7 +240,8 @@ async def upload_archive(
 
                 if retry_count >= max_retries:
                     error = LanraragiErrorResponse(error=str(client_connector_error), status=408)
-                    return None, error
+                    # return None, error
+                    raise client_connector_error
                 tts = 2 ** retry_count
                 LOGGER.warning(
                     f"Connection refused while uploading {filename}, retrying in {tts}s "
@@ -376,6 +377,7 @@ async def test_xfail_catch_flakes(lanraragi: LRRClient, semaphore: asyncio.Semap
         del response, error
     # <<<<< UPLOAD STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=["aiohttp.client_exceptions.ClientConnectorError"])
 @pytest.mark.asyncio
 async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -462,6 +464,7 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     assert len(response.data) == 100-50, "Incorrect number of archives in server!"
     # <<<<< DELETE ARCHIVE ASYNC STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=["aiohttp.client_exceptions.ClientConnectorError"])
 @pytest.mark.asyncio
 async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -556,6 +559,7 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore, 
         assert not error, f"Failed to complete task (status {error.status}): {error.error}"
     # <<<<< SIMULATE READ ARCHIVE STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=["aiohttp.client_exceptions.ClientConnectorError"])
 @pytest.mark.asyncio
 async def test_category(lanraragi: LRRClient):
     """
@@ -652,6 +656,7 @@ async def test_category(lanraragi: LRRClient):
     del response, error
     # <<<<< UNLINK BOOKMARK <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=["aiohttp.client_exceptions.ClientConnectorError"])
 @pytest.mark.asyncio
 async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -786,6 +791,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
     del response, error
     # <<<<< GET CATEGORY STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=["aiohttp.client_exceptions.ClientConnectorError"])
 @pytest.mark.asyncio
 async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -864,6 +870,7 @@ async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
     del response, error
     # <<<<< DISCARD SEARCH CACHE STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=["aiohttp.client_exceptions.ClientConnectorError"])
 @pytest.mark.asyncio
 async def test_shinobu_api(lanraragi: LRRClient):
     """
@@ -925,6 +932,7 @@ async def test_shinobu_api(lanraragi: LRRClient):
     del response, error
     # <<<<< GET SHINOBU STATUS STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=["aiohttp.client_exceptions.ClientConnectorError"])
 @pytest.mark.asyncio
 async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -975,6 +983,7 @@ async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, 
     del response, error
     # <<<<< CLEAN DATABASE STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=["aiohttp.client_exceptions.ClientConnectorError"])
 @pytest.mark.asyncio
 async def test_drop_database(lanraragi: LRRClient):
     """
@@ -997,6 +1006,7 @@ async def test_drop_database(lanraragi: LRRClient):
     assert error and error.status == 401, f"Expected no permissions, got status {error.status}."
     # <<<<< TEST CONNECTION STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=["aiohttp.client_exceptions.ClientConnectorError"])
 @pytest.mark.asyncio
 async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -1099,6 +1109,7 @@ async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore,
     del response, error
     # <<<<< DELETE TANKOUBON STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=["aiohttp.client_exceptions.ClientConnectorError"])
 @pytest.mark.asyncio
 async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -1167,6 +1178,7 @@ async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npge
     del response, error
     # <<<<< REGENERATE THUMBNAILS STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=["aiohttp.client_exceptions.ClientConnectorError"])
 @pytest.mark.asyncio
 async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -1224,6 +1236,7 @@ async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
     del response, error
     # <<<<< GET MINION JOB DETAILS STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=["aiohttp.client_exceptions.ClientConnectorError"])
 @pytest.mark.asyncio
 async def test_concurrent_clients(environment: AbstractLRRDeploymentContext):
     """
