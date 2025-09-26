@@ -12,7 +12,7 @@ from pathlib import Path
 import sys
 import tempfile
 import tracemalloc
-from typing import Generator, List, Optional, Tuple
+from typing import Generator, List, Optional, Set, Tuple
 import warnings
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 import numpy as np
@@ -217,16 +217,25 @@ async def upload_archive(
                 os_errno: Optional[int] = getattr(inner_os_error, "errno", None)
                 os_winerr: Optional[int] = getattr(inner_os_error, "winerror", None)
 
-                if os_errno != errno.ECONNREFUSED:
-                    LOGGER.error(f"Unhandled error number: {os_errno}.")
-                    raise client_connector_error
+                POSIX_REFUSED: Set[int] = {errno.ECONNREFUSED}
+                if hasattr(errno, "WSAECONNREFUSED"):
+                    POSIX_REFUSED.add(errno.WSAECONNREFUSED)
+                if hasattr(errno, "WSAECONNRESET"):
+                    POSIX_REFUSED.add(errno.WSAECONNRESET)
 
                 # 64: The specified network name is no longer available
                 # 1225: ERROR_CONNECTION_REFUSED
                 # 10054: An existing connection was forcibly closed by the remote host
                 # 10061: WSAECONNREFUSED
-                if os_winerr not in (64, 1225, 10054, 10061):
-                    LOGGER.error(f"Encountered unhandled WinError {os_winerr} while uploading {filename}.")
+                WIN_REFUSED = {64, 1225, 10054, 10061}
+                is_connection_refused = (
+                    (os_winerr in WIN_REFUSED) or
+                    (os_errno in POSIX_REFUSED) or
+                    isinstance(inner_os_error, ConnectionRefusedError)
+                )
+
+                if not is_connection_refused:
+                    LOGGER.error(f"Encountered error not related to connection while uploading {filename}: os_errno={os_errno}, os_winerr={os_winerr}")
                     raise client_connector_error
 
                 if retry_count >= max_retries:
@@ -234,9 +243,8 @@ async def upload_archive(
                     return None, error
                 tts = 2 ** retry_count
                 LOGGER.warning(
-                    f"Encountered refused connection while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})"
-                    + "" if not os_errno else f"; os_errno={os_errno}"
-                    + "" if not os_winerr else f"; os_winerr=\"{os_winerr}\""
+                    f"Connection refused while uploading {filename}, retrying in {tts}s "
+                    f"({retry_count+1}/{max_retries}); os_errno={os_errno}; os_winerr={os_winerr}"
                 )
                 await asyncio.sleep(tts)
                 retry_count += 1
