@@ -2,14 +2,18 @@
 Collection of all simple API testing pipelines for the LANraragi server.
 
 For each testing pipeline, a corresponding LRR environment is set up and torn down.
+
+windows-2025 dev environments on Github are extremely flaky and prone to network problems.
+We add a flake tank at the front, and rerun test cases in Windows on flake errors.
 """
 
 import asyncio
 import errno
 import logging
 from pathlib import Path
+import sys
 import tempfile
-from typing import Generator, List, Optional, Tuple
+from typing import Generator, List, Optional, Set, Tuple
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 import numpy as np
 import pytest
@@ -72,7 +76,7 @@ from lanraragi.models.tankoubon import (
 )
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.common import compute_upload_checksum, DEFAULT_API_KEY
+from aio_lanraragi_tests.common import compute_upload_checksum
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import (
     CreatePageRequest,
@@ -82,7 +86,7 @@ from aio_lanraragi_tests.archive_generation.models import (
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
 
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 @pytest.fixture
 def resource_prefix() -> Generator[str, None, None]:
@@ -95,7 +99,7 @@ def port_offset() -> Generator[int, None, None]:
 @pytest.fixture(autouse=True)
 def environment(request: pytest.FixtureRequest, port_offset: int, resource_prefix: str):
     is_lrr_debug_mode: bool = request.config.getoption("--lrr-debug")
-    environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset)
+    environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
     environment.setup(with_api_key=True, with_nofunmode=True, lrr_debug_mode=is_lrr_debug_mode)
     request.session.lrr_environment = environment
     yield environment
@@ -116,15 +120,14 @@ async def lanraragi(environment: AbstractLRRDeploymentContext) ->  Generator[LRR
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
-    client = LRRClient(
-        lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
-        lrr_api_key=DEFAULT_API_KEY,
-        timeout=10
-    )
+    # connector = aiohttp.TCPConnector(limit=8, limit_per_host=8, keepalive_timeout=30)
+    # client = environment.lrr_client(connector=connector)
+    client = environment.lrr_client()
     try:
         yield client
     finally:
         await client.close()
+        # await connector.close()
 
 async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
     async with semaphore:
@@ -143,8 +146,8 @@ async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyn
             try:
                 status, content = await client.download_file(url, client.headers, params=params)
             except asyncio.TimeoutError:
-                timeout_msg = f"Request timed out after {client.session.timeout.total}s"
-                logger.error(f"Failed to get page {page_api} (timeout): {timeout_msg}")
+                timeout_msg = f"Request timed out after {client.client_session.timeout.total}s"
+                LOGGER.error(f"Failed to get page {page_api} (timeout): {timeout_msg}")
                 return (None, _build_err_response(timeout_msg, 500))
             if status == 200:
                 return (content, None)
@@ -185,7 +188,7 @@ async def upload_archive(
                     if retry_count >= max_retries:
                         return None, error
                     tts = 2 ** retry_count
-                    logger.warning(f"Locked resource when uploading {filename}. Retrying in {tts}s ({retry_count+1}/{max_retries})...")
+                    LOGGER.warning(f"Locked resource when uploading {filename}. Retrying in {tts}s ({retry_count+1}/{max_retries})...")
                     await asyncio.sleep(tts)
                     retry_count += 1
                     continue
@@ -197,7 +200,7 @@ async def upload_archive(
                     error = LanraragiErrorResponse(error=str(timeout_error), status=408)
                     return None, error
                 tts = 2 ** retry_count
-                logger.warning(f"Encountered timeout exception while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})...")
+                LOGGER.warning(f"Encountered timeout exception while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})...")
                 await asyncio.sleep(tts)
                 retry_count += 1
                 continue
@@ -206,16 +209,36 @@ async def upload_archive(
                 os_errno: Optional[int] = getattr(inner_os_error, "errno", None)
                 os_winerr: Optional[int] = getattr(inner_os_error, "winerror", None)
 
+                POSIX_REFUSED: Set[int] = {errno.ECONNREFUSED}
+                if hasattr(errno, "WSAECONNREFUSED"):
+                    POSIX_REFUSED.add(errno.WSAECONNREFUSED)
+                if hasattr(errno, "WSAECONNRESET"):
+                    POSIX_REFUSED.add(errno.WSAECONNRESET)
+
+                # 64: The specified network name is no longer available
                 # 1225: ERROR_CONNECTION_REFUSED
+                # 10054: An existing connection was forcibly closed by the remote host
                 # 10061: WSAECONNREFUSED
-                if os_errno != errno.ECONNREFUSED and os_winerr not in (1225, 10061):
+                WIN_REFUSED = {64, 1225, 10054, 10061}
+                is_connection_refused = (
+                    (os_winerr in WIN_REFUSED) or
+                    (os_errno in POSIX_REFUSED) or
+                    isinstance(inner_os_error, ConnectionRefusedError)
+                )
+
+                if not is_connection_refused:
+                    LOGGER.error(f"Encountered error not related to connection while uploading {filename}: os_errno={os_errno}, os_winerr={os_winerr}")
                     raise client_connector_error
 
                 if retry_count >= max_retries:
                     error = LanraragiErrorResponse(error=str(client_connector_error), status=408)
-                    return None, error
+                    # return None, error
+                    raise client_connector_error
                 tts = 2 ** retry_count
-                logger.warning(f"Encountered refused connection while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})...")
+                LOGGER.warning(
+                    f"Connection refused while uploading {filename}, retrying in {tts}s "
+                    f"({retry_count+1}/{max_retries}); os_errno={os_errno}; os_winerr={os_winerr}"
+                )
                 await asyncio.sleep(tts)
                 retry_count += 1
                 continue
@@ -297,6 +320,56 @@ def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Gen
     responses = write_archives_to_disk(requests)
     return responses
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Cache priming required only for flaky Windows testing environments.")
+@pytest.mark.asyncio
+@pytest.mark.xfail
+async def test_xfail_catch_flakes(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
+    """
+    This xfail test case serves no integration testing purpose, other than to prime the cache of flaky testing hosts
+    and reduce the chances of subsequent test case failures caused by network flakes, such as remote host connection
+    closures or connection refused errors resulting from high client request pressure to unprepared host.
+
+    Therefore, occasional test case failures here are expected and ignored.
+    """
+    num_archives = 100
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lanraragi.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+
+    LOGGER.debug("Established connection with test LRR server.")
+    # verify we are working with a new server.
+    response, error = await lanraragi.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+    assert len(response.data) == 0, "Server contains archives!"
+    del response, error
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    tag_generators = create_tag_generators(100, pmf)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        LOGGER.debug(f"Creating {num_archives} archives to upload.")
+        write_responses = save_archives(num_archives, tmpdir, npgenerator)
+        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+
+        # archive metadata
+        LOGGER.debug("Uploading archives to server.")
+        tasks = []
+        for i, _response in enumerate(write_responses):
+            title = f"Archive {i}"
+            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
+            checksum = compute_upload_checksum(_response.save_path)
+            tasks.append(asyncio.create_task(
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            ))
+        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        for response, error in gathered:
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+        del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -312,7 +385,7 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
 
-    logger.debug("Established connection with test LRR server.")
+    LOGGER.debug("Established connection with test LRR server.")
     # verify we are working with a new server.
     response, error = await lanraragi.archive_api.get_all_archives()
     assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
@@ -324,12 +397,12 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     tag_generators = create_tag_generators(100, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
-        logger.debug(f"Creating {num_archives} archives to upload.")
+        LOGGER.debug(f"Creating {num_archives} archives to upload.")
         write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
-        logger.debug("Uploading archives to server.")
+        LOGGER.debug("Uploading archives to server.")
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
@@ -345,7 +418,7 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> VALIDATE UPLOAD COUNT STAGE >>>>>
-    logger.debug("Validating upload counts.")
+    LOGGER.debug("Validating upload counts.")
     response, error = await lanraragi.archive_api.get_all_archives()
     assert not error, f"Failed to get archive data (status {error.status}): {error.error}"
 
@@ -383,6 +456,7 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     assert len(response.data) == 100-50, "Incorrect number of archives in server!"
     # <<<<< DELETE ARCHIVE ASYNC STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -394,7 +468,7 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore, 
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
 
-    logger.debug("Established connection with test LRR server.")
+    LOGGER.debug("Established connection with test LRR server.")
     # verify we are working with a new server.
     response, error = await lanraragi.archive_api.get_all_archives()
     assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
@@ -406,19 +480,18 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore, 
     tag_generators = create_tag_generators(100, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
-        logger.debug(f"Creating {num_archives} archives to upload.")
+        LOGGER.debug(f"Creating {num_archives} archives to upload.")
         write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
-        logger.debug("Uploading archives to server.")
+        LOGGER.debug("Uploading archives to server.")
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for response, error in gathered:
@@ -477,6 +550,7 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore, 
         assert not error, f"Failed to complete task (status {error.status}): {error.error}"
     # <<<<< SIMULATE READ ARCHIVE STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_category(lanraragi: LRRClient):
     """
@@ -489,7 +563,7 @@ async def test_category(lanraragi: LRRClient):
     # >>>>> TEST CONNECTION STAGE >>>>>
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-    logger.debug("Established connection with test LRR server.")
+    LOGGER.debug("Established connection with test LRR server.")
     # verify we are working with a new server.
     response, error = await lanraragi.archive_api.get_all_archives()
     assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
@@ -573,6 +647,7 @@ async def test_category(lanraragi: LRRClient):
     del response, error
     # <<<<< UNLINK BOOKMARK <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -596,7 +671,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
 
-    logger.debug("Established connection with test LRR server.")
+    LOGGER.debug("Established connection with test LRR server.")
     # verify we are working with a new server.
     response, error = await lanraragi.archive_api.get_all_archives()
     assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
@@ -609,19 +684,18 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
     tag_generators = create_tag_generators(100, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
-        logger.debug(f"Creating {num_archives} archives to upload.")
+        LOGGER.debug(f"Creating {num_archives} archives to upload.")
         write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
-        logger.debug("Uploading archives to server.")
+        LOGGER.debug("Uploading archives to server.")
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for response, error in gathered:
@@ -707,6 +781,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
     del response, error
     # <<<<< GET CATEGORY STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -724,7 +799,7 @@ async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
 
-    logger.debug("Established connection with test LRR server.")
+    LOGGER.debug("Established connection with test LRR server.")
     # verify we are working with a new server.
     response, error = await lanraragi.archive_api.get_all_archives()
     assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
@@ -736,19 +811,18 @@ async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
     tag_generators = create_tag_generators(num_archives, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
-        logger.debug(f"Creating {num_archives} archives to upload.")
+        LOGGER.debug(f"Creating {num_archives} archives to upload.")
         write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
-        logger.debug("Uploading archives to server.")
+        LOGGER.debug("Uploading archives to server.")
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for response, error in gathered:
@@ -785,6 +859,7 @@ async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
     del response, error
     # <<<<< DISCARD SEARCH CACHE STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_shinobu_api(lanraragi: LRRClient):
     """
@@ -793,7 +868,7 @@ async def test_shinobu_api(lanraragi: LRRClient):
     # >>>>> TEST CONNECTION STAGE >>>>>
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-    logger.debug("Established connection with test LRR server.")
+    LOGGER.debug("Established connection with test LRR server.")
     # <<<<< TEST CONNECTION STAGE <<<<<
     
     # >>>>> GET SHINOBU STATUS STAGE >>>>>
@@ -811,7 +886,7 @@ async def test_shinobu_api(lanraragi: LRRClient):
         response, error = await lanraragi.shinobu_api.restart_shinobu()
         assert not error, f"Failed to restart shinobu (status {error.status}): {error.error}"
         if response.new_pid == pid:
-            logger.warning(f"Shinobu PID {pid} did not change; retrying...")
+            LOGGER.warning(f"Shinobu PID {pid} did not change; retrying...")
             continue
         else:
             pid_has_changed = True
@@ -835,7 +910,7 @@ async def test_shinobu_api(lanraragi: LRRClient):
         response, error = await lanraragi.shinobu_api.get_shinobu_status()
         assert not error, f"Failed to get shinobu status (status {error.status}): {error.error}"
         if response.is_alive:
-            logger.warning(f"Shinobu is still running; retrying in 1s... ({retry_count+1}/{max_retries})")
+            LOGGER.warning(f"Shinobu is still running; retrying in 1s... ({retry_count+1}/{max_retries})")
             retry_count += 1
             await asyncio.sleep(1)
             continue
@@ -846,6 +921,7 @@ async def test_shinobu_api(lanraragi: LRRClient):
     del response, error
     # <<<<< GET SHINOBU STATUS STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -857,26 +933,25 @@ async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, 
     # >>>>> TEST CONNECTION STAGE >>>>>
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-    logger.debug("Established connection with test LRR server.")
+    LOGGER.debug("Established connection with test LRR server.")
     # <<<<< TEST CONNECTION STAGE <<<<<
     
     # >>>>> UPLOAD STAGE >>>>>
     tag_generators = create_tag_generators(num_archives, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
-        logger.debug(f"Creating {num_archives} archives to upload.")
+        LOGGER.debug(f"Creating {num_archives} archives to upload.")
         write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
-        logger.debug("Uploading archives to server.")
+        LOGGER.debug("Uploading archives to server.")
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for response, error in gathered:
@@ -896,6 +971,7 @@ async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, 
     del response, error
     # <<<<< CLEAN DATABASE STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_drop_database(lanraragi: LRRClient):
     """
@@ -904,7 +980,7 @@ async def test_drop_database(lanraragi: LRRClient):
     # >>>>> TEST CONNECTION STAGE >>>>>
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-    logger.debug("Established connection with test LRR server.")
+    LOGGER.debug("Established connection with test LRR server.")
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> DROP DATABASE STAGE >>>>>
@@ -918,6 +994,7 @@ async def test_drop_database(lanraragi: LRRClient):
     assert error and error.status == 401, f"Expected no permissions, got status {error.status}."
     # <<<<< TEST CONNECTION STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -928,26 +1005,25 @@ async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore,
     # >>>>> TEST CONNECTION STAGE >>>>>
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-    logger.debug("Established connection with test LRR server.")
+    LOGGER.debug("Established connection with test LRR server.")
     # <<<<< TEST CONNECTION STAGE <<<<<
     
     # >>>>> UPLOAD STAGE >>>>>
     tag_generators = create_tag_generators(num_archives, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
-        logger.debug(f"Creating {num_archives} archives to upload.")
+        LOGGER.debug(f"Creating {num_archives} archives to upload.")
         write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
-        logger.debug("Uploading archives to server.")
+        LOGGER.debug("Uploading archives to server.")
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for response, error in gathered:
@@ -1020,6 +1096,7 @@ async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore,
     del response, error
     # <<<<< DELETE TANKOUBON STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -1030,26 +1107,25 @@ async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npge
     # >>>>> TEST CONNECTION STAGE >>>>>
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-    logger.debug("Established connection with test LRR server.")
+    LOGGER.debug("Established connection with test LRR server.")
     # <<<<< TEST CONNECTION STAGE <<<<<
     
     # >>>>> UPLOAD STAGE >>>>>
     tag_generators = create_tag_generators(num_archives, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
-        logger.debug(f"Creating {num_archives} archives to upload.")
+        LOGGER.debug(f"Creating {num_archives} archives to upload.")
         write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
-        logger.debug("Uploading archives to server.")
+        LOGGER.debug("Uploading archives to server.")
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for response, error in gathered:
@@ -1088,6 +1164,7 @@ async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npge
     del response, error
     # <<<<< REGENERATE THUMBNAILS STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
@@ -1098,26 +1175,25 @@ async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
     # >>>>> TEST CONNECTION STAGE >>>>>
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-    logger.debug("Established connection with test LRR server.")
+    LOGGER.debug("Established connection with test LRR server.")
     # <<<<< TEST CONNECTION STAGE <<<<<
     
     # >>>>> UPLOAD STAGE >>>>>
     tag_generators = create_tag_generators(num_archives, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
-        logger.debug(f"Creating {num_archives} archives to upload.")
+        LOGGER.debug(f"Creating {num_archives} archives to upload.")
         write_responses = save_archives(num_archives, tmpdir, npgenerator)
         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
         # archive metadata
-        logger.debug("Uploading archives to server.")
+        LOGGER.debug("Uploading archives to server.")
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for response, error in gathered:
@@ -1145,6 +1221,7 @@ async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
     del response, error
     # <<<<< GET MINION JOB DETAILS STAGE <<<<<
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_concurrent_clients(environment: AbstractLRRDeploymentContext):
     """
@@ -1154,14 +1231,14 @@ async def test_concurrent_clients(environment: AbstractLRRDeploymentContext):
     session = aiohttp.ClientSession()
     try:
         client1 = LRRClient(
-            lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
+            lrr_base_url=f"http://127.0.0.1:{environment.lrr_port}",
             lrr_api_key="lanraragi",
-            session=session
+            client_session=session
         )
         client2 = LRRClient(
-            lrr_host=f"http://127.0.0.1:{environment.lrr_port}",
+            lrr_base_url=f"http://127.0.0.1:{environment.lrr_port}",
             lrr_api_key="lanraragi",
-            session=session
+            client_session=session
         )
         results = await asyncio.gather(
             client1.misc_api.get_server_info(),

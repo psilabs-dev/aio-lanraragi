@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aio-lanraragi"
-version = "0.1.8"
+version = "0.1.9"
 authors = [
     {name="psilabs-dev"}
 ]
@@ -35,9 +35,14 @@ Homepage = "https://github.com/psilabs-dev/aio-lanraragi"
 addopts = [
     "--import-mode=importlib"
 ]
-log_cli = true
+filterwarnings = [
+    "error:Unclosed client session.*:ResourceWarning",
+    "error::pytest.PytestUnraisableExceptionWarning",
+]
 log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
-log_cli_date_format = "%Y-%m-%d %H:%M:%S"
+log_cli_date_format = "%H:%M:%S"
+log_format  = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
+log_date_format = "%H:%M:%S"
 
 [tool.ruff]
 extend-select = ["ASYNC", "C4", "SIM"]

@@ -16,7 +16,7 @@ class _MiscApiClient(_ApiClient):
         GET /api/info
         """
         url = self.api_context.build_url("/api/info")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             return (_process_get_server_info_response(content), None)
         return (None, _build_err_response(content, status))
@@ -35,7 +35,7 @@ class _MiscApiClient(_ApiClient):
         params = {}
         if request.category:
             params["category"] = request.category
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers, params=params)
         if status == 200:
             return (GetOpdsCatalogResponse(result=content), None)
         return (None, _build_err_response(content, status))
@@ -45,7 +45,7 @@ class _MiscApiClient(_ApiClient):
         GET /api/plugins/:type
         """
         url = self.api_context.build_url(f"/api/plugins/{request.type}")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             return (_handle_get_available_plugins_response(content), None)
         return (None, _build_err_response(content, status))
@@ -62,7 +62,7 @@ class _MiscApiClient(_ApiClient):
             form_data.add_field('id', request.arcid)
         if request.arg:
             form_data.add_field('arg', request.arg)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers, data=form_data)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, data=form_data)
         if status == 200:
             return (_handle_use_plugin_response(content), None)
         return (None, _build_err_response(content, status))
@@ -79,7 +79,7 @@ class _MiscApiClient(_ApiClient):
             form_data.add_field('id', request.arcid)
         if request.arg:
             form_data.add_field('arg', request.arg)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers, data=form_data)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, data=form_data)
         if status == 200:
             response_j = json.loads(content)
             job = response_j.get("job")
@@ -91,7 +91,7 @@ class _MiscApiClient(_ApiClient):
         DELETE /api/tempfolder
         """
         url = self.api_context.build_url("/api/tempfolder")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
             newsize = response_j.get("newsize")
@@ -107,7 +107,7 @@ class _MiscApiClient(_ApiClient):
         form_data.add_field('url', request.url)
         if request.catid:
             form_data.add_field('catid', request.catid)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers, data=form_data)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, data=form_data)
         if status == 200:
             response_j = json.loads(content)
             job = response_j.get("job")
@@ -122,7 +122,7 @@ class _MiscApiClient(_ApiClient):
         url = self.api_context.build_url("/api/regen_thumbs")
         form_data = aiohttp.FormData(quote_fields=False)
         form_data.add_field('force', request.force)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers, data=form_data)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, data=form_data)
         if status == 200:
             response_j = json.loads(content)
             job = response_j.get("job")

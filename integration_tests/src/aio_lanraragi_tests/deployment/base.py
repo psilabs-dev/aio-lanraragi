@@ -5,7 +5,10 @@ from typing import Optional
 
 from aio_lanraragi_tests.common import DEFAULT_LRR_PORT, DEFAULT_REDIS_PORT
 from aio_lanraragi_tests.exceptions import DeploymentException
+import aiohttp
 import requests
+
+from lanraragi.clients.client import LRRClient
 
 
 class AbstractLRRDeploymentContext(abc.ABC):
@@ -59,6 +62,31 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Port exposed for the given Redis database.
         """
         return DEFAULT_REDIS_PORT + self.port_offset
+    
+    @property
+    def lrr_base_url(self) -> str:
+        """
+        Base URL for this instance. Defaults to `"http://127.0.0.1:$lrr_port"`.
+
+        Currently a readonly property.
+        """
+        if not hasattr(self, "_lrr_base_url"):
+            self._lrr_base_url = f"http://127.0.0.1:{self.lrr_port}"
+        return self._lrr_base_url
+
+    @property
+    def lrr_api_key(self) -> Optional[str]:
+        """
+        Unencoded API key for this instance.
+        Can be None, which represents a server without an API key.
+        """
+        if not hasattr(self, "_lrr_api_key"):
+            return None
+        return self._lrr_api_key
+
+    @lrr_api_key.setter
+    def lrr_api_key(self, lrr_api_key: Optional[str]):
+        self._lrr_api_key = lrr_api_key
 
     @abc.abstractmethod
     def update_api_key(self, api_key: Optional[str]):
@@ -218,3 +246,13 @@ class AbstractLRRDeploymentContext(abc.ABC):
             for line in log_text.split('\n'):
                 if line.strip():
                     self.logger.log(log_level, f"LRR: {line}")
+
+    def lrr_client(
+        self, ssl: bool=True, 
+        client_session: Optional[aiohttp.ClientSession]=None, connector: Optional[aiohttp.BaseConnector]=None, 
+        logger: Optional[logging.Logger]=None
+    ) -> LRRClient:
+        """
+        Returns a LRRClient object configured to connect to this server.
+        """
+        return LRRClient(self.lrr_base_url, self.lrr_api_key, ssl=ssl, client_session=client_session, connector=connector, logger=logger)

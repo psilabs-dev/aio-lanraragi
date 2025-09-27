@@ -94,7 +94,11 @@ def pytest_sessionstart(session: pytest.Session):
     """
     Configure a global run ID for a pytest session.
     """
-    session.config.global_run_id = int(time.time() * 1000)
+    config = session.config
+    config.global_run_id = int(time.time() * 1000)
+    global_run_id = config.global_run_id
+    npseed: int = config.getoption("--npseed")
+    logger.info(f"pytest run parameters: global_run_id={global_run_id}, npseed={npseed}")
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item: Item, call: CallInfo[Any]):

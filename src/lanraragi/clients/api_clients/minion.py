@@ -20,7 +20,7 @@ class _MinionApiClient(_ApiClient):
         GET /api/minion/:jobid
         """
         url = self.api_context.build_url(f"/api/minion/{request.job_id}")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
             state = response_j.get("state")
@@ -35,7 +35,7 @@ class _MinionApiClient(_ApiClient):
         GET /api/minion/:jobid/detail
         """
         url = self.api_context.build_url(f"/api/minion/{request.job_id}/detail")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             return (_process_get_minion_job_detail_response(content), None)
         return (None, _build_err_response(content, status))

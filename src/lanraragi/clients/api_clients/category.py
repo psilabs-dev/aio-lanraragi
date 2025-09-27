@@ -17,7 +17,7 @@ class _CategoryApiClient(_ApiClient):
         GET /api/categories
         """
         url = self.api_context.build_url("/api/categories")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             return (_process_get_all_categories_response(content), None)
         return (None, _build_err_response(content, status))
@@ -27,7 +27,7 @@ class _CategoryApiClient(_ApiClient):
         GET /api/categories/:id
         """
         url = self.api_context.build_url(f"/api/categories/{request.category_id}")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             return (_process_get_category_response(content), None)
         return (None, _build_err_response(content, status))
@@ -43,7 +43,7 @@ class _CategoryApiClient(_ApiClient):
         form_data.add_field('name', request.name)
         if request.search is not None:
             form_data.add_field('search', request.search)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.api_context.headers, data=form_data)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers, data=form_data)
         if status == 200:
             response_j = json.loads(content)
             category_id = response_j.get("category_id")
@@ -62,7 +62,7 @@ class _CategoryApiClient(_ApiClient):
             form_data.add_field('name', request.name)
         if request.search is not None:
             form_data.add_field('search', request.search)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.api_context.headers, data=form_data)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers, data=form_data)
         if status == 200:
             response_j = json.loads(content)
             category_id = response_j.get("category_id")
@@ -74,7 +74,7 @@ class _CategoryApiClient(_ApiClient):
         DELETE /api/categories/:id
         """
         url = self.api_context.build_url(f"/api/categories/{request.category_id}")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
         if status == 200:
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))
@@ -84,7 +84,7 @@ class _CategoryApiClient(_ApiClient):
         PUT /api/categories/:id/:archive
         """
         url = self.api_context.build_url(f"/api/categories/{request.category_id}/{request.arcid}")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
             success_message = response_j.get("successMessage")
@@ -96,7 +96,7 @@ class _CategoryApiClient(_ApiClient):
         DELETE /api/categories/:id/:archive
         """
         url = self.api_context.build_url(f"/api/categories/{request.category_id}/{request.arcid}")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
         if status == 200:
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))
@@ -108,7 +108,7 @@ class _CategoryApiClient(_ApiClient):
         If bookmark link is disabled, the response will be None.
         """
         url = self.api_context.build_url("/api/categories/bookmark_link")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
             category_id = response_j.get("category_id")
@@ -122,7 +122,7 @@ class _CategoryApiClient(_ApiClient):
         url = self.api_context.build_url(f"/api/categories/bookmark_link/{request.category_id}")
         form_data = aiohttp.FormData(quote_fields=False)
         form_data.add_field('id', request.category_id)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.api_context.headers, data=form_data)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers, data=form_data)
         if status == 200:
             response_j = json.loads(content)
             category_id = response_j.get("category_id")
@@ -134,7 +134,7 @@ class _CategoryApiClient(_ApiClient):
         DELETE /api/categories/bookmark_link
         """
         url = self.api_context.build_url("/api/categories/bookmark_link")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
             category_id = response_j.get("category_id")

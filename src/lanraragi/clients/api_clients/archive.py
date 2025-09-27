@@ -50,7 +50,7 @@ class _ArchiveApiClient(_ApiClient):
         GET /api/archives
         """
         url = self.api_context.build_url("/api/archives")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             return (_process_get_all_archives_response(content), None)
         return (None, _build_err_response(content, status))
@@ -60,7 +60,7 @@ class _ArchiveApiClient(_ApiClient):
         GET /api/archives/untagged
         """
         url = self.api_context.build_url("/api/archives/untagged")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             return (GetUntaggedArchivesResponse(data=json.loads(content)), None) # the content data should just be a list of string.
         return (None, _build_err_response(content, status))
@@ -70,7 +70,7 @@ class _ArchiveApiClient(_ApiClient):
         GET /api/archives/:id/metadata
         """
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/metadata")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             return (_process_get_archive_metadata_response(content), None)
         return (None, _build_err_response(content, status))
@@ -80,7 +80,7 @@ class _ArchiveApiClient(_ApiClient):
         GET /api/archives/:id/categories
         """
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/categories")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             return (_process_get_archive_categories_response(content), None)
         return (None, _build_err_response(content, status))
@@ -90,7 +90,7 @@ class _ArchiveApiClient(_ApiClient):
         GET /api/archives/:id/tankoubons
         """
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/tankoubons")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
             tankoubons: List[str] = response_j.get("tankoubons")
@@ -107,7 +107,7 @@ class _ArchiveApiClient(_ApiClient):
             params["page"] = request.page
         if request.nofallback:
             params["no_fallback"] = str(request.nofallback).lower()
-        status, data = await self.api_context.download_thumbnail(url, self.api_context.headers, params=params)
+        status, data = await self.api_context.download_thumbnail(url, self.headers, params=params)
         if status in [200, 202]:
             return (_process_get_archive_thumbnail_response(data, status), None)
         return (None, _build_err_response(data, status))
@@ -120,7 +120,7 @@ class _ArchiveApiClient(_ApiClient):
         form_data = aiohttp.FormData(quote_fields=False)
         if request.force:
             form_data.add_field('force', request.force)
-        status, data = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.api_context.headers, data=form_data)
+        status, data = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, data=form_data)
         if status in [200, 202]:
             response_j = json.loads(data)
             job = response_j.get("job")
@@ -133,7 +133,7 @@ class _ArchiveApiClient(_ApiClient):
         GET  /api/archives/:id/download
         """
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/download")
-        status, data = await self.api_context.download_file(url, self.api_context.headers)
+        status, data = await self.api_context.download_file(url, self.headers)
         if status == 200:
             return (DownloadArchiveResponse(data=data), None)
         return (None, _build_err_response(data, status))
@@ -146,7 +146,7 @@ class _ArchiveApiClient(_ApiClient):
         params = {}
         if request.force:
             params["force"] = str(request.force).lower()
-        status, data = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.api_context.headers, params=params)
+        status, data = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers, params=params)
         if status == 200:
             response_j = json.loads(data)
             job = response_j.get("job") if 'job' in response_j else None
@@ -159,7 +159,7 @@ class _ArchiveApiClient(_ApiClient):
         DELETE /api/archives/:id/isnew
         """
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/isnew")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
         if status == 200:
             return (ClearNewArchiveFlagResponse(arcid=request.arcid), None)
         return (None, _build_err_response(content, status))
@@ -169,7 +169,7 @@ class _ArchiveApiClient(_ApiClient):
         PUT /api/archives/:id/progress/:page
         """
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/progress/{request.page}")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
             arcid = response_j.get("id")
@@ -195,7 +195,7 @@ class _ArchiveApiClient(_ApiClient):
             form_data.add_field('category_id', request.category_id)
         if request.file_checksum:
             form_data.add_field('file_checksum', request.file_checksum)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.api_context.headers, data=form_data)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers, data=form_data)
         if status == 200:
             response_j = json.loads(content)
             arcid = response_j.get("id")
@@ -210,7 +210,7 @@ class _ArchiveApiClient(_ApiClient):
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/thumbnail")
         form_data = aiohttp.FormData(quote_fields=False)
         form_data.add_field('page', request.page)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.api_context.headers, data=form_data)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers, data=form_data)
         if status == 200:
             response_j = json.loads(content)
             new_thumbnail = response_j.get("new_thumbnail")
@@ -229,7 +229,7 @@ class _ArchiveApiClient(_ApiClient):
             form_data.add_field('tags', request.tags)
         if request.summary:
             form_data.add_field('summary', request.summary)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.api_context.headers, data=form_data)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers, data=form_data)
         if status == 200:
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))
@@ -239,7 +239,7 @@ class _ArchiveApiClient(_ApiClient):
         DELETE /api/archives/:id
         """
         url = self.api_context.build_url(f"/api/archives/{request.arcid}")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.api_context.headers)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
             filename = response_j.get("filename")

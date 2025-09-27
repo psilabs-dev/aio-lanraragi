@@ -27,25 +27,147 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
     multiple concurrent API calls.
     """
 
+    @property
+    def logger(self) -> logging.Logger:
+        return self._logger
+
+    @logger.setter
+    def logger(self, logger: logging.Logger):
+        self._logger = logger
+
+    @property
+    def headers(self) -> Dict[str, str]:
+        """
+        LRR request headers. Is either an empty dict or contains authentication.
+        """
+        if not hasattr(self, "_headers"):
+            self._headers = {}
+        return self._headers
+
+    @property
+    def lrr_host(self) -> str:
+        """
+        Base URL for LANraragi service.
+        TODO: deprecated in favor of `lrr_base_url`.
+        https://github.com/psilabs-dev/aio-lanraragi/issues/106
+        """
+        return self.lrr_base_url
+
+    @lrr_host.setter
+    def lrr_host(self, lrr_host: str):
+        # TODO: deprecated in favor of `lrr_base_url`.
+        # https://github.com/psilabs-dev/aio-lanraragi/issues/106
+        self.lrr_base_url = lrr_host
+
+    @property
+    def lrr_base_url(self) -> str:
+        """
+        Base URL for the LANraragi service.
+
+        Examples:
+        - `"http://127.0.0.1:3000"`
+        - `"https://lanraragi.example"`
+        - `"https://website.com/lanraragi"`
+        """
+        return self._lrr_base_url
+    
+    @lrr_base_url.setter
+    def lrr_base_url(self, lrr_base_url: str):
+        self._lrr_base_url = lrr_base_url
+    
+    @property
+    def lrr_api_key(self) -> Optional[str]:
+        """
+        Unencoded API key for LANraragi
+        """
+        return self._lrr_api_key
+
+    @lrr_api_key.setter
+    def lrr_api_key(self, lrr_api_key: Optional[str]):
+        if lrr_api_key is not None:
+            self.headers["Authorization"] = _build_auth_header(lrr_api_key)
+        else:
+            if "Authorization" in self.headers:
+                del self.headers["Authorization"]
+        self._lrr_api_key = lrr_api_key
+
+    @property
+    def owns_client_session(self) -> bool:
+        """
+        Readonly property set on instantiation, which indicates whether this context
+        owns its aiohttp.ClientSession resource.
+
+        If owned, the resource must be closed on context exit.
+        """
+        return self._owns_client_session
+    
+    @property
+    def owns_connector(self) -> bool:
+        """
+        Readonly property set on instantiation, which indicates whether this context
+        owns its aiohttp.BaseConnector resource.
+
+        If owned, the resource must be closed on context exit.
+        """
+        return self._owns_connector
+
     def __init__(
             self,
-            lrr_host: str, lrr_api_key: str,
-            session: Optional[aiohttp.ClientSession]=None, ssl: bool=True, timeout: Optional[int] = None,
+            lrr_base_url: str, lrr_api_key: Optional[str]=None,
+            ssl: bool=True,
+            session: Optional[aiohttp.ClientSession]=None,
+            client_session: Optional[aiohttp.ClientSession]=None,
+            connector: Optional[aiohttp.BaseConnector]=None,
             logger: Optional[logging.Logger]=None
     ):
+        """
+        Instantiates an ApiContextManager instance and context.
+        Any resource not provided by the user will be created and owned by
+        the context. On context exit, these resources will be closed.
+        """
         if not logger:
             logger = logging.getLogger(__name__)
         self.logger = logger
-        self.lrr_host = lrr_host
+        self.lrr_base_url = lrr_base_url
         self.lrr_api_key = lrr_api_key
-        self.headers = {"Authorization": _build_auth_header(lrr_api_key)}
-        self.session = session
+
+        # aiohttp-specific properties
+        # if client session is configured by user, it overrides all other configurations.
+        # on context exit, the client (and its attributes) will NOT be cleaned.
+
+        self._session_lock = asyncio.Lock()
+        # Prefer explicit client_session; keep deprecated `session` for backward compatibility
+        client_session = session if session else client_session # TODO: https://github.com/psilabs-dev/aio-lanraragi/issues/106
+        if client_session:
+            self.client_session = client_session
+            self.connector = None
+            self._owns_client_session = False
+            self._owns_connector = False
+        else:
+            self.client_session = None
+            self._owns_client_session = True
+
+            # if connector is configured, overrides SSL preference, 
+            # and connector will NOT be cleaned on context exit.
+            # Otherwise, we will create the connector during session create.
+            # A connector will NEVER be created in isolation.
+            if connector:
+                self.connector = connector
+                self._owns_connector = False
+            else:
+                self.connector = None
+                self._owns_connector = True
+
+        # aiohttp-specific convenience configurations
         self.ssl = ssl
-        self.timeout = timeout
-        self._created_session = False
         self.initialize_api_groups()
 
     def initialize_api_groups(self):
+        """
+        A stub to be overridden by LRRClient to be used at post-construct time,
+        as auth data created during construct-time will be passed down to child
+        clients.
+        """
         return
 
     def update_api_key(self, api_key: Optional[str]):
@@ -61,22 +183,55 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
             self.headers["Authorization"] = _build_auth_header(api_key)
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        if not self.session:
-            timeout: Optional[aiohttp.ClientTimeout] = None
-            if self.timeout:
-                timeout = aiohttp.ClientTimeout(total=self.timeout)
-            if not self.ssl:
-                self.session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False), timeout=timeout)
+        """
+        Returns a client session to use.
+        If user provided a session during instantiation, this will return that session.
+        If user did not provide a session, but instead a connector, this will create an owned session with that connector.
+        If user did not provide aiohttp resources, this will create owned resources.
+
+        All owned aiohttp resources will be automatically closed.
+        """
+
+        if self.client_session:
+            return self.client_session
+        
+        # only one session can be created and owned by the context manager at any given time.
+        async with self._session_lock:
+            if self.client_session:
+                return self.client_session
+            if self.connector:
+                self.client_session = aiohttp.ClientSession(connector=self.connector, connector_owner=False)
+            elif self.ssl is not None:
+                self.client_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self.ssl))
             else:
-                self.session = aiohttp.ClientSession(timeout=timeout)
-            self._created_session = True
-        return self.session
-    
+                self.client_session = aiohttp.ClientSession()
+        return self.client_session
+
     async def close(self):
-        if self.session and self._created_session:
-            await self.session.close()
-            self.session = None
-            self._created_session = False
+        if self.owns_client_session and self.owns_connector:
+            # both session and connector are ours. Consequently, the connector shouldn't exist.
+            if self.connector:
+                await self.connector.close()
+            if self.client_session:
+                await self.client_session.close()
+            self.client_session = None
+            self.connector = None
+        elif self.owns_client_session:
+            # close client session, but don't close borrowed connector.
+            await self.client_session.close()
+            self.client_session = None
+            self.connector = None
+        elif self.owns_connector:
+            # close connector, but don't close borrowed client session.
+            if self.connector:
+                await self.connector.close()
+            self.client_session = None
+            self.connector = None
+        else:
+            # do nothing. These are borrowed by context manager.
+            self.client_session = None
+            self.connector = None
+            return
 
     def build_url(self, api: str) -> str:
         """
@@ -86,7 +241,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         - `client.build_url("/api/search")`
         - `client.build_url("/api/archives")`
         """
-        return f"{self.lrr_host}{api}"
+        return f"{self.lrr_base_url}{api}"
 
     @override
     async def __aenter__(self: _ApiContextManagerLike) -> _ApiContextManagerLike:
