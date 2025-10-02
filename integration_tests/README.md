@@ -2,7 +2,7 @@
 
 This directory contains the API/integration testing package for "aio-lanraragi". It includes tools for setting up and tearing down LRR docker environments, and creating synthetic archive data.
 
-Versioning of `integration_tests` is synced to that of `aio-lanraragi`.
+Integration testing version updates apply only if changes to integration testing code or tests have occurred.
 
 For information on setting up a developer environment for testing, refer to [development](/docs/development.md).
 
@@ -106,8 +106,9 @@ In a test deployment, considered resources are as follows:
 Since docker test deployments rely only on one image, we will pin the image ID to the global run ID instead.
 
 ## Scope
-The scope of this library is limited to perform routine (i.e. not long-running by default) API integration tests within the "tests" directory. Each integration test must contain at least one LRR API call in an isolated LRR docker environment. The library tests will check the following points:
+The scope of this library is limited to perform routine (i.e. not long-running by default) API integration tests within the "tests" directory. The library tests will check one or more of the following points:
 
+1. That the LRR server deployment was successful;
 1. That the functionality provided by LRR API is correct and according to API documentation;
 1. That the aio-lanraragi client API calls are correct.
 
