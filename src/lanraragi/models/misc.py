@@ -44,7 +44,6 @@ class GetAvailablePluginsResponse(LanraragiResponse):
     plugins: List[GetAvailablePluginsResponsePlugin] = Field(...)
 
 class UsePluginRequest(LanraragiRequest):
-    key: str = Field(..., description="API key, mandatory for this method.")
     plugin: str = Field(..., description="Namespace of the plugin to use.")
     arcid: Optional[str] = Field(None, description="ID of the archive to use the plugin on. This is only mandatory for metadata plugins.")
     arg: Optional[str] = Field(None, description="Optional One-Shot argument to use when executing this Plugin.")
@@ -54,7 +53,6 @@ class UsePluginResponse(LanraragiResponse):
     type: Literal["login", "metadata", "script"] = Field(...)
 
 class UsePluginAsyncRequest(LanraragiRequest):
-    key: str = Field(..., description="API key, mandatory for this method.")
     plugin: str = Field(..., description="Namespace of the plugin to use.")
     arcid: Optional[str] = Field(None, description="ID of the archive to use the plugin on. This is only mandatory for metadata plugins.")
     arg: Optional[str] = Field(None, description="Optional One-Shot argument to use when executing this Plugin.")
