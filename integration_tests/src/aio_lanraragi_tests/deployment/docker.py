@@ -174,6 +174,17 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def redis_volume(self, volume: docker.models.volumes.Volume):
         self._redis_volume = volume
 
+    @property
+    def docker_client(self) -> docker.DockerClient:
+        return self._docker_client
+
+    @property
+    def docker_api(self) -> Optional[docker.APIClient]:
+        """
+        Returns API client if docker image build logs streaming is configured, else None.
+        """
+        return self._docker_api
+
     def __init__(
             self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient,
             resource_prefix: str, port_offset: int,
@@ -189,8 +200,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.global_run_id = global_run_id
         self.git_url = git_url
         self.git_branch = git_branch
-        self.docker_client = docker_client
-        self.docker_api = docker_api
+        self._docker_client = docker_client
+        self._docker_api = docker_api
         if logger is None:
             logger = LOGGER
         self.logger = logger
@@ -625,7 +636,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             for evt in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag=image_id, decode=True, rm=True):
                 logs.append(evt)
                 if (msg := evt.get("stream")):
-                    self.logger.debug(msg.strip())
+                    self.logger.info(msg.strip())
                 if "error" in evt or "errorDetail" in evt:
                     error_msg = evt.get("error") or evt.get("errorDetail", {}).get("message")
                     raise DeploymentException(f"Docker image build failed! Error: {error_msg}")
