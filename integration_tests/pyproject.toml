@@ -17,6 +17,9 @@ dependencies = [
     "redis"
 ]
 
+[project.scripts]
+lrr-staging = "aio_lanraragi_tests.console:console"
+
 [project.urls]
 Homepage = "https://github.com/psilabs-dev/aio-lanraragi"
 
