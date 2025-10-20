@@ -3,7 +3,6 @@ Python module for setting up and tearing down docker environments for LANraragi.
 """
 
 import contextlib
-import json
 import logging
 from pathlib import Path
 import tempfile
@@ -591,7 +590,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.network.remove()
             self.logger.debug(f"Removed network: {self.network_name}")
 
-    def _build_docker_image(self, build_path: Path, force: bool=False):
+    def _build_docker_image(self, build_path: str, force: bool=False):
         """
         Build a docker image.
 
@@ -601,24 +600,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         image_id = self.lrr_image_name
 
-        if force:
-            if not Path(build_path).exists():
-                raise FileNotFoundError(f"Build path {build_path} does not exist!")
-            dockerfile_path = Path(build_path) / "tools" / "build" / "docker" / "Dockerfile"
-            if not dockerfile_path.exists():
-                raise FileNotFoundError(f"Dockerfile {dockerfile_path} does not exist!")
-            self.logger.debug(f"Building LRR image; this can take a while ({dockerfile_path}).")
-            build_start = time.time()
-            if self.docker_api:
-                for lineb in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag=image_id):
-                    if (data := json.loads(lineb.decode('utf-8').strip())) and (stream := data.get('stream')):
-                        self.logger.debug(stream.strip())
-            else:
-                self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag=image_id)
-            build_time = time.time() - build_start
-            self.logger.info(f"LRR image {image_id} build complete: time {build_time}s")
-            return
-        else:
+        if not force:
             try:
                 self.docker_client.images.get(image_id)
                 self.logger.debug(f"Image {image_id} already exists, skipping build.")
@@ -627,6 +609,31 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.logger.debug(f"Image {image_id} not found, building.")
                 self._build_docker_image(build_path, force=True)
                 return
+
+        if not Path(build_path).exists():
+            raise FileNotFoundError(f"Build path {build_path} does not exist!")
+
+        dockerfile_path = Path(build_path) / "tools" / "build" / "docker" / "Dockerfile"
+        if not dockerfile_path.exists():
+            raise FileNotFoundError(f"Dockerfile {dockerfile_path} does not exist!")
+
+        self.logger.debug(f"Building LRR image; this can take a while ({dockerfile_path}).")
+        build_start = time.time()
+
+        if self.docker_api:
+            logs = []
+            for evt in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag=image_id, decode=True, rm=True):
+                logs.append(evt)
+                if (msg := evt.get("stream")):
+                    self.logger.debug(msg.strip())
+                if "error" in evt or "errorDetail" in evt:
+                    error_msg = evt.get("error") or evt.get("errorDetail", {}).get("message")
+                    raise DeploymentException(f"Docker image build failed! Error: {error_msg}")
+        else:
+            self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag=image_id)
+        build_time = time.time() - build_start
+        self.logger.info(f"LRR image {image_id} build complete: time {build_time}s")
+        return
 
     def _pull_docker_image_if_not_exists(self, image: str, force: bool=False):
         """
