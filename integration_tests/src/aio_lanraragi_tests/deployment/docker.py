@@ -608,6 +608,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Args:
             build_path: The path to the build directory.
             force: Whether to force the build (e.g. even if the image already exists).
+        
+        Raises:
+            FileNotFoundError: docker image or build path not found
+            DeploymentException: if docker image build fails with log stream output
+            docker.errors.BuildError: if docker image build fails with log stream disabled
         """
         image_id = self.lrr_image_name
 
