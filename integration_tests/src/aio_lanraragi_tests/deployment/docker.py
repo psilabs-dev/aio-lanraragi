@@ -185,11 +185,18 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         return self._docker_api
 
+    @property
+    def is_force_build(self) -> bool:
+        """
+        Force build Docker image, even if the image ID exists.
+        """
+        return self._is_force_build
+
     def __init__(
             self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient,
             resource_prefix: str, port_offset: int,
             docker_api: docker.APIClient=None, logger: Optional[logging.Logger]=None,
-            global_run_id: int=None, is_allow_uploads: bool=True,
+            global_run_id: int=None, is_allow_uploads: bool=True, is_force_build: bool=False
     ):
 
         self.resource_prefix = resource_prefix
@@ -206,6 +213,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             logger = LOGGER
         self.logger = logger
         self.is_allow_uploads = is_allow_uploads
+        self._is_force_build = is_force_build
 
     @override
     def update_api_key(self, api_key: Optional[str]):
@@ -303,7 +311,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         image_id = self.lrr_image_name
         if self.build_path:
             self.logger.info(f"Building LRR image {image_id} from build path {self.build_path}.")
-            self._build_docker_image(self.build_path, force=False)
+            self._build_docker_image(self.build_path, force=self.is_force_build)
         elif self.git_url:
             self.logger.info(f"Building LRR image {image_id} from git URL {self.git_url}.")
             try:
@@ -434,19 +442,16 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if with_api_key:
             resp = self.update_api_key(DEFAULT_API_KEY)
             if resp.exit_code != 0:
-                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to add API key to server: {resp}")
 
         if with_nofunmode:
             resp = self.enable_nofun_mode()
             if resp.exit_code != 0:
-                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to enable nofunmode: {resp}")
 
         if lrr_debug_mode:
             resp = self.enable_lrr_debug_mode()
             if resp.exit_code  != 0:
-                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to enable debug mode for LRR: {resp}")
         self.logger.debug("Redis server is ready.")
 
@@ -457,7 +462,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.is_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
-                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to modify permissions for LRR contents: {resp}")
         self.logger.debug("LRR server is ready.")
 
@@ -475,7 +479,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.is_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
-                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to modify permissions for LRR contents: {resp}")
         self.logger.debug("LRR server is ready.")
 
@@ -521,7 +524,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.is_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
-                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to modify permissions for LRR contents: {resp}")
         self.logger.debug("LRR server is ready.")
 
