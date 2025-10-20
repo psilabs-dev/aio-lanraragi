@@ -6,6 +6,7 @@ Note: this is experimental and subject to iteration and breaking, regardless of 
 
 Usage is separated to the following:
 ```sh
+lrr-staging version     # get integration tests version
 lrr-staging up          # create and start staging environment
 lrr-staging restart     # restart environment (requires created)
 lrr-staging stop        # stop environment (requires created)
