@@ -39,7 +39,7 @@ def get_deployment(
 
 def up(image: str=None, git_url: str=None, git_branch: str=None, build: str=None, docker_api: docker.APIClient=None):
     d = get_deployment(build_path=build, image=image, git_url=git_url, git_branch=git_branch, docker_api=docker_api)
-    d.setup()
+    d.setup(with_api_key=True)
     print("LRR staging environment setup complete.")
     sys.exit(0)
 
