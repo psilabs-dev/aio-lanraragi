@@ -12,9 +12,12 @@ import pytest_asyncio
 from lanraragi.clients.client import LRRClient
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.common import DEFAULT_API_KEY
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD
 
 LOGGER = logging.getLogger(__name__)
+
+LRR_LOGIN_TITLE = "LANraragi - Admin Login"
+LRR_INDEX_TITLE = "LANraragi"
 
 class ApiAuthMatrixParams(BaseModel):
     # used by test_api_auth_matrix.
@@ -143,13 +146,76 @@ async def sample_test_api_auth_matrix(
 
     # test main page.
     # playwright uses English as locale and timezone, if this changes in the future we may need to update.
-    expected_title = "LANraragi - Admin Login" if is_nofunmode else "LANraragi"
+    expected_title = LRR_LOGIN_TITLE if is_nofunmode else LRR_INDEX_TITLE
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
         await page.goto(lrr_client.lrr_base_url)
+        await page.wait_for_load_state("networkidle")
         assert await page.title() == expected_title
         await browser.close()
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+async def test_nofunmode_login_right_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lanraragi: LRRClient):
+    """
+    Login with correct password.
+    """
+    environment.setup(with_nofunmode=True, lrr_debug_mode=is_lrr_debug_mode)
+
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(lanraragi.lrr_base_url)
+        await page.wait_for_load_state("networkidle")
+        assert await page.title() == LRR_LOGIN_TITLE
+
+        # right password test
+        await page.fill("#pw_field", DEFAULT_LRR_PASSWORD)
+        await page.click("input[type='submit'][value='Login']")
+        await page.wait_for_load_state("networkidle")
+        assert await page.title() == LRR_INDEX_TITLE
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+async def test_nofunmode_login_empty_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lanraragi: LRRClient):
+    """
+    Login without password.
+    """
+    environment.setup(with_nofunmode=True, lrr_debug_mode=is_lrr_debug_mode)
+
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(lanraragi.lrr_base_url)
+        await page.wait_for_load_state("networkidle")
+        assert await page.title() == LRR_LOGIN_TITLE
+
+        # empty password test
+        await page.click("input[type='submit'][value='Login']")
+        await page.wait_for_load_state("networkidle")
+        assert "Wrong Password." in await page.content()
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+async def test_nofunmode_login_wrong_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lanraragi: LRRClient):
+    """
+    Login with wrong password.
+    """
+    environment.setup(with_nofunmode=True, lrr_debug_mode=is_lrr_debug_mode)
+
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(lanraragi.lrr_base_url)
+        await page.wait_for_load_state("networkidle")
+        assert await page.title() == LRR_LOGIN_TITLE
+
+        # right password test
+        await page.fill("#pw_field", "password")
+        await page.click("input[type='submit'][value='Login']")
+        await page.wait_for_load_state("networkidle")
+        assert "Wrong Password." in await page.content()
 
 @pytest.mark.asyncio
 @pytest.mark.playwright

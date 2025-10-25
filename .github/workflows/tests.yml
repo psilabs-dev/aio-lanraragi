@@ -55,6 +55,7 @@ jobs:
           pytest tests --log-cli-level=INFO \
             --git-url=https://github.com/difegue/LANraragi.git \
             --git-branch=dev \
+            --playwright \
             --docker-api \
             --npseed 42
         env:
@@ -195,6 +196,7 @@ jobs:
           --log-cli-level=INFO `
           --windist "$env:GITHUB_WORKSPACE\LANraragi\win-dist" `
           --staging "$env:GITHUB_WORKSPACE\staging" `
+          --playwright `
           --npseed 42
 
   check:

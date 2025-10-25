@@ -51,6 +51,7 @@ DEFAULT_LRR_PORT = 3000
 DEFAULT_REDIS_PORT = 6379
 
 DEFAULT_API_KEY = "lanraragi"
+DEFAULT_LRR_PASSWORD = "kamimamita"
 
 @overload
 def compute_upload_checksum(br: io.IOBase) -> str:
