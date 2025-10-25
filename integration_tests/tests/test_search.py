@@ -37,6 +37,7 @@ from aio_lanraragi_tests.archive_generation.models import (
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 
 from lanraragi.models.search import SearchArchiveIndexRequest
+from lanraragi.models.category import CreateCategoryRequest
 from tests.utils import (
     pmf,
     upload_archive,
@@ -257,11 +258,11 @@ async def test_search_algorithm(
     # >>>>> INITIALIZE DATASET >>>>>
     LOGGER.info("Initializing dataset...")
     archives, _ = dataset
-    await populate_server(lanraragi, semaphore, archives)
+    arcids = await populate_server(lanraragi, semaphore, archives)
     LOGGER.info("Dataset initialization complete.")
     # <<<<< INITIALIZE DATASET <<<<<
 
-    # >>>>> SEARCH TESTS >>>>>
+    # >>>>> BASIC SEARCH TEST >>>>>
     # search by title with expectation of only one result.
     title_frequency_map: Dict[str, List[S1ArchiveInfo]] = {}
     for a in archives:
@@ -285,11 +286,105 @@ async def test_search_algorithm(
     assert actual_tagset.issuperset(expected_tagset), f"Actual tagset {actual_tagset} not a subset of expected tagset: {expected_tagset} (extra tags: {expected_tagset.difference(actual_tagset)})"
     response, error = await lanraragi.search_api.discard_search_cache()
     assert not error, f"Discard search cache failed (status {error.status}): {error.error}"
+    # <<<<< BASIC SEARCH TEST <<<<<
 
-    # search untaggedonly archives, sort by title (asc then desc)
+    # >>>>> SEARCH: UNTAGGED-ONLY, SORT BY TITLE ASC/DESC >>>>>
+    # Build expected untagged arcids from dataset mapping to uploaded arcids
+    expected_untagged_arcids: Set[str] = set()
+    for idx, a in enumerate(archives):
+        if (a.tags or "") == "":
+            expected_untagged_arcids.add(arcids[idx])
 
-    # search by most popular artist and sort by source (desc then asc, then include start flag)
+    response, error = await lanraragi.search_api.search_archive_index(
+        SearchArchiveIndexRequest(untaggedonly=True, sortby="title", start="-1", groupby_tanks=False)
+    )
+    assert not error, f"Search failed (status {error.status}): {error.error}"
+    asc_ids = [rec.arcid for rec in response.data]
+    assert len(asc_ids) > 0, "Expected at least one untagged archive"
+    # Validate returned arcids are subset of expected untagged set
+    assert set(asc_ids).issubset(expected_untagged_arcids), f"Returned IDs not subset of expected untagged set: {set(asc_ids) - expected_untagged_arcids}"
+    # switch to DESC and ensure it's reverse of ASC
+    response, error = await lanraragi.search_api.discard_search_cache()
+    assert not error, f"Discard search cache failed (status {error.status}): {error.error}"
+    response, error = await lanraragi.search_api.search_archive_index(
+        SearchArchiveIndexRequest(untaggedonly=True, sortby="title", order="desc", start="-1", groupby_tanks=False)
+    )
+    assert not error, f"Search failed (status {error.status}): {error.error}"
+    desc_ids = [rec.arcid for rec in response.data]
+    assert desc_ids == list(reversed(asc_ids)), "DESC order is not the reverse of ASC for title sort"
+    response, error = await lanraragi.search_api.discard_search_cache()
+    assert not error, f"Discard search cache failed (status {error.status}): {error.error}"
+    # <<<<< SEARCH: UNTAGGED-ONLY, SORT BY TITLE ASC/DESC <<<<<
 
-    # search by most popular artist, include a category, then sort by another namespace (asc then desc)
+    # >>>>> SEARCH: MOST POPULAR ARTIST, SORT BY SOURCE (DESC THEN ASC), TEST START >>>>>
+    # Determine most popular artist from dataset
+    artist_count: Dict[str, int] = {}
+    for a in archives:
+        if not a.tags:
+            continue
+        for t in a.tags.split(","):
+            t = t.strip()
+            if not t.startswith("artist:"):
+                continue
+            val = t.split(":", 1)[1]
+            artist_count[val] = artist_count.get(val, 0) + 1
+    assert artist_count, "No artist tags found in dataset"
+    popular_artist = max(artist_count.items(), key=lambda kv: kv[1])[0]
 
-    # <<<<< SEARCH TESTS <<<<<
+    # DESC by source
+    response, error = await lanraragi.search_api.search_archive_index(
+        SearchArchiveIndexRequest(search_filter=f"artist:{popular_artist}", sortby="source", order="desc", start="-1", groupby_tanks=False)
+    )
+    assert not error, f"Search failed (status {error.status}): {error.error}"
+    ids_desc = [rec.arcid for rec in response.data]
+
+    # ASC by source
+    response, error = await lanraragi.search_api.discard_search_cache()
+    assert not error, f"Discard search cache failed (status {error.status}): {error.error}"
+    response, error = await lanraragi.search_api.search_archive_index(
+        SearchArchiveIndexRequest(search_filter=f"artist:{popular_artist}", sortby="source", start="-1", groupby_tanks=False)
+    )
+    assert not error, f"Search failed (status {error.status}): {error.error}"
+    ids_asc = [rec.arcid for rec in response.data]
+    assert ids_desc == list(reversed(ids_asc)), "DESC order is not the reverse of ASC for source sort"
+
+    # Verify paging via start flag using ASC baseline
+    if len(ids_asc) >= 10:
+        response, error = await lanraragi.search_api.discard_search_cache()
+        assert not error, f"Discard search cache failed (status {error.status}): {error.error}"
+        response, error = await lanraragi.search_api.search_archive_index(
+            SearchArchiveIndexRequest(search_filter=f"artist:{popular_artist}", sortby="source", start="5", groupby_tanks=False)
+        )
+        assert not error, f"Search failed (status {error.status}): {error.error}"
+        ids_start5 = [rec.arcid for rec in response.data]
+        # Expect this to align with a slice of the full ASC sequence
+        assert ids_start5 == ids_asc[5:5+len(ids_start5)], "Start-based pagination does not match expected slice"
+    response, error = await lanraragi.search_api.discard_search_cache()
+    assert not error, f"Discard search cache failed (status {error.status}): {error.error}"
+    # <<<<< SEARCH: MOST POPULAR ARTIST, SORT BY SOURCE (DESC THEN ASC), TEST START <<<<<
+
+    # >>>>> SEARCH: MOST POPULAR ARTIST + CATEGORY, SORT BY ANOTHER NAMESPACE ASC/DESC >>>>>
+    # Create a dynamic category using a frequent non-namespaced tag from dataset (popular.tag)
+    response, error = await lanraragi.category_api.create_category(CreateCategoryRequest(name="dyn-popular", search="popular.tag"))
+    assert not error, f"Create category failed (status {error.status}): {error.error}"
+    category_id = response.category_id
+
+    # Choose a namespace different from 'source' for sorting, e.g., 'language'
+    response, error = await lanraragi.search_api.search_archive_index(
+        SearchArchiveIndexRequest(category=category_id, search_filter=f"artist:{popular_artist}", sortby="language", start="-1", groupby_tanks=False)
+    )
+    assert not error, f"Search failed (status {error.status}): {error.error}"
+    cat_lang_asc = [rec.arcid for rec in response.data]
+
+    response, error = await lanraragi.search_api.discard_search_cache()
+    assert not error, f"Discard search cache failed (status {error.status}): {error.error}"
+    response, error = await lanraragi.search_api.search_archive_index(
+        SearchArchiveIndexRequest(category=category_id, search_filter=f"artist:{popular_artist}", sortby="language", order="desc", start="-1", groupby_tanks=False)
+    )
+    assert not error, f"Search failed (status {error.status}): {error.error}"
+    cat_lang_desc = [rec.arcid for rec in response.data]
+    assert cat_lang_desc == list(reversed(cat_lang_asc)), "DESC order is not the reverse of ASC for language sort with category"
+
+    response, error = await lanraragi.search_api.discard_search_cache()
+    assert not error, f"Discard search cache failed (status {error.status}): {error.error}"
+    # <<<<< SEARCH: MOST POPULAR ARTIST + CATEGORY, SORT BY ANOTHER NAMESPACE ASC/DESC <<<<<
