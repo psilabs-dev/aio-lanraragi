@@ -7,28 +7,24 @@ Tests the following functionalities live:
 """
 
 import asyncio
-import errno
+import hashlib
 import logging
 from pathlib import Path
 import sys
 import tempfile
-from typing import Generator, List, Optional, Set, Tuple
-from aio_lanraragi_tests.deployment.factory import generate_deployment
+from typing import Dict, Generator, List, Optional, Set, Tuple
 import numpy as np
 import pytest
+
+from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
+from aio_lanraragi_tests.deployment.factory import generate_deployment
+from aio_lanraragi_tests.search_algorithm_testing.data_generation import dump_dataset, generate_dataset, validate_dataset
+from aio_lanraragi_tests.search_algorithm_testing.models import S1ArchiveInfo, S1CategoryInfo
 import pytest_asyncio
-import aiohttp
-import aiohttp.client_exceptions
 
 from lanraragi.clients.client import LRRClient
-from lanraragi.models.archive import (
-    UploadArchiveRequest,
-    UploadArchiveResponse,
-)
-from lanraragi.models.base import (
-    LanraragiErrorResponse,
-    LanraragiResponse
-)
+from lanraragi.models.archive import UploadArchiveResponse
+from lanraragi.models.base import LanraragiErrorResponse
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.common import compute_upload_checksum
@@ -39,9 +35,12 @@ from aio_lanraragi_tests.archive_generation.models import (
     WriteArchiveResponse,
 )
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
-from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
-from aio_lanraragi_tests.s1.utils import load_dataset
-from aio_lanraragi_tests.s1.models import S1ArchiveInfo
+
+from lanraragi.models.search import SearchArchiveIndexRequest
+from tests.utils import (
+    pmf,
+    upload_archive,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -53,24 +52,23 @@ def resource_prefix() -> Generator[str, None, None]:
 def port_offset() -> Generator[int, None, None]:
     yield 10
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
+def is_lrr_debug_mode(request: pytest.FixtureRequest) -> Generator[bool, None, None]:
+    yield request.config.getoption("--lrr-debug")
+
+@pytest.fixture
+def dataset(request: pytest.FixtureRequest) -> Generator[Tuple[List[S1ArchiveInfo], List[S1CategoryInfo]], None, None]:
+    seed: int = int(request.config.getoption("npseed"))
+    yield generate_dataset(seed)
+
+@pytest.fixture
 def environment(request: pytest.FixtureRequest, port_offset: int, resource_prefix: str):
     is_lrr_debug_mode: bool = request.config.getoption("--lrr-debug")
     environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
-    environment.setup(with_api_key=True, lrr_debug_mode=is_lrr_debug_mode)
+    environment.setup(with_api_key=True, with_nofunmode=True, lrr_debug_mode=is_lrr_debug_mode)
     request.session.lrr_environment = environment
     yield environment
     environment.teardown(remove_data=True)
-
-@pytest.fixture
-def npgenerator(request: pytest.FixtureRequest) -> Generator[np.random.Generator, None, None]:
-    seed: int = int(request.config.getoption("npseed"))
-    generator = np.random.default_rng(seed)
-    yield generator
-
-@pytest.fixture
-def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
-    yield asyncio.BoundedSemaphore(value=8)
 
 @pytest_asyncio.fixture
 async def lanraragi(environment: AbstractLRRDeploymentContext) ->  Generator[LRRClient, None, None]:
@@ -83,99 +81,15 @@ async def lanraragi(environment: AbstractLRRDeploymentContext) ->  Generator[LRR
     finally:
         await client.close()
 
-async def upload_archive(
-    client: LRRClient, save_path: Path, filename: str, semaphore: asyncio.Semaphore, checksum: str=None, title: str=None, tags: str=None,
-    max_retries: int=4
-) -> Tuple[UploadArchiveResponse, LanraragiErrorResponse]:
-    async with semaphore:
-        with open(save_path, 'rb') as f:  # noqa: ASYNC230
-            file = f.read()
-            request = UploadArchiveRequest(file=file, filename=filename, title=title, tags=tags, file_checksum=checksum)
+@pytest.fixture
+def npgenerator(request: pytest.FixtureRequest) -> Generator[np.random.Generator, None, None]:
+    seed: int = int(request.config.getoption("npseed"))
+    generator = np.random.default_rng(seed)
+    yield generator
 
-        retry_count = 0
-        while True:
-            try:
-                response, error = await client.archive_api.upload_archive(request)
-                if response:
-                    return response, error
-                if error.status == 423: # locked resource
-                    if retry_count >= max_retries:
-                        return None, error
-                    tts = 2 ** retry_count
-                    LOGGER.warning(f"Locked resource when uploading {filename}. Retrying in {tts}s ({retry_count+1}/{max_retries})...")
-                    await asyncio.sleep(tts)
-                    retry_count += 1
-                    continue
-            except asyncio.TimeoutError as timeout_error:
-                # if LRR handles files synchronously then our concurrent uploads may put too much pressure.
-                # employ retry with exponential backoff here as well. This is not considered a server-side
-                # problem.
-                if retry_count >= max_retries:
-                    error = LanraragiErrorResponse(error=str(timeout_error), status=408)
-                    return None, error
-                tts = 2 ** retry_count
-                LOGGER.warning(f"Encountered timeout exception while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})...")
-                await asyncio.sleep(tts)
-                retry_count += 1
-                continue
-            except aiohttp.client_exceptions.ClientConnectorError as client_connector_error:
-                inner_os_error: OSError = client_connector_error.os_error
-                os_errno: Optional[int] = getattr(inner_os_error, "errno", None)
-                os_winerr: Optional[int] = getattr(inner_os_error, "winerror", None)
-
-                POSIX_REFUSED: Set[int] = {errno.ECONNREFUSED}
-                if hasattr(errno, "WSAECONNREFUSED"):
-                    POSIX_REFUSED.add(errno.WSAECONNREFUSED)
-                if hasattr(errno, "WSAECONNRESET"):
-                    POSIX_REFUSED.add(errno.WSAECONNRESET)
-
-                # 64: The specified network name is no longer available
-                # 1225: ERROR_CONNECTION_REFUSED
-                # 10054: An existing connection was forcibly closed by the remote host
-                # 10061: WSAECONNREFUSED
-                WIN_REFUSED = {64, 1225, 10054, 10061}
-                is_connection_refused = (
-                    (os_winerr in WIN_REFUSED) or
-                    (os_errno in POSIX_REFUSED) or
-                    isinstance(inner_os_error, ConnectionRefusedError)
-                )
-
-                if not is_connection_refused:
-                    LOGGER.error(f"Encountered error not related to connection while uploading {filename}: os_errno={os_errno}, os_winerr={os_winerr}")
-                    raise client_connector_error
-
-                if retry_count >= max_retries:
-                    error = LanraragiErrorResponse(error=str(client_connector_error), status=408)
-                    # return None, error
-                    raise client_connector_error
-                tts = 2 ** retry_count
-                LOGGER.warning(
-                    f"Connection refused while uploading {filename}, retrying in {tts}s "
-                    f"({retry_count+1}/{max_retries}); os_errno={os_errno}; os_winerr={os_winerr}"
-                )
-                await asyncio.sleep(tts)
-                retry_count += 1
-                continue
-
-            # just raise whatever else comes up because we should handle them explicitly anyways
-
-async def retry_on_lock(operation_func, max_retries: int = 10) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
-    """
-    Wrapper function that retries an operation if it encounters a 423 locked resource error.
-    """
-    retry_count = 0
-    while True:
-        response, error = await operation_func()
-        if error and error.status == 423: # locked resource
-            retry_count += 1
-            if retry_count > max_retries:
-                return response, error
-            await asyncio.sleep(2 ** retry_count)
-            continue
-        return response, error
-
-def pmf(t: float) -> float:
-    return 2 ** (-t * 100)
+@pytest.fixture
+def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
+    yield asyncio.BoundedSemaphore(value=8)
 
 def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Generator) -> List[WriteArchiveResponse]:
     requests = []
@@ -247,11 +161,28 @@ async def populate_server(
 
     return arcids
 
-# We'll still need this since we're uploading a bunch of archives.
+def test_dataset_generation_quality(dataset: Tuple[List[S1ArchiveInfo], List[S1CategoryInfo]], request: pytest.FixtureRequest):
+    """
+    Pre-test that the dataset generated satsifies data quality constraints, and that the hash of the dataset is consistent and deterministic.
+    """
+    archives, categories = dataset
+    validate_dataset(archives, categories)
+
+    seed: int = int(request.config.getoption("npseed"))
+    if seed == 42:
+        sha256_hash = hashlib.sha256()
+        sha256_hash.update(dump_dataset(archives, categories).encode())
+        hex_digest = sha256_hash.hexdigest()
+        assert hex_digest == "6481b592c90ddf2cfbf9aa11037f99511d0aa333611816e1a71651fec3c54521"
+    else:
+        LOGGER.warning("Nonstandard seed provided, skipping hash check.")
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Cache priming required only for flaky Windows testing environments.")
 @pytest.mark.asyncio
 @pytest.mark.xfail
-async def test_xfail_catch_flakes(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
+async def test_xfail_catch_flakes(
+    lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator
+):
     """
     This xfail test case serves no integration testing purpose, other than to prime the cache of flaky testing hosts
     and reduce the chances of subsequent test case failures caused by network flakes, such as remote host connection
@@ -298,10 +229,19 @@ async def test_xfail_catch_flakes(lanraragi: LRRClient, semaphore: asyncio.Semap
     # <<<<< UPLOAD STAGE <<<<<
 
 @pytest.mark.asyncio
-async def test_s1_exact_search(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
+async def test_search_algorithm(
+    dataset: Tuple[List[S1ArchiveInfo], List[S1CategoryInfo]], environment: AbstractLRRDeploymentContext, lanraragi: LRRClient, semaphore: asyncio.Semaphore, is_lrr_debug_mode: bool
+):
     """
-    Search with filter "XXJcHPeOaAE BT7q BTq0Zf2pC 0ln", and get exactly one archive.
+    Test the search algorithm.
+
+    Cases to test:
+    - test exact title search
+    - test sorting algorithm
     """
+
+    environment.setup(with_nofunmode=True, with_api_key=True, lrr_debug_mode=is_lrr_debug_mode)
+
     # >>>>> TEST CONNECTION STAGE >>>>>
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
@@ -314,18 +254,42 @@ async def test_s1_exact_search(lanraragi: LRRClient, semaphore: asyncio.Semaphor
     del response, error
     # <<<<< TEST CONNECTION STAGE <<<<<
 
-    # >>>>> LOAD S1 DATASET & UPLOAD ALL ARCHIVES >>>>>
-    dataset = load_dataset()
-    archives: List[S1ArchiveInfo] = dataset["archives"]
+    # >>>>> INITIALIZE DATASET >>>>>
+    LOGGER.info("Initializing dataset...")
+    archives, _ = dataset
     await populate_server(lanraragi, semaphore, archives)
-    # <<<<< LOAD S1 DATASET & UPLOAD ALL ARCHIVES <<<<<
+    LOGGER.info("Dataset initialization complete.")
+    # <<<<< INITIALIZE DATASET <<<<<
 
-    # >>>>> SEARCH STAGE >>>>>
-    from lanraragi.models.search import SearchArchiveIndexRequest
-    filter_str = "XXJcHPeOaAE BT7q BTq0Zf2pC 0ln"
-    search_resp, search_err = await lanraragi.search_api.search_archive_index(
-        SearchArchiveIndexRequest(search_filter=filter_str)
-    )
-    assert not search_err, f"Failed to search archive index (status {search_err.status}): {search_err.error}"
-    assert len(search_resp.data) == 1, f"Expected exactly 1 match, got {len(search_resp.data)}"
-    # <<<<< SEARCH STAGE <<<<<
+    # >>>>> SEARCH TESTS >>>>>
+    # search by title with expectation of only one result.
+    title_frequency_map: Dict[str, List[S1ArchiveInfo]] = {}
+    for a in archives:
+        if a.title not in title_frequency_map:
+            title_frequency_map[a.title] = []
+        title_frequency_map[a.title].append(a)
+    expected_title: Optional[str] = None
+    expected_tagset: Optional[Set[str]] = None
+    for title in title_frequency_map:
+        if len(title_frequency_map[title]) == 1:
+            expected_title = title_frequency_map[title][0].title
+            expected_tagset = set(title_frequency_map[title][0].tags.split(","))
+            break
+    assert expected_title, "No archive found with unique title!"
+    response, error = await lanraragi.search_api.search_archive_index(SearchArchiveIndexRequest(search_filter=expected_title))
+    assert not error, f"Search failed (status {error.status}): {error.error}"
+    assert len(response.data) == 1, f"Expected exactly one archive, got: {response.data}"
+    actual_title = response.data[0].title
+    actual_tagset = set(response.data[0].tags.split(","))
+    assert actual_title == expected_title, f"Expected title {expected_title}, got: {actual_title}"
+    assert actual_tagset.issuperset(expected_tagset), f"Actual tagset {actual_tagset} not a subset of expected tagset: {expected_tagset} (extra tags: {expected_tagset.difference(actual_tagset)})"
+    response, error = await lanraragi.search_api.discard_search_cache()
+    assert not error, f"Discard search cache failed (status {error.status}): {error.error}"
+
+    # search untaggedonly archives, sort by title (asc then desc)
+
+    # search by most popular artist and sort by source (desc then asc, then include start flag)
+
+    # search by most popular artist, include a category, then sort by another namespace (asc then desc)
+
+    # <<<<< SEARCH TESTS <<<<<

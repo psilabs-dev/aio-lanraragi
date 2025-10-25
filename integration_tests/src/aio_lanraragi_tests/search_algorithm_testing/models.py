@@ -2,7 +2,6 @@
 from typing import List, Optional
 from pydantic import BaseModel
 
-
 class S1ArchiveInfo(BaseModel):
     preid: int # ID before creating the archive (to keep track of it).
     title: str

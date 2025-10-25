@@ -1,6 +1,5 @@
 """
 Generate search algorithm testing synthetic dataset (S1). This may be iterated on in the future.
-Deterministic random generation is not guaranteed, so we'll need to generate once and store in the repo.
 Summary is not included in search testing.
 
 Dataset constraints:
@@ -45,31 +44,29 @@ Recommendations:
 - all unstructured data is fuzzily generated with unicode.
 """
 
+import argparse
 import json
+import logging
+from pathlib import Path
 import random
 import string
-import sys
-from pathlib import Path
 from typing import Dict, List, Set
 
-# Ensure local src/ is importable when running this script directly
-THIS_FILE = Path(__file__).resolve()
-INTEGRATION_ROOT = THIS_FILE.parents[1]
-SRC_DIR = INTEGRATION_ROOT / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+from aio_lanraragi_tests.search_algorithm_testing.models import S1ArchiveInfo, S1CategoryInfo
 
-from aio_lanraragi_tests.s1.models import S1ArchiveInfo, S1CategoryInfo
+LOGGER = logging.getLogger(__name__)
 
-reserved_chars = ["\"", "?", "_", "*", "%", "-", "$", ","]
+# reserved characters (not allowed in individual tags, but allow special behavior for search filtering)
+RESERVED_CHARS = ["\"", "?", "_", "*", "%", "-", "$", ","]
 
-def generate_s1():
+def generate_dataset(seed: int):
     """
     Generate archives and categories satisfying validate_s1 constraints.
-    Uses random with seed 42 for determinism.
+
+    Only seed 42 is tested to pass validation.
     Returns: (archives, categories)
     """
-    random.seed(42)
+    random.seed(seed)
 
     num_archives = 1000
     all_preids = list(range(num_archives))
@@ -139,13 +136,13 @@ def generate_s1():
             return False
         if ":" in tag:
             return False
-        return all(rc not in tag for rc in reserved_chars)
+        return all(rc not in tag for rc in RESERVED_CHARS)
 
     def rand_ascii_special() -> str:
         # allowed ascii specials, excluding reserved and ':'
         allowed = "!.;'/()+==~^&#@."
         # ensure no comma or percent or underscore etc.
-        allowed = "".join(ch for ch in allowed if ch not in reserved_chars and ch != ":")
+        allowed = "".join(ch for ch in allowed if ch not in RESERVED_CHARS and ch != ":")
         return random.choice(allowed)
 
     unicode_pool = [
@@ -247,11 +244,9 @@ def generate_s1():
     # Assign at least one unique non-ns tag to every tagged archive so all 1000 appear
     non_untagged_preids = [i for i in all_preids if i not in untagged_preids]
     tag_assignment: Dict[int, Set[str]] = {pid: set() for pid in non_untagged_preids}
-    idx = 0
-    for tag in non_ns_tags:
+    for idx, tag in enumerate(non_ns_tags):
         pid = non_untagged_preids[idx % len(non_untagged_preids)]
         tag_assignment[pid].add(tag)
-        idx += 1
 
     # Spread additional random non-ns tags per archive
     for pid in non_untagged_preids:
@@ -299,15 +294,13 @@ def generate_s1():
     EPOCH_MIN = 1445644800
     EPOCH_MAX = 1761366700
 
-    uploaded_preids = set(non_untagged_preids[:700])
-    published_preids = set(non_untagged_preids[700:1300])
-    published_preids = {pid for pid in published_preids if pid in non_untagged_preids}
+    # Deterministic lists for structured namespace assignment
+    uploaded_list = non_untagged_preids[:700]
+    published_list = non_untagged_preids[700:1300]
+    published_list = {pid for pid in published_list if pid in non_untagged_preids}
 
     uploaded_common_value = str(1609459200)
     published_common_value = str(1577836800)
-
-    artist_preids = set(non_untagged_preids[:700])
-
     def random_name() -> str:
         parts = []
         for _ in range(random.randint(1, 3)):
@@ -334,18 +327,18 @@ def generate_s1():
         else:
             # ensure reserved characters are not used
             candidate = random_unicode_name()
-            if all(rc not in candidate for rc in reserved_chars):
+            if all(rc not in candidate for rc in RESERVED_CHARS):
                 artist_name_set.add(candidate)
-    artist_names: List[str] = list(artist_name_set)
+    # Sort for deterministic base ordering, then shuffle deterministically
+    artist_names: List[str] = sorted(artist_name_set)
     random.shuffle(artist_names)
 
     def add_tag(pid: int, tag: str):
-        if any(rc in tag for rc in reserved_chars):
+        if any(rc in tag for rc in RESERVED_CHARS):
             return
         tag_assignment[pid].add(tag)
 
     # Structured namespaces with guaranteed duplicates
-    uploaded_list = list(uploaded_preids)
     for i, pid in enumerate(uploaded_list):
         if i < 12:
             val = uploaded_common_value
@@ -353,7 +346,6 @@ def generate_s1():
             val = str(random.randint(EPOCH_MIN, EPOCH_MAX))
         add_tag(pid, f"uploaded:{val}")
 
-    published_list = list(published_preids)
     for i, pid in enumerate(published_list):
         if i < 12:
             val = published_common_value
@@ -368,22 +360,18 @@ def generate_s1():
     # - >=300 distinct artists overall
     # - One artist appears in >=100 archives, and at least 10 artists appear in >=20
 
-    available_pids = [pid for pid in non_untagged_preids]
+    available_pids = list(non_untagged_preids)
     random.shuffle(available_pids)
-    ten_artist_pids = set(available_pids[:10])
-    two_artist_pids = set(available_pids[10:30])
-    single_artist_pids = set(available_pids[30:630])  # 600 pids
+    ten_artist_pids = available_pids[:10]
+    two_artist_pids = available_pids[10:30]
+    single_list = available_pids[30:630]  # 600 pids
 
-    # pick popular artists
+    # pick popular artists deterministically from artist_names
     top_artist = artist_common_value
     popular_artists = [a for a in artist_names if a != top_artist][:9]
 
-    single_list = list(single_artist_pids)
-    random.shuffle(single_list)
-
     # 120 singles get the top artist
-    top_targets = set(single_list[:120])
-    for pid in top_targets:
+    for pid in single_list[:120]:
         add_tag(pid, f"artist:{top_artist}")
 
     # Next 9 artists get 20 each
@@ -483,20 +471,20 @@ def generate_s1():
         "$": "dollar$tag",
         ",": "comma,tag",
     }
-    for ch in reserved_chars:
+    for ch in RESERVED_CHARS:
         filt = special_filters[ch]
         categories.append(S1CategoryInfo(preid=cat_preid, name=f"Dyn Special {ch}", filter=filt, archives=None))
         cat_preid += 1
 
     return archives, categories
 
-def validate_s1(archives: List[S1ArchiveInfo], categories: List[S1CategoryInfo]):
+def validate_dataset(archives: List[S1ArchiveInfo], categories: List[S1CategoryInfo]):
     """
-    Validate that conditions are all satisfied, otherwise throw error.
+    Validate that data generation constraints are all satisfied, otherwise throw error.
     """
 
     # constraint 1
-    print("Testing constraint 1...")
+    LOGGER.info("Testing constraint 1...")
     assert len(archives) == 1000
     title_frequency: Dict[str, int] = {}
     has_10_arcs_same_title = False
@@ -516,19 +504,19 @@ def validate_s1(archives: List[S1ArchiveInfo], categories: List[S1CategoryInfo])
     assert has_10_arcs_no_title, "Not found: at least 10 archives with no title"
     assert has_10_arcs_same_title, "Not found: at least 10 archives with same title"
     assert num_arcs_with_10_or_more_tags >= 10, "Number of archives with at least 10 tags less than 10"
-    print("Constraint passed.")
+    LOGGER.info("Constraint passed.")
 
     # constraint 2
-    print("Testing constraint 2...")
+    LOGGER.info("Testing constraint 2...")
     num_untagged_archives = 0
     for a in archives:
         if a.tags == "":
             num_untagged_archives += 1
     assert num_untagged_archives == 20, "Number of untagged archives not 20."
-    print("Constraint passed.")
+    LOGGER.info("Constraint passed.")
 
     # constraint 3-6
-    print("Testing constraints 3-6...")
+    LOGGER.info("Testing constraints 3-6...")
     tagset: Set[str] = set() # non-namespaced tags.
     namespace_value_map: Dict[str, Dict[str, int]] = {} # namespace -> value -> frequency
     tag_archive_frequency: Dict[str, int] = {} # number of archives by tag
@@ -537,7 +525,7 @@ def validate_s1(archives: List[S1ArchiveInfo], categories: List[S1CategoryInfo])
         for tag in tag_list:
             if not tag:
                 continue
-            assert all(rc not in tag for rc in reserved_chars), f"Detected reserved character in tag: \"{tag}\""
+            assert all(rc not in tag for rc in RESERVED_CHARS), f"Detected reserved character in tag: \"{tag}\""
             if ":" not in tag:
                 tagset.add(tag)
                 if tag not in tag_archive_frequency:
@@ -569,7 +557,7 @@ def validate_s1(archives: List[S1ArchiveInfo], categories: List[S1CategoryInfo])
 
     # 4e: source namespace exists and all values are ASCII-only
     assert "source" in namespace_value_map, "'source' namespace not found."
-    assert all(val.isascii() for val in namespace_value_map["source"].keys()), "Found non-ASCII value(s) in 'source' namespace."
+    assert all(val.isascii() for val in namespace_value_map["source"]), "Found non-ASCII value(s) in 'source' namespace."
 
     num_unstructured_namespaces = 0
     num_structured_namespaces = 0
@@ -612,10 +600,10 @@ def validate_s1(archives: List[S1ArchiveInfo], categories: List[S1CategoryInfo])
         if tag_archive_frequency[tag] >= 200:
             has_tag_over_200_archives = True
     assert has_tag_over_200_archives, "No tag which belongs to at least 200 archives."
-    print("Constraints passed.")
+    LOGGER.info("Constraints passed.")
 
     # constraint 4d (artist namespace specifics)
-    print("Testing constraint 4d (artist namespace)...")
+    LOGGER.info("Testing constraint 4d (artist namespace)...")
     artist_values_map = namespace_value_map.get("artist", {})
     num_distinct_artists = len(artist_values_map)
     assert num_distinct_artists >= 300, f"Found {num_distinct_artists} distinct artists; need at least 300."
@@ -651,14 +639,14 @@ def validate_s1(archives: List[S1ArchiveInfo], categories: List[S1CategoryInfo])
     # At least 10 artists appear in >= 20 archives each
     artists_ge_20 = sum(1 for freq in artist_values_map.values() if freq >= 20)
     assert artists_ge_20 >= 10, f"Artists with >=20 archives: {artists_ge_20}; need at least 10."
-    print("Constraints passed.")
+    LOGGER.info("Constraints passed.")
 
-    print("Testing constraint 7-11...")
+    LOGGER.info("Testing constraint 7-11...")
     has_static_200_archives = False
     has_static_0_archives = False
     has_dynamic_namespaced = False
     has_dynamic_non_namespaced = False
-    special_chars_presence: Dict[str, bool] = dict.fromkeys(reserved_chars, False)
+    special_chars_presence: Dict[str, bool] = dict.fromkeys(RESERVED_CHARS, False)
     for c in categories:
         assert not (c.archives and c.filter), "Category cannot have both archives and filter set."
         if c.archives is not None:
@@ -682,9 +670,9 @@ def validate_s1(archives: List[S1ArchiveInfo], categories: List[S1CategoryInfo])
     assert has_dynamic_non_namespaced, "No dynamic category with a non-namespaced tag filter."
     for ch, present in special_chars_presence.items():
         assert present, f"No dynamic category found for special character '{ch}'."
-    print("Constraints passed.")
+    LOGGER.info("Constraints passed.")
 
-    print("Testing constraints 12-14...")
+    LOGGER.info("Testing constraints 12-14...")
     long_title_count = sum(1 for a in archives if len(a.title) >= 200)
     assert long_title_count >= 10, f"Found {long_title_count} archives with very long titles; need at least 10."
 
@@ -694,26 +682,37 @@ def validate_s1(archives: List[S1ArchiveInfo], categories: List[S1CategoryInfo])
         if len(tag_list) >= 200:
             archives_with_200_or_more_tags += 1
     assert archives_with_200_or_more_tags >= 15, f"Found {archives_with_200_or_more_tags} archives with >=200 tags; need at least 15."
-    print("Constraints passed.")
+    LOGGER.info("Constraints passed.")
+
+def dump_dataset(archives: List[S1ArchiveInfo], categories: List[S1CategoryInfo]) -> str:
+    """
+    Dump data into a JSON.
+    """
+    data = {
+        "archives": [a.model_dump() for a in archives],
+        "categories": [c.model_dump() for c in categories]
+    }
+    return json.dumps(data, ensure_ascii=False, indent=4)
 
 if __name__ == "__main__":
-    archives, categories = generate_s1()
-    validate_s1(archives, categories)
+    """
+    Output the generated dataset to disk for analysis.
+    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--out", required=True, help="Path to dataset output.")
+    parser.add_argument("--seed", type=int, default=42, help="Custom seed for random generation.")
+    args = parser.parse_args()
 
-    def model_to_dict(obj):
-        if hasattr(obj, "model_dump"):
-            return obj.model_dump()
-        if hasattr(obj, "dict"):
-            return obj.dict()
-        return obj.__dict__
+    out_file = Path(args.out)
+    seed = args.seed
 
-    output = {
-        "archives": [model_to_dict(a) for a in archives],
-        "categories": [model_to_dict(c) for c in categories],
-    }
+    archives, categories = generate_dataset(seed)
 
-    out_path = INTEGRATION_ROOT / "src" / "aio_lanraragi_tests" / "resources" / "s1" / "dataset.json"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8") as f:
-        json.dump(output, f, ensure_ascii=False, indent=4)
-    print(f"Wrote dataset to {out_path}")
+    try:
+        validate_dataset(archives, categories)
+    except AssertionError:
+        print("Validation failed.")
+
+    content = dump_dataset(archives, categories)
+    with open(out_file, 'w', encoding='utf-8') as writer:
+        writer.write(content)

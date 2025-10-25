@@ -9,6 +9,7 @@ requires-python = ">=3.12, <3.14"
 dependencies = [
     "docker",
     "git-python",
+    "natsort",
     "numpy",
     "pillow",
     "playwright",
