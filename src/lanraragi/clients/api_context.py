@@ -218,7 +218,8 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
             self.connector = None
         elif self.owns_client_session:
             # close client session, but don't close borrowed connector.
-            await self.client_session.close()
+            if self.client_session:
+                await self.client_session.close()
             self.client_session = None
             self.connector = None
         elif self.owns_connector:

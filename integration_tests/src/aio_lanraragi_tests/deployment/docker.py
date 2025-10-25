@@ -3,7 +3,6 @@ Python module for setting up and tearing down docker environments for LANraragi.
 """
 
 import contextlib
-import json
 import logging
 from pathlib import Path
 import tempfile
@@ -175,11 +174,29 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def redis_volume(self, volume: docker.models.volumes.Volume):
         self._redis_volume = volume
 
+    @property
+    def docker_client(self) -> docker.DockerClient:
+        return self._docker_client
+
+    @property
+    def docker_api(self) -> Optional[docker.APIClient]:
+        """
+        Returns API client if docker image build logs streaming is configured, else None.
+        """
+        return self._docker_api
+
+    @property
+    def is_force_build(self) -> bool:
+        """
+        Force build Docker image, even if the image ID exists.
+        """
+        return self._is_force_build
+
     def __init__(
             self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient,
             resource_prefix: str, port_offset: int,
             docker_api: docker.APIClient=None, logger: Optional[logging.Logger]=None,
-            global_run_id: int=None, is_allow_uploads: bool=True,
+            global_run_id: int=None, is_allow_uploads: bool=True, is_force_build: bool=False
     ):
 
         self.resource_prefix = resource_prefix
@@ -190,12 +207,13 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.global_run_id = global_run_id
         self.git_url = git_url
         self.git_branch = git_branch
-        self.docker_client = docker_client
-        self.docker_api = docker_api
+        self._docker_client = docker_client
+        self._docker_api = docker_api
         if logger is None:
             logger = LOGGER
         self.logger = logger
         self.is_allow_uploads = is_allow_uploads
+        self._is_force_build = is_force_build
 
     @override
     def update_api_key(self, api_key: Optional[str]):
@@ -293,7 +311,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         image_id = self.lrr_image_name
         if self.build_path:
             self.logger.info(f"Building LRR image {image_id} from build path {self.build_path}.")
-            self._build_docker_image(self.build_path, force=False)
+            self._build_docker_image(self.build_path, force=self.is_force_build)
         elif self.git_url:
             self.logger.info(f"Building LRR image {image_id} from git URL {self.git_url}.")
             try:
@@ -424,19 +442,16 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if with_api_key:
             resp = self.update_api_key(DEFAULT_API_KEY)
             if resp.exit_code != 0:
-                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to add API key to server: {resp}")
 
         if with_nofunmode:
             resp = self.enable_nofun_mode()
             if resp.exit_code != 0:
-                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to enable nofunmode: {resp}")
 
         if lrr_debug_mode:
             resp = self.enable_lrr_debug_mode()
             if resp.exit_code  != 0:
-                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to enable debug mode for LRR: {resp}")
         self.logger.debug("Redis server is ready.")
 
@@ -447,7 +462,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.is_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
-                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to modify permissions for LRR contents: {resp}")
         self.logger.debug("LRR server is ready.")
 
@@ -465,7 +479,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.is_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
-                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to modify permissions for LRR contents: {resp}")
         self.logger.debug("LRR server is ready.")
 
@@ -511,7 +524,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.is_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
-                self._reset_docker_test_env(remove_data=True)
                 raise DeploymentException(f"Failed to modify permissions for LRR contents: {resp}")
         self.logger.debug("LRR server is ready.")
 
@@ -591,34 +603,22 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.network.remove()
             self.logger.debug(f"Removed network: {self.network_name}")
 
-    def _build_docker_image(self, build_path: Path, force: bool=False):
+    def _build_docker_image(self, build_path: str, force: bool=False):
         """
         Build a docker image.
 
         Args:
             build_path: The path to the build directory.
             force: Whether to force the build (e.g. even if the image already exists).
+        
+        Raises:
+            FileNotFoundError: docker image or build path not found
+            DeploymentException: if docker image build fails with log stream output
+            docker.errors.BuildError: if docker image build fails with log stream disabled
         """
         image_id = self.lrr_image_name
 
-        if force:
-            if not Path(build_path).exists():
-                raise FileNotFoundError(f"Build path {build_path} does not exist!")
-            dockerfile_path = Path(build_path) / "tools" / "build" / "docker" / "Dockerfile"
-            if not dockerfile_path.exists():
-                raise FileNotFoundError(f"Dockerfile {dockerfile_path} does not exist!")
-            self.logger.debug(f"Building LRR image; this can take a while ({dockerfile_path}).")
-            build_start = time.time()
-            if self.docker_api:
-                for lineb in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag=image_id):
-                    if (data := json.loads(lineb.decode('utf-8').strip())) and (stream := data.get('stream')):
-                        self.logger.debug(stream.strip())
-            else:
-                self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag=image_id)
-            build_time = time.time() - build_start
-            self.logger.info(f"LRR image {image_id} build complete: time {build_time}s")
-            return
-        else:
+        if not force:
             try:
                 self.docker_client.images.get(image_id)
                 self.logger.debug(f"Image {image_id} already exists, skipping build.")
@@ -627,6 +627,31 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.logger.debug(f"Image {image_id} not found, building.")
                 self._build_docker_image(build_path, force=True)
                 return
+
+        if not Path(build_path).exists():
+            raise FileNotFoundError(f"Build path {build_path} does not exist!")
+
+        dockerfile_path = Path(build_path) / "tools" / "build" / "docker" / "Dockerfile"
+        if not dockerfile_path.exists():
+            raise FileNotFoundError(f"Dockerfile {dockerfile_path} does not exist!")
+
+        self.logger.debug(f"Building LRR image; this can take a while ({dockerfile_path}).")
+        build_start = time.time()
+
+        if self.docker_api:
+            logs = []
+            for evt in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag=image_id, decode=True, rm=True):
+                logs.append(evt)
+                if (msg := evt.get("stream")):
+                    self.logger.info(msg.strip())
+                if "error" in evt or "errorDetail" in evt:
+                    error_msg = evt.get("error") or evt.get("errorDetail", {}).get("message")
+                    raise DeploymentException(f"Docker image build failed! Error: {error_msg}")
+        else:
+            self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag=image_id)
+        build_time = time.time() - build_start
+        self.logger.info(f"LRR image {image_id} build complete: time {build_time}s")
+        return
 
     def _pull_docker_image_if_not_exists(self, image: str, force: bool=False):
         """

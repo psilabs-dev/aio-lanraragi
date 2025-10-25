@@ -120,14 +120,11 @@ async def lanraragi(environment: AbstractLRRDeploymentContext) ->  Generator[LRR
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
-    # connector = aiohttp.TCPConnector(limit=8, limit_per_host=8, keepalive_timeout=30)
-    # client = environment.lrr_client(connector=connector)
     client = environment.lrr_client()
     try:
         yield client
     finally:
         await client.close()
-        # await connector.close()
 
 async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
     async with semaphore:

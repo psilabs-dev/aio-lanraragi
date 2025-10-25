@@ -3,7 +3,7 @@ requires = ["setuptools"]
 
 [project]
 name = "aio-lanraragi-integration-tests"
-version = "0.1.10"
+version = "0.1.11"
 description = "Integration tests for aio-lanraragi"
 requires-python = ">=3.12, <3.14"
 dependencies = [
@@ -16,6 +16,9 @@ dependencies = [
     "pytest-rerunfailures",
     "redis"
 ]
+
+[project.scripts]
+lrr-staging = "aio_lanraragi_tests.console:console"
 
 [project.urls]
 Homepage = "https://github.com/psilabs-dev/aio-lanraragi"
