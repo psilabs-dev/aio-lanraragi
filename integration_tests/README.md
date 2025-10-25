@@ -53,6 +53,17 @@ By default, random variable sampling (e.g. for tag generation or list shuffling)
 pytest tests/test_auth.py --npseed 43
 ```
 
+### [Playwright](https://playwright.dev/python/docs/library) UI Testing
+
+Playwright is experimental. Install with:
+```sh
+pip install playwright
+playwright install
+pytest tests --playwright
+```
+
+Due to certain event loop quirks with `pytest-playwright`, we will only use `playwright`.
+
 ### Logging
 
 To see LRR process logs accompanying a test failure, use the pytest flag `--log-cli-level=ERROR`:
