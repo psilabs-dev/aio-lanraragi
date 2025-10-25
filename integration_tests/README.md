@@ -64,6 +64,11 @@ pytest tests --playwright
 
 Due to certain event loop quirks with `pytest-playwright`, we will only use `playwright`.
 
+To add tests, [codegen](https://playwright.dev/docs/codegen) may be useful:
+```sh
+npx playwright codegen --target=python http://localhost:3001
+```
+
 ### Logging
 
 To see LRR process logs accompanying a test failure, use the pytest flag `--log-cli-level=ERROR`:

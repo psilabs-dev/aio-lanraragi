@@ -157,7 +157,7 @@ async def sample_test_api_auth_matrix(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-async def test_nofunmode_login_right_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lanraragi: LRRClient):
+async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lanraragi: LRRClient):
     """
     Login with correct password.
     """
@@ -178,7 +178,7 @@ async def test_nofunmode_login_right_password(environment: AbstractLRRDeployment
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-async def test_nofunmode_login_empty_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lanraragi: LRRClient):
+async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lanraragi: LRRClient):
     """
     Login without password.
     """
@@ -199,7 +199,7 @@ async def test_nofunmode_login_empty_password(environment: AbstractLRRDeployment
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-async def test_nofunmode_login_wrong_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lanraragi: LRRClient):
+async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lanraragi: LRRClient):
     """
     Login with wrong password.
     """
@@ -217,6 +217,57 @@ async def test_nofunmode_login_wrong_password(environment: AbstractLRRDeployment
         await page.click("input[type='submit'][value='Login']")
         await page.wait_for_load_state("networkidle")
         assert "Wrong Password." in await page.content()
+        assert await page.title() == LRR_LOGIN_TITLE
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lanraragi: LRRClient):
+    """
+    Simulate UI: enable nofunmode and check that login is enforced.
+    """
+    environment.setup(with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(lanraragi.lrr_base_url)
+        await page.wait_for_load_state("networkidle")
+        assert await page.title() == LRR_INDEX_TITLE
+
+        # enter admin portal
+        # exit overlay
+        if "New Version Release Notes" in await page.content():
+            LOGGER.info("Closing new releases overlay.")
+            await page.keyboard.press("Escape")
+
+        assert "Admin Login" in await page.content(), "Admin Login not found!"
+
+        LOGGER.info("Click Admin Login button")
+        await page.get_by_role("link", name="Admin Login").click()
+        assert await page.title() == LRR_LOGIN_TITLE
+
+        LOGGER.info("Entering default password")
+        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+        await page.get_by_role("button", name="Login").click()
+        await page.wait_for_load_state("networkidle")
+        assert await page.title() == LRR_INDEX_TITLE
+
+        LOGGER.info("Clicking settings button.")
+        await page.get_by_role("link", name="Settings").click()
+        LOGGER.info("Clicking security settings.")
+        await page.get_by_text("Security").click()
+        LOGGER.info("Enabling No-Fun Mode.")
+        await page.get_by_role("checkbox", name="Enabling No-Fun Mode will").check()
+        LOGGER.info("Clicking save settings.")
+        await page.get_by_role("button", name="Save Settings").click()
+
+    environment.restart()
+
+    LOGGER.info("Checking that LRR server is locked after restart.")
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(lanraragi.lrr_base_url)
+        await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_LOGIN_TITLE
 
 @pytest.mark.asyncio
