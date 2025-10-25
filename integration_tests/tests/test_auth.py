@@ -195,6 +195,7 @@ async def test_nofunmode_login_empty_password(environment: AbstractLRRDeployment
         await page.click("input[type='submit'][value='Login']")
         await page.wait_for_load_state("networkidle")
         assert "Wrong Password." in await page.content()
+        assert await page.title() == LRR_LOGIN_TITLE
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -216,6 +217,7 @@ async def test_nofunmode_login_wrong_password(environment: AbstractLRRDeployment
         await page.click("input[type='submit'][value='Login']")
         await page.wait_for_load_state("networkidle")
         assert "Wrong Password." in await page.content()
+        assert await page.title() == LRR_LOGIN_TITLE
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
