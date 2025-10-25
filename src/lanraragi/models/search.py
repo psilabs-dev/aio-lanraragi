@@ -9,6 +9,8 @@ class SearchArchiveIndexRequest(LanraragiRequest):
     start: Optional[str] = Field(None)
     sortby: Optional[str] = Field(None)
     order: Optional[str] = Field(None)
+    newonly: Optional[bool] = Field(None)
+    untaggedonly: Optional[bool] = Field(None)
     groupby_tanks: bool = Field("true")
 
 class SearchArchiveIndexResponseRecord(BaseModel):

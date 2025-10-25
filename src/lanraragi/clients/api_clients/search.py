@@ -33,6 +33,8 @@ class _SearchApiClient(_ApiClient):
             ("start", request.start),
             ("sortby", request.sortby),
             ("order", request.order),
+            ("newonly", request.newonly),
+            ("untaggedonly", request.untaggedonly),
             ("groupby_tanks", request.groupby_tanks),
         ]:
             if value:
