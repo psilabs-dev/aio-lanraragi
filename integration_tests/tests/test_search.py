@@ -300,7 +300,7 @@ async def test_xfail_catch_flakes(lanraragi: LRRClient, semaphore: asyncio.Semap
 @pytest.mark.asyncio
 async def test_s1_exact_search(lanraragi: LRRClient, semaphore: asyncio.Semaphore):
     """
-    Search with filter "wmq6 Tkx9NI YXΩ Oy4cq K3αyn9ff Kxkdpi6q Ngac72qf", and get exactly one archive.
+    Search with filter "XXJcHPeOaAE BT7q BTq0Zf2pC 0ln", and get exactly one archive.
     """
     # >>>>> TEST CONNECTION STAGE >>>>>
     response, error = await lanraragi.misc_api.get_server_info()
@@ -322,7 +322,7 @@ async def test_s1_exact_search(lanraragi: LRRClient, semaphore: asyncio.Semaphor
 
     # >>>>> SEARCH STAGE >>>>>
     from lanraragi.models.search import SearchArchiveIndexRequest
-    filter_str = "wmq6 Tkx9NI YXΩ Oy4cq K3αyn9ff Kxkdpi6q Ngac72qf"
+    filter_str = "XXJcHPeOaAE BT7q BTq0Zf2pC 0ln"
     search_resp, search_err = await lanraragi.search_api.search_archive_index(
         SearchArchiveIndexRequest(search_filter=filter_str)
     )

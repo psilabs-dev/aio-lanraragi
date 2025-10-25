@@ -25,6 +25,7 @@ Dataset constraints:
         4. 10 archives have 10 different artists in their tags.
         5. At least 100 archives have 1 common artist.
         6. At least 20 archives have 1 common artist, for 10 artists.
+    e. "source" namespace exists with the property that all values are ascii only.
 5. 2 tag namespaces with epoch second values (1445644800 - 1761366700)
     a. at least 1 namespaced tag with at least 500 archives
     b. at least 1 namespaced tag with 10 duplicate values
@@ -426,12 +427,17 @@ def generate_s1():
         count_other = random.randint(0, 3)
         chosen_ns = random.sample(other_unstructured, count_other)
         for ns in chosen_ns:
-            if random.random() < 0.25:
-                val = random_unicode_name()
-            elif random.random() < 0.6:
+            r = random.random()
+            if ns == "source":
+                # ASCII-only for source
                 val = random_name()
             else:
-                val = "".join(random.choices(string.ascii_letters, k=random.randint(4, 10))).capitalize()
+                if r < 0.25:
+                    val = random_unicode_name()
+                elif r < 0.6:
+                    val = random_name()
+                else:
+                    val = "".join(random.choices(string.ascii_letters, k=random.randint(4, 10))).capitalize()
             add_tag(pid, f"{ns}:{val}")
 
     # Render archives
@@ -560,6 +566,10 @@ def validate_s1(archives: List[S1ArchiveInfo], categories: List[S1CategoryInfo])
         if any(not val.isascii() for val in values):
             unicode_ns_count += 1
     assert unicode_ns_count >= 4, f"Namespaces with unicode values: {unicode_ns_count}; need at least 4."
+
+    # 4e: source namespace exists and all values are ASCII-only
+    assert "source" in namespace_value_map, "'source' namespace not found."
+    assert all(val.isascii() for val in namespace_value_map["source"].keys()), "Found non-ASCII value(s) in 'source' namespace."
 
     num_unstructured_namespaces = 0
     num_structured_namespaces = 0
