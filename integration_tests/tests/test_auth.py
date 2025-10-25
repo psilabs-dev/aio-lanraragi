@@ -4,6 +4,7 @@ from aio_lanraragi_tests.deployment.factory import generate_deployment
 import aiohttp
 import numpy as np
 from typing import Generator, List
+import playwright.async_api
 from pydantic import BaseModel, Field
 import pytest
 import pytest_asyncio
@@ -140,9 +141,20 @@ async def sample_test_api_auth_matrix(
             assert not response, f"Expected forbidden error from calling {method_name}, got response: {response}"
             assert error.status == 401, f"Expected status 401, got: {error.status}."
 
+    # test main page.
+    # playwright uses English as locale and timezone, if this changes in the future we may need to update.
+    expected_title = "LANraragi - Admin Login" if is_nofunmode else "LANraragi"
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(lrr_client.lrr_base_url)
+        assert await page.title() == expected_title
+        await browser.close()
+
 @pytest.mark.asyncio
+@pytest.mark.playwright
 async def test_api_auth_matrix(
-    environment: AbstractLRRDeploymentContext, lanraragi: LRRClient, npgenerator: np.random.Generator, port_offset: int, is_lrr_debug_mode: bool
+    environment: AbstractLRRDeploymentContext, lanraragi: LRRClient, npgenerator: np.random.Generator, is_lrr_debug_mode: bool
 ):
     """
     Test the following situation combinations:

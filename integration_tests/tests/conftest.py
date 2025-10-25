@@ -50,6 +50,9 @@ def pytest_addoption(parser: pytest.Parser):
         Run experimental tests. For example, to test a set of LANraragi APIs in
         active development, but are yet merged upstream.
 
+    playwright : `bool = False`
+        Run UI integration tests requiring Playwright.
+
     failing : `bool = False`
         Run tests that are known to fail.
 
@@ -65,6 +68,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--staging", action="store", default=None, help="Path to the LRR staging directory (where all host-based testing and file RW happens).")
     parser.addoption("--lrr-debug", action="store_true", default=False, help="Enable debug mode for the LRR logs.")
     parser.addoption("--experimental", action="store_true", default=False, help="Run experimental tests.")
+    parser.addoption("--playwright", action="store_true", default=False, help="Run Playwright UI tests. Requires `playwright install`")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
 
@@ -75,10 +79,19 @@ def pytest_configure(config: pytest.Config):
     )
     config.addinivalue_line(
         "markers",
+        "playwright: Playwright UI tests will be skipped by default."
+    )
+    config.addinivalue_line(
+        "markers",
         "failing: Tests that are known to fail will be skipped by default."
     )
 
 def pytest_collection_modifyitems(config: pytest.Config, items: List[pytest.Item]):
+    if not config.getoption("--playwright"):
+        skip_playwright = pytest.mark.skip(reason="need --playwright option enabled")
+        for item in items:
+            if 'playwright' in item.keywords:
+                item.add_marker(skip_playwright)
     if not config.getoption("--experimental"):
         skip_experimental = pytest.mark.skip(reason="need --experimental option enabled")
         for item in items:
