@@ -18,7 +18,7 @@ class Page:
     margin: int
     font_size: int
     image: Image.Image
-    first_n_bytes = int
+    first_n_bytes: int
     image_format: str
     text: str
     filename: str
