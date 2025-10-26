@@ -4,7 +4,7 @@ This directory contains the API/integration testing package for "aio-lanraragi".
 
 Integration testing version updates apply only if changes to integration testing code or tests have occurred.
 
-For information on setting up a developer environment for testing, refer to [development](/docs/development.md).
+For information on setting up a developer environment for testing, refer to [development](/docs/development.md). Additionally, see [resource management](/integration_tests/docs/resource_management.md) for documentation on how resources are managed during test-time.
 
 ## Usage
 
@@ -55,14 +55,14 @@ pytest tests/test_auth.py --npseed 43
 
 ### [Playwright](https://playwright.dev/python/docs/library) UI Testing
 
-Playwright is experimental. Install with:
+Playwright integration tests are experimental. Install with:
 ```sh
 pip install playwright
 playwright install
 pytest tests --playwright
 ```
 
-Due to certain event loop quirks with `pytest-playwright`, we will only use `playwright`.
+Due to certain event loop quirks with `pytest-playwright` and compatibility issues with `pytest-asyncio`, we will only use `playwright`.
 
 The process of adding UI tests can be broken to the following:
 - outlining the UI steps taken
@@ -89,47 +89,10 @@ On test failures, pytest will attempt to collect the service logs from the runni
 
 See [pytest](https://docs.pytest.org/en/stable/#) docs for more test-related options.
 
-### Test-time Resource Management
-To prepare for potential distributed testing, we should ensure all resources provided by the test host during the lifecycle of a test session are available to one (and only one) test case. All such resources should be reclaimed at the end of tests, and at the end of a failed test or exception, *provided* they were produced during test-time. Examples of resources include: networks, volumes, containers, ports, build artifacts, processes, files, and directories.
-
-To streamline resource management, each test deployment is passed a `resource_prefix` and a `port_offset`. The former is prepended to the names of all named resources, while the latter is added to the default port values of service resources.
-
-On Windows hosts, multiple deployments are achieved by having multiple copies of the same distribution, as LRR processes are identified by their perl executable path. To this end, we must provide a staging directory that stores not only these distributions, but also all persistent, writable and isolated data. The staging directory and the win-dist directory should not overlap. Multiple tests may operate within the staging directory concurrently, provided they work in their own respective resource prefix namespaces and port offsets. The staging directory should not contain data unrelated to tests, or children without a resource prefix. The staging directory should be same across all tests. On Github workflows, for example, all tests live under the staging directory `$env:GITHUB_WORKSPACE\staging`.
-
-The following are general rules for provisioning resources. Likewise, the user must ensure that their environment provides these resources for testing:
-
-- all automated testing resources should start with `test_` prefix.
-- all LRR automated testing containers should expose ports within the range 3010-3020.
-- all redis automated testing containers should expose ports within the range 6389-6399.
-- when testing on Windows (or on the host machine in general): all files should be written within a resource-prefixed directory within the staging directory.
-
-In a test deployment, considered resources are as follows:
-
-| resource | deployment type | format | description |
-| - | - | - | - |
-| LRR contents volume | docker | "{resource_prefix}lanraragi_contents" | name of docker volume for LRR archives storage |
-| LRR thumbnail volume | docker | "{resource_prefix}lanraragi_thumb" | name of docker volume for LRR thumbnails storage |
-| redis volume | docker | "{resource_prefix}redis_data" | name of docker volume for LRR database |
-| network | network | "{resource_prefix}network" | name of docker network |
-| LRR container | docker | "{resource_prefix}lanraragi_service" | |
-| redis container | docker | "{resource_prefix}redis_service | |
-| LRR image | docker | "integration_test_lanraragi:{global_id} | |
-| windist directory | windows | "{resource_prefix}win-dist" | removable copy of the Windows distribution of LRR in staging |
-| contents directory | windows | "{resource_prefix}contents" | contents directory of LRR application in staging |
-| temp directory | windows | "{resource_prefix}temp" | temp directory of LRR application in staging |
-| redis | windows | "{resource_prefix}redis" | redis directory in staging |
-| log | windows | "{resource_prefix}log" | logs directory in staging |
-| pid | windows | "{resource_prefix}pid" | PID directory in staging |
-
-> For example: if `resource_prefix="test_lanraragi_` and `port_offset=10`, then `network=test_lanraragi_network` and the redis port equals 6389.
-
-Since docker test deployments rely only on one image, we will pin the image ID to the global run ID instead.
-
 ## Scope
-The scope of this library is limited to perform routine (i.e. not long-running by default) API integration tests within the "tests" directory. The library tests will check one or more of the following points:
+The scope of this library is limited to perform routine (i.e. not long-running by default) API integration or E2E tests within the "tests" directory. The library tests will confirm one or more of the following points:
 
 1. That the LRR server deployment was successful;
 1. That the functionality provided by LRR API is correct and according to API documentation;
 1. That the aio-lanraragi client API calls are correct.
-
-For all intents and purposes, this is treated as its own individual repository/submodule within "aio-lanraragi".
+1. That LRR exhibits expected browser-side behavior.
