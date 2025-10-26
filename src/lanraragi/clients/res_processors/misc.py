@@ -1,6 +1,12 @@
 import json
 from typing import List
-from lanraragi.models.misc import GetAvailablePluginsResponse, GetAvailablePluginsResponsePlugin, GetServerInfoResponse, UsePluginResponse
+
+from lanraragi.models.misc import (
+    GetAvailablePluginsResponse,
+    GetAvailablePluginsResponsePlugin,
+    GetServerInfoResponse,
+    UsePluginResponse
+)
 
 
 def _process_get_server_info_response(content: str) -> GetServerInfoResponse:

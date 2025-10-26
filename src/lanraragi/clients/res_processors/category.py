@@ -1,6 +1,11 @@
 import json
 from typing import List
-from lanraragi.models.category import GetAllCategoriesResponse, GetAllCategoriesResponseRecord, GetCategoryResponse
+
+from lanraragi.models.category import (
+    GetAllCategoriesResponse,
+    GetAllCategoriesResponseRecord,
+    GetCategoryResponse
+)
 
 
 def _process_get_all_categories_response(content: str) -> GetAllCategoriesResponse:

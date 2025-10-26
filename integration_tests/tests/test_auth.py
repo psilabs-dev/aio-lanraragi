@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from aio_lanraragi_tests.deployment.factory import generate_deployment
 import aiohttp
 import numpy as np
 from typing import Generator, List
@@ -11,6 +10,7 @@ import pytest_asyncio
 
 from lanraragi.clients.client import LRRClient
 
+from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD
 

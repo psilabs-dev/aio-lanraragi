@@ -2,14 +2,13 @@ import abc
 import logging
 import time
 from typing import Optional
-
-from aio_lanraragi_tests.common import DEFAULT_LRR_PORT, DEFAULT_REDIS_PORT
-from aio_lanraragi_tests.exceptions import DeploymentException
 import aiohttp
 import requests
 
 from lanraragi.clients.client import LRRClient
 
+from aio_lanraragi_tests.common import DEFAULT_LRR_PORT, DEFAULT_REDIS_PORT
+from aio_lanraragi_tests.exceptions import DeploymentException
 
 class AbstractLRRDeploymentContext(abc.ABC):
 

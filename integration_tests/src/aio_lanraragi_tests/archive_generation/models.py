@@ -1,6 +1,5 @@
 from pathlib import Path
 from PIL import Image
-
 from typing import List, Tuple, Union
 
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum

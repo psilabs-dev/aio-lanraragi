@@ -10,13 +10,11 @@ We add a flake tank at the front, and rerun test cases in Windows on flake error
 import asyncio
 import errno
 import http
-import json
 import logging
 from pathlib import Path
 import sys
 import tempfile
 from typing import Generator, List, Optional, Set, Tuple
-from aio_lanraragi_tests.deployment.factory import generate_deployment
 import numpy as np
 import pytest
 import pytest_asyncio
@@ -77,6 +75,7 @@ from lanraragi.models.tankoubon import (
     UpdateTankoubonRequest,
 )
 
+from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.common import compute_upload_checksum
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum

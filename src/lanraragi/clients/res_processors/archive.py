@@ -1,7 +1,14 @@
 import json
 from typing import List
-from lanraragi.models.archive import GetAllArchivesResponse, GetAllArchivesResponseRecord, GetArchiveCategoriesCatRecord, GetArchiveCategoriesResponse, GetArchiveMetadataResponse, GetArchiveThumbnailResponse
 
+from lanraragi.models.archive import (
+    GetAllArchivesResponse,
+    GetAllArchivesResponseRecord,
+    GetArchiveCategoriesCatRecord,
+    GetArchiveCategoriesResponse,
+    GetArchiveMetadataResponse,
+    GetArchiveThumbnailResponse
+)
 
 def _process_get_all_archives_response(content: str) -> GetAllArchivesResponse:
     response_j = json.loads(content) # note: this is already a list.

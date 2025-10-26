@@ -1,4 +1,5 @@
 import json
+
 from lanraragi.models.minion import GetMinionJobDetailResponse, GetMinionJobDetailResponseResult
 
 

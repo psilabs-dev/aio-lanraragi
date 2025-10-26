@@ -1,11 +1,9 @@
 import logging
 import time
 from typing import Any, List
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 import pytest
-from _pytest.nodes import Item
-from _pytest.reports import TestReport
-from _pytest.runner import CallInfo
+
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +112,7 @@ def pytest_sessionstart(session: pytest.Session):
     logger.info(f"pytest run parameters: global_run_id={global_run_id}, npseed={npseed}")
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_makereport(item: Item, call: CallInfo[Any]):
+def pytest_runtest_makereport(item: pytest.Item, _: pytest.CallInfo[Any]):
     """
     Some logic to allow pytest to retrieve the LRR environment during a test failure.
     Dumps LRR logs from environment before containers are cleaned up as error logs.
@@ -122,7 +120,7 @@ def pytest_runtest_makereport(item: Item, call: CallInfo[Any]):
     To see these logs, include `--log-cli-level=ERROR`.
     """
     outcome = yield
-    report: TestReport = outcome.get_result()
+    report: pytest.TestReport = outcome.get_result()
     if report.when == "call" and report.failed:
         logger.info(f"Test failed: dumping logs... ({item.nodeid})")
 
