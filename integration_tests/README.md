@@ -64,7 +64,11 @@ pytest tests --playwright
 
 Due to certain event loop quirks with `pytest-playwright`, we will only use `playwright`.
 
-To add tests, [codegen](https://playwright.dev/docs/codegen) may be useful:
+The process of adding UI tests can be broken to the following:
+- outlining the UI steps taken
+- converting those steps to Playwright
+
+The conversion stage may be assisted via [codegen](https://playwright.dev/docs/codegen-intro), a tool which records browser actions into Python Playwright code:
 ```sh
 npx playwright codegen --target=python http://localhost:3001
 ```
