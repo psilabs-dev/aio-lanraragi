@@ -12,12 +12,9 @@ from lanraragi.clients.client import LRRClient
 
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE, LRR_LOGIN_TITLE
 
 LOGGER = logging.getLogger(__name__)
-
-LRR_LOGIN_TITLE = "LANraragi - Admin Login"
-LRR_INDEX_TITLE = "LANraragi"
 
 class ApiAuthMatrixParams(BaseModel):
     # used by test_api_auth_matrix.
