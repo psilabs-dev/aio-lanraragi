@@ -112,7 +112,7 @@ def pytest_sessionstart(session: pytest.Session):
     logger.info(f"pytest run parameters: global_run_id={global_run_id}, npseed={npseed}")
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_makereport(item: pytest.Item, _: pytest.CallInfo[Any]):
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
     """
     Some logic to allow pytest to retrieve the LRR environment during a test failure.
     Dumps LRR logs from environment before containers are cleaned up as error logs.
@@ -122,51 +122,13 @@ def pytest_runtest_makereport(item: pytest.Item, _: pytest.CallInfo[Any]):
     outcome = yield
     report: pytest.TestReport = outcome.get_result()
     if report.when == "call" and report.failed:
-        logger.info(f"Test failed: dumping logs... ({item.nodeid})")
-
-        # # TODO: don't delete this tutorial; will probably use this in the future. (9/6/25)
-        # # Log exception details from the report
-        # if report.longrepr:
-        #     logger.info(f"Exception details: {report.longrepr}")
-        
-        # # Access the raw exception from the call info if available
-        # if hasattr(call, 'excinfo') and call.excinfo:
-        #     excinfo = call.excinfo
-        #     exc_class = excinfo.type
-        #     exc_instance = excinfo.value
-            
-        #     logger.info(f"Exception class: {exc_class}")
-        #     logger.info(f"Exception type name: {exc_class.__name__}")
-        #     logger.info(f"Exception module: {exc_class.__module__}")
-        #     logger.info(f"Exception value: {exc_instance}")
-        #     logger.info(f"Exception message: {str(exc_instance)}")
-            
-        #     # Handle custom exceptions with error codes
-        #     if hasattr(exc_instance, 'error_code'):
-        #         logger.info(f"Custom error code: {exc_instance.error_code}")
-            
-        #     if hasattr(exc_instance, 'details'):
-        #         logger.info(f"Custom details: {exc_instance.details}")
-            
-        #     # Pattern matching for specific exception types
-        #     if exc_class == KeyError:
-        #         logger.info("Handling KeyError: Missing key in dictionary/mapping")
-        #     elif exc_class == ValueError:
-        #         logger.info("Handling ValueError: Invalid value provided")
-        #     elif exc_class.__name__ == 'AssertionError':
-        #         logger.info("Handling AssertionError: Test assertion failed")
-        #     elif exc_class.__module__ != 'builtins':
-        #         logger.info(f"Custom exception detected from module: {exc_class.__module__}")
-            
-        #     # Check if it's a subclass of specific exceptions
-        #     if issubclass(exc_class, ConnectionError):
-        #         logger.info("This is a connection-related error")
-        #     elif issubclass(exc_class, OSError):
-        #         logger.info("This is an OS-related error")
-        
+        if excinfo := call.excinfo:
+            logger.error(f"Test threw {excinfo.typename} with message \"{excinfo.value}\": dumping logs... ({item.nodeid})")
+        else:
+            logger.error(f"Test failed: dumping logs... ({item.nodeid})")
         try:
-            if hasattr(item.session, 'lrr_environment'):
-                environment: AbstractLRRDeploymentContext = item.session.lrr_environment
+            if hasattr(item.session, 'lrr_environment') and isinstance(item.session.lrr_environment, AbstractLRRDeploymentContext):
+                environment = item.session.lrr_environment
                 logger.error("\n\n >>>>> LRR LOGS >>>>>")
                 environment.display_lrr_logs()
                 logger.error("<<<<< LRR LOGS <<<<<\n\n")
