@@ -9,6 +9,8 @@ We add a flake tank at the front, and rerun test cases in Windows on flake error
 
 import asyncio
 import errno
+import http
+import json
 import logging
 from pathlib import Path
 import sys
@@ -1217,6 +1219,20 @@ async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
     assert not error, f"Failed to get minion job details (status {error.status}): {error.error}"
     del response, error
     # <<<<< GET MINION JOB DETAILS STAGE <<<<<
+
+@pytest.mark.asyncio
+@pytest.mark.experimental
+async def test_openapi_invalid_request(lanraragi: LRRClient):
+    """
+    Verify that OpenAPI request validation works.
+    """
+    # test get archive metadata API.
+    # Even if the archive doesn't exist, this request shouldn't go through due to invalid arcid format (40-char req).
+    status, content = await lanraragi.handle_request(
+        http.HTTPMethod.GET, lanraragi.build_url("/api/archives/123"), lanraragi.headers
+    )
+    assert status == 400, f"Expected bad request status from malformed arcid, got {status}"
+    assert "String is too short" in content, f"Expected \"String is too short\" in response, got: {content}"
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
