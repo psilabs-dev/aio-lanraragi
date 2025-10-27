@@ -17,6 +17,7 @@ import tempfile
 from typing import Generator, List, Optional, Set, Tuple
 import numpy as np
 import pytest
+import playwright.async_api
 import pytest_asyncio
 import aiohttp
 import aiohttp.client_exceptions
@@ -77,7 +78,7 @@ from lanraragi.models.tankoubon import (
 
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.common import compute_upload_checksum
+from aio_lanraragi_tests.common import LRR_INDEX_TITLE, compute_upload_checksum
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import (
     CreatePageRequest,
@@ -1260,3 +1261,67 @@ async def test_concurrent_clients(environment: AbstractLRRDeploymentContext):
             assert not error, f"Failed to get server info (status {error.status}): {error.error}"
     finally:
         await session.close()
+
+# skip: for demonstration purposes only.
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.experimental
+async def test_webkit_search_bar(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
+    """
+    Upload two archive, apply search filter, read archive, then go back and check the search filter is still populated.
+    """
+    num_archives = 2
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lanraragi.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    LOGGER.debug("Established connection with test LRR server.")
+    # <<<<< TEST CONNECTION STAGE <<<<<
+    
+    # >>>>> UPLOAD STAGE >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        LOGGER.debug(f"Creating {num_archives} archives to upload.")
+        write_responses = save_archives(num_archives, tmpdir, npgenerator)
+        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+
+        # archive metadata
+        LOGGER.debug("Uploading archives to server.")
+        for title, tags, wr in [
+            ("Test Archive", "tag-1,tag-2", write_responses[0]),
+            ("Test Archive 2", "tag-2,tag-3", write_responses[1])
+        ]:
+            _, error = await upload_archive(lanraragi, wr.save_path, wr.save_path.name, semaphore, title=title, tags=tags)
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+        del error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.webkit.launch()
+        page = await browser.new_page()
+        await page.goto(lanraragi.lrr_base_url)
+        await page.wait_for_load_state("networkidle")
+        assert await page.title() == LRR_INDEX_TITLE
+
+        # enter admin portal
+        # exit overlay
+        if "New Version Release Notes" in await page.content():
+            LOGGER.info("Closing new releases overlay.")
+            await page.keyboard.press("Escape")
+
+        # click search bar
+        LOGGER.info("Applying search filter: \"tag-1\"...")
+        await page.get_by_role("combobox", name="Search Title, Artist, Series").click()
+        await page.get_by_role("combobox", name="Search Title, Artist, Series").fill("tag-1")
+        await page.get_by_role("button", name="Apply Filter").click()
+
+        LOGGER.info("Opening reader for \"Test Archive\"...")
+        await page.get_by_role("link", name="Test Archive").nth(1).click()
+
+        LOGGER.info("Going back to index page and checking search bar...")
+        await page.get_by_role("link", name="").click()
+        await playwright.async_api.expect(
+            page.get_by_role("combobox", name="Search Title, Artist, Series")
+        ).to_have_value("tag-1")
+    # <<<<< UI STAGE <<<<<
