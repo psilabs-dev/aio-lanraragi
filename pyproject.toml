@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aio-lanraragi"
-version = "0.1.10"
+version = "0.1.11"
 authors = [
     {name="psilabs-dev"}
 ]
 description = "An asynchronous Python API client for LANraragi, written with aiohttp and pydantic for type validation."
 license = { file = "LICENSE" }
 readme = "README.md"
-requires-python = ">=3.12, <3.14"
+requires-python = ">=3.12, <=3.14"
 dependencies = [
     "aiohttp",
     "pydantic>=2.0.0"

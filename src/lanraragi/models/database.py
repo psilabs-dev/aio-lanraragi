@@ -1,5 +1,6 @@
 from typing import List, Optional
 from pydantic import BaseModel, Field
+
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
 class GetDatabaseStatsRequest(LanraragiRequest):

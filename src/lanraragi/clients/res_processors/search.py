@@ -1,6 +1,11 @@
 import json
 from typing import List
-from lanraragi.models.search import GetRandomArchivesResponse, SearchArchiveIndexResponse, SearchArchiveIndexResponseRecord
+
+from lanraragi.models.search import (
+    GetRandomArchivesResponse,
+    SearchArchiveIndexResponse,
+    SearchArchiveIndexResponseRecord
+)
 
 def _process_search_archive_index_response(content: str) -> SearchArchiveIndexResponse:
     response_j = json.loads(content)

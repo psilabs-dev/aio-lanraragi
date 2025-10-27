@@ -1,6 +1,13 @@
 import json
 from typing import List
-from lanraragi.models.tankoubon import GetTankoubonResponse, TankoubonArchiveRecord, TankoubonRecord, GetAllTankoubonsResponse, TankoubonFullDataRecord
+
+from lanraragi.models.tankoubon import (
+    GetTankoubonResponse,
+    TankoubonArchiveRecord,
+    TankoubonRecord,
+    GetAllTankoubonsResponse,
+    TankoubonFullDataRecord
+)
 
 
 def _handle_get_all_tankoubons_response(content: str) -> GetAllTankoubonsResponse:

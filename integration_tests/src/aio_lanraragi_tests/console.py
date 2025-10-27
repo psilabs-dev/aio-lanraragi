@@ -37,9 +37,11 @@ def get_deployment(
     )
     return environment
 
-def up(image: str=None, git_url: str=None, git_branch: str=None, build: str=None, docker_api: docker.APIClient=None):
+def up(
+    image: str=None, git_url: str=None, git_branch: str=None, build: str=None, docker_api: docker.APIClient=None, with_nofunmode: bool=False
+):
     d = get_deployment(build_path=build, image=image, git_url=git_url, git_branch=git_branch, docker_api=docker_api)
-    d.setup(with_api_key=True)
+    d.setup(with_api_key=True, with_nofunmode=with_nofunmode)
     print("LRR staging environment setup complete.")
     sys.exit(0)
 
@@ -77,6 +79,7 @@ def console():
     up_parser.add_argument("--git-branch", help="Git branch to use")
     up_parser.add_argument("--build", help="Build path to use")
     up_parser.add_argument("--docker-api", action='store_true', help="Stream docker build logs")
+    up_parser.add_argument("--nofunmode", action="store_true", help="Start LRR with nofunmode (default false).")
 
     down_parser = subparsers.add_parser("down", help="Teardown services")
     down_parser.add_argument("--volumes", action="store_true", help="Remove volumes")
@@ -106,7 +109,7 @@ def console():
                 docker_api: Optional[docker.APIClient] = None
                 if args.docker_api:
                     docker_api = docker.APIClient(base_url="unix://var/run/docker.sock")
-                up(image=args.image, git_url=args.git_url, git_branch=args.git_branch, build=args.build, docker_api=docker_api)
+                up(image=args.image, git_url=args.git_url, git_branch=args.git_branch, build=args.build, docker_api=docker_api, with_nofunmode=args.nofunmode)
             case "down":
                 down(remove_data=args.volumes)
             case "restart":

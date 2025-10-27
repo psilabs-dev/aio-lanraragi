@@ -1,11 +1,9 @@
 import logging
 import time
 from typing import Any, List
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 import pytest
-from _pytest.nodes import Item
-from _pytest.reports import TestReport
-from _pytest.runner import CallInfo
+
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +48,9 @@ def pytest_addoption(parser: pytest.Parser):
         Run experimental tests. For example, to test a set of LANraragi APIs in
         active development, but are yet merged upstream.
 
+    playwright : `bool = False`
+        Run UI integration tests requiring Playwright.
+
     failing : `bool = False`
         Run tests that are known to fail.
 
@@ -65,6 +66,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--staging", action="store", default=None, help="Path to the LRR staging directory (where all host-based testing and file RW happens).")
     parser.addoption("--lrr-debug", action="store_true", default=False, help="Enable debug mode for the LRR logs.")
     parser.addoption("--experimental", action="store_true", default=False, help="Run experimental tests.")
+    parser.addoption("--playwright", action="store_true", default=False, help="Run Playwright UI tests. Requires `playwright install`")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
 
@@ -75,10 +77,19 @@ def pytest_configure(config: pytest.Config):
     )
     config.addinivalue_line(
         "markers",
+        "playwright: Playwright UI tests will be skipped by default."
+    )
+    config.addinivalue_line(
+        "markers",
         "failing: Tests that are known to fail will be skipped by default."
     )
 
 def pytest_collection_modifyitems(config: pytest.Config, items: List[pytest.Item]):
+    if not config.getoption("--playwright"):
+        skip_playwright = pytest.mark.skip(reason="need --playwright option enabled")
+        for item in items:
+            if 'playwright' in item.keywords:
+                item.add_marker(skip_playwright)
     if not config.getoption("--experimental"):
         skip_experimental = pytest.mark.skip(reason="need --experimental option enabled")
         for item in items:
@@ -101,7 +112,7 @@ def pytest_sessionstart(session: pytest.Session):
     logger.info(f"pytest run parameters: global_run_id={global_run_id}, npseed={npseed}")
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_makereport(item: Item, call: CallInfo[Any]):
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
     """
     Some logic to allow pytest to retrieve the LRR environment during a test failure.
     Dumps LRR logs from environment before containers are cleaned up as error logs.
@@ -109,53 +120,15 @@ def pytest_runtest_makereport(item: Item, call: CallInfo[Any]):
     To see these logs, include `--log-cli-level=ERROR`.
     """
     outcome = yield
-    report: TestReport = outcome.get_result()
+    report: pytest.TestReport = outcome.get_result()
     if report.when == "call" and report.failed:
-        logger.info(f"Test failed: dumping logs... ({item.nodeid})")
-
-        # # TODO: don't delete this tutorial; will probably use this in the future. (9/6/25)
-        # # Log exception details from the report
-        # if report.longrepr:
-        #     logger.info(f"Exception details: {report.longrepr}")
-        
-        # # Access the raw exception from the call info if available
-        # if hasattr(call, 'excinfo') and call.excinfo:
-        #     excinfo = call.excinfo
-        #     exc_class = excinfo.type
-        #     exc_instance = excinfo.value
-            
-        #     logger.info(f"Exception class: {exc_class}")
-        #     logger.info(f"Exception type name: {exc_class.__name__}")
-        #     logger.info(f"Exception module: {exc_class.__module__}")
-        #     logger.info(f"Exception value: {exc_instance}")
-        #     logger.info(f"Exception message: {str(exc_instance)}")
-            
-        #     # Handle custom exceptions with error codes
-        #     if hasattr(exc_instance, 'error_code'):
-        #         logger.info(f"Custom error code: {exc_instance.error_code}")
-            
-        #     if hasattr(exc_instance, 'details'):
-        #         logger.info(f"Custom details: {exc_instance.details}")
-            
-        #     # Pattern matching for specific exception types
-        #     if exc_class == KeyError:
-        #         logger.info("Handling KeyError: Missing key in dictionary/mapping")
-        #     elif exc_class == ValueError:
-        #         logger.info("Handling ValueError: Invalid value provided")
-        #     elif exc_class.__name__ == 'AssertionError':
-        #         logger.info("Handling AssertionError: Test assertion failed")
-        #     elif exc_class.__module__ != 'builtins':
-        #         logger.info(f"Custom exception detected from module: {exc_class.__module__}")
-            
-        #     # Check if it's a subclass of specific exceptions
-        #     if issubclass(exc_class, ConnectionError):
-        #         logger.info("This is a connection-related error")
-        #     elif issubclass(exc_class, OSError):
-        #         logger.info("This is an OS-related error")
-        
+        if excinfo := call.excinfo:
+            logger.error(f"Test threw {excinfo.typename} with message \"{excinfo.value}\": dumping logs... ({item.nodeid})")
+        else:
+            logger.error(f"Test failed: dumping logs... ({item.nodeid})")
         try:
-            if hasattr(item.session, 'lrr_environment'):
-                environment: AbstractLRRDeploymentContext = item.session.lrr_environment
+            if hasattr(item.session, 'lrr_environment') and isinstance(item.session.lrr_environment, AbstractLRRDeploymentContext):
+                environment = item.session.lrr_environment
                 logger.error("\n\n >>>>> LRR LOGS >>>>>")
                 environment.display_lrr_logs()
                 logger.error("<<<<< LRR LOGS <<<<<\n\n")

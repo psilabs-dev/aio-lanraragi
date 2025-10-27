@@ -1,6 +1,5 @@
 from pathlib import Path
 from PIL import Image
-
 from typing import List, Tuple, Union
 
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
@@ -18,7 +17,7 @@ class Page:
     margin: int
     font_size: int
     image: Image.Image
-    first_n_bytes = int
+    first_n_bytes: int
     image_format: str
     text: str
     filename: str

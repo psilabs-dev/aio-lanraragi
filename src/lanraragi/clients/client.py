@@ -1,4 +1,5 @@
 from typing import override
+
 from lanraragi.clients.api_context import ApiContextManager
 from lanraragi.clients.api_clients.archive import _ArchiveApiClient
 from lanraragi.clients.api_clients.category import _CategoryApiClient

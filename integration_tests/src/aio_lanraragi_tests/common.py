@@ -51,6 +51,10 @@ DEFAULT_LRR_PORT = 3000
 DEFAULT_REDIS_PORT = 6379
 
 DEFAULT_API_KEY = "lanraragi"
+DEFAULT_LRR_PASSWORD = "kamimamita"
+
+LRR_LOGIN_TITLE = "LANraragi - Admin Login"
+LRR_INDEX_TITLE = "LANraragi"
 
 @overload
 def compute_upload_checksum(br: io.IOBase) -> str:
