@@ -2,6 +2,15 @@
 
 An asynchronous Python API client for [LANraragi](https://github.com/Difegue/LANraragi), written with [aiohttp](https://github.com/aio-libs/aiohttp) and [pydantic](https://github.com/pydantic/pydantic) for type validation. The project is a work in progress (and subject to potential breaking changes on minor version).
 
+## Installation
+
+A Python interpreter is required. I recommend `uv`, specifically:
+
+- Installing `uv` from [installation guides](https://docs.astral.sh/uv/getting-started/installation/),
+- Installing an interpreter with `uv python install` (see [installing python](https://docs.astral.sh/uv/guides/install-python/)),
+- Creating a virtual environment with `uv venv` (see [pip interface](https://docs.astral.sh/uv/pip/))
+- Installing deps in this virtual environment with `uv pip install`.
+
 Installation with pip:
 
 ```sh
@@ -17,6 +26,12 @@ pip install git+https://github.com/psilabs-dev/aio-lanraragi.git@$branch_name
 For development documentation, see [development](/docs/development.md). For integration testing documentation, see [integration tests README](/integration_tests/README.md).
 
 ## Usage
+
+To enable the usage of an API in LRR, you must first insert an API key to the database:
+
+1. Login as Admin
+1. Go to Settings > Security > API Key
+1. Fill in API key (e.g. "lanraragi", which we'll use for demonstration)
 
 Here is an example on getting all archives from LANraragi using `LRRClient`'s context management:
 ```python
