@@ -323,3 +323,54 @@ async def test_api_auth_matrix(
             test_param.is_nofunmode, test_param.is_api_key_configured_server, test_param.is_api_key_configured_client,
             test_param.is_matching_api_key, environment, lanraragi
         )
+
+@pytest.mark.asyncio
+async def test_disable_cors_preflight(environment: AbstractLRRDeploymentContext, lanraragi: LRRClient, is_lrr_debug_mode: bool):
+    """
+    Test preflight header response from server when CORS is not configured.
+    This is the default behavior for LRR.
+
+    Tests will be done with a privileged endpoint.
+    """
+    environment.setup(enable_cors=False, lrr_debug_mode=is_lrr_debug_mode)
+    api = lanraragi.build_url("/api/shinobu")
+    async with (
+        aiohttp.ClientSession(headers={"Origin": "https://www.example.com"}) as session,
+        session.options(api) as response
+    ):
+        headers = response.headers
+
+        # confirm the CORS headers aren't here.
+        # this is the current default behavior (when disabled),
+        # so we'll test with the strictest conditions.
+        assert "Access-Control-Allow-Headers" not in headers, "Allowed headers not in headers when CORS is enabled."
+        assert "Access-Control-Allow-Methods" not in headers, "Allowed methods not present in headers when CORS is enabled."
+        assert "Access-Control-Allow-Origin" not in headers, "Allowed origin not present in headers when CORS is enabled."
+
+@pytest.mark.asyncio
+async def test_enable_cors_preflight(environment: AbstractLRRDeploymentContext, lanraragi: LRRClient, is_lrr_debug_mode: bool):
+    """
+    Test preflight header response from server when CORS is enabled.
+    """
+    environment.setup(enable_cors=True, lrr_debug_mode=is_lrr_debug_mode)
+    api = lanraragi.build_url("/api/shinobu")
+    async with (
+        aiohttp.ClientSession(headers={"Origin": "https://www.example.com"}) as session,
+        session.options(api) as response
+    ):
+        headers = response.headers
+
+        # confirm the CORS headers exist.
+        assert "Access-Control-Allow-Headers" in headers, "Allowed headers not in headers when CORS is enabled."
+        assert "Access-Control-Allow-Methods" in headers, "Allowed methods not present in headers when CORS is enabled."
+        assert "Access-Control-Allow-Origin" in headers, "Allowed origin not present in headers when CORS is enabled."
+
+        # confirm that the following methods must be provided by the server.
+        expected_allowed_methods = {"GET", "OPTIONS", "POST", "DELETE", "PUT"}
+        actual_allowed_methods = {method.strip() for method in headers["Access-Control-Allow-Methods"].split(",")}
+        assert actual_allowed_methods == expected_allowed_methods, "Actual allowed methods not a subset of expected allowed methods."
+
+        # confirm that the server allows any origin.
+        expected_allowed_origin = "*"
+        actual_allowed_origin = headers["Access-Control-Allow-Origin"].strip()
+        assert actual_allowed_origin == expected_allowed_origin, "CORS allowed origin does not match."
