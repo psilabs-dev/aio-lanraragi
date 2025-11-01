@@ -114,8 +114,22 @@ class AbstractLRRDeploymentContext(abc.ABC):
         ...
 
     @abc.abstractmethod
+    def enable_cors(self):
+        """
+        Enable CORS for the LRR instance by updating configuration.
+        """
+        ...
+
+    @abc.abstractmethod
+    def disable_cors(self):
+        """
+        Disable CORS for the LRR instance by updating configuration.
+        """
+        ...
+
+    @abc.abstractmethod
     def setup(
-        self, with_api_key: bool=False, with_nofunmode: bool=False, lrr_debug_mode: bool=False,
+        self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
         test_connection_max_retries: int=4
     ):
         """
@@ -124,6 +138,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Args:
             `with_api_key`: whether to add an API key (default API key: "lanraragi") to the LRR environment
             `with_nofunmode`: whether to enable nofunmode in the LRR environment
+            `enable_cors`: whether to enable CORS headers for the Client API
             `lrr_debug_mode`: whether to enable debug mode for the LRR application
             `test_connection_max_retries`: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """

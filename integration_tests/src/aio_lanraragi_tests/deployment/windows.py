@@ -364,8 +364,18 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.redis_client.hset("LRR_CONFIG", "enable_devmode", "0")
 
     @override
+    def enable_cors(self):
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "enablecors", "1")
+
+    @override
+    def disable_cors(self):
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "enablecors", "0")
+
+    @override
     def setup(
-        self, with_api_key: bool=False, with_nofunmode: bool=False, lrr_debug_mode: bool=False,
+        self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
         test_connection_max_retries: int=4
     ):
         """
@@ -456,6 +466,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.enable_nofun_mode()
         if lrr_debug_mode:
             self.enable_lrr_debug_mode()
+        if enable_cors:
+            self.enable_cors()
+        else:
+            self.disable_cors()
         self.logger.debug("Redis post-connect configuration complete.")
 
         if is_port_available(lrr_port):

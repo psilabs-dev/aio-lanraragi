@@ -239,6 +239,14 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def disable_lrr_debug_mode(self):
         return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG enable_devmode 0")
 
+    @override
+    def enable_cors(self):
+        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG enablecors 1")
+
+    @override
+    def disable_cors(self):
+        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG enablecors 0")
+
     # by default LRR contents directory is owned by root.
     # to make it writable by the koyomi user, we need to change the ownership.
     def allow_uploads(self):
@@ -289,7 +297,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def setup(
-        self, with_api_key: bool=False, with_nofunmode: bool=False, lrr_debug_mode: bool=False,
+        self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
         test_connection_max_retries: int=4
     ):
         """
@@ -453,6 +461,14 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             resp = self.enable_lrr_debug_mode()
             if resp.exit_code  != 0:
                 raise DeploymentException(f"Failed to enable debug mode for LRR: {resp}")
+        if enable_cors:
+            resp = self.enable_cors()
+            if resp.exit_code != 0:
+                raise DeploymentException(f"Failed to enable CORS: {resp}")
+        else:
+            resp = self.disable_cors()
+            if resp.exit_code != 0:
+                raise DeploymentException(f"Failed to disable CORS: {resp}")
         self.logger.debug("Redis server is ready.")
 
         # start lrr
