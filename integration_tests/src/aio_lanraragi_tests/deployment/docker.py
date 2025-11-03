@@ -4,6 +4,7 @@ Python module for setting up and tearing down docker environments for LANraragi.
 
 import contextlib
 import logging
+import os
 from pathlib import Path
 import tempfile
 import shutil
@@ -180,6 +181,24 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Force build Docker image, even if the image ID exists.
         """
         return self._is_force_build
+
+    @property
+    def lrr_uid(self) -> bool:
+        """
+        LRR user UID
+        """
+        if not hasattr(self, "_lrr_uid"):
+            self._lrr_uid = os.getuid()
+        return self._lrr_uid
+    
+    @property
+    def lrr_gid(self) -> bool:
+        """
+        LRR user GID
+        """
+        if not hasattr(self, "_lrr_gid"):
+            self._lrr_gid = os.getgid()
+        return self._lrr_gid
 
     def __init__(
             self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient, staging_dir: str,
@@ -421,7 +440,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             "3000/tcp": lrr_port
         }
         lrr_environment = [
-            f"LRR_REDIS_ADDRESS={redis_container_name}:{DEFAULT_REDIS_PORT}"
+            f"LRR_REDIS_ADDRESS={redis_container_name}:{DEFAULT_REDIS_PORT}",
+            f"LRR_UID={self.lrr_uid}",
+            f"LRR_GID={self.lrr_gid}"
         ]
         create_lrr_container = False
         if self.lrr_container:
