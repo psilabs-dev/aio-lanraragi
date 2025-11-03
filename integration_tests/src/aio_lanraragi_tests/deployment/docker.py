@@ -260,15 +260,19 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Try to give koyomi the thumb directory.
         """
-        return self.lrr_container.exec_run(["sh", "-c", 'chown -R koyomi: /home/koyomi/lanraragi/thumb || true'])
+        resp = self.lrr_container.exec_run(["sh", "-c", 'chown -R koyomi: /home/koyomi/lanraragi/thumb'], demux=True)
+        if resp.exit_code != 0:
+            raise DeploymentException("Failed to provide koyomi write access to thumbnail directory!")
+        return resp
 
     # by default LRR contents directory is owned by root.
     # to make it writable by the koyomi user, we need to change the ownership.
     def allow_uploads(self):
-        # On bind mounts (host directories), chown may fail due to permission constraints.
-        # Make this a best-effort operation and do not fail the setup if it cannot change ownership.
         self.allow_writable_thumb()
-        return self.lrr_container.exec_run(["sh", "-c", 'chown -R koyomi: /home/koyomi/lanraragi/content || true'])
+        resp = self.lrr_container.exec_run(["sh", "-c", 'chown -R koyomi: /home/koyomi/lanraragi/content'], demux=True)
+        if resp.exit_code != 0:
+            raise DeploymentException("Failed to provide koyomi write access to archives directory!")
+        return resp
 
     @override
     def start_lrr(self):
