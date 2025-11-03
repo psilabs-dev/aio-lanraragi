@@ -82,6 +82,7 @@ from aio_lanraragi_tests.common import LRR_INDEX_TITLE, compute_upload_checksum
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import (
     CreatePageRequest,
+    TagGenerator,
     WriteArchiveRequest,
     WriteArchiveResponse,
 )
@@ -89,6 +90,7 @@ from aio_lanraragi_tests.archive_generation.archive import write_archives_to_dis
 from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
 
 LOGGER = logging.getLogger(__name__)
+ENABLE_SYNC_FALLBACK = False # for debugging.
 
 @pytest.fixture
 def resource_prefix() -> Generator[str, None, None]:
@@ -330,6 +332,32 @@ def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Gen
     responses = write_archives_to_disk(requests)
     return responses
 
+async def upload_archives(
+    write_responses: List[WriteArchiveResponse], tag_generators: List[TagGenerator],
+    npgenerator: np.random.Generator, semaphore: asyncio.Semaphore, lanraragi: LRRClient
+):
+    if ENABLE_SYNC_FALLBACK:
+        for i, _response in enumerate(write_responses):
+            title = f"Archive {i}"
+            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
+            checksum = compute_upload_checksum(_response.save_path)
+            _, error = await upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+        return
+    else: 
+        tasks = []
+        for i, _response in enumerate(write_responses):
+            title = f"Archive {i}"
+            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
+            checksum = compute_upload_checksum(_response.save_path)
+            tasks.append(asyncio.create_task(
+                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            ))
+        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        for _, error in gathered:
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+        return
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Cache priming required only for flaky Windows testing environments.")
 @pytest.mark.asyncio
 @pytest.mark.xfail
@@ -366,18 +394,7 @@ async def test_xfail_catch_flakes(lanraragi: LRRClient, semaphore: asyncio.Semap
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        tasks = []
-        for i, _response in enumerate(write_responses):
-            title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
-            tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
-            ))
-        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
-        for response, error in gathered:
-            assert not error, f"Upload failed (status {error.status}): {error.error}"
-        del response, error
+        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lanraragi)
     # <<<<< UPLOAD STAGE <<<<<
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
@@ -415,18 +432,7 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        tasks = []
-        for i, _response in enumerate(write_responses):
-            title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
-            tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
-            ))
-        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
-        for response, error in gathered:
-            assert not error, f"Upload failed (status {error.status}): {error.error}"
-        del response, error
+        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lanraragi)
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> VALIDATE UPLOAD COUNT STAGE >>>>>
@@ -499,17 +505,7 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore, 
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        tasks = []
-        for i, _response in enumerate(write_responses):
-            title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
-            ))
-        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
-        for response, error in gathered:
-            assert not error, f"Upload failed (status {error.status}): {error.error}"
-        del response, error
+        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lanraragi)
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> GET ALL ARCHIVES STAGE >>>>>
@@ -704,18 +700,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        tasks = []
-        for i, _response in enumerate(write_responses):
-            title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
-            ))
-        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
-        for response, error in gathered:
-            assert not error, f"Upload failed (status {error.status}): {error.error}"
-            archive_ids.append(response.arcid)
-        del response, error
+        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lanraragi)
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> GET BOOKMARK LINK STAGE >>>>>
@@ -832,17 +817,7 @@ async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        tasks = []
-        for i, _response in enumerate(write_responses):
-            title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
-            ))
-        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
-        for response, error in gathered:
-            assert not error, f"Upload failed (status {error.status}): {error.error}"
-        del response, error
+        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lanraragi)
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> SEARCH STAGE >>>>>
@@ -962,17 +937,7 @@ async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, 
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        tasks = []
-        for i, _response in enumerate(write_responses):
-            title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
-            ))
-        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
-        for response, error in gathered:
-            assert not error, f"Upload failed (status {error.status}): {error.error}"
-        del response, error
+        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lanraragi)
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> GET STATISTICS STAGE >>>>>
@@ -1035,17 +1000,7 @@ async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore,
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        tasks = []
-        for i, _response in enumerate(write_responses):
-            title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
-            ))
-        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
-        for response, error in gathered:
-            assert not error, f"Upload failed (status {error.status}): {error.error}"
-        del response, error
+        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lanraragi)
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> GET ARCHIVE IDS STAGE >>>>>
@@ -1138,17 +1093,7 @@ async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npge
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        tasks = []
-        for i, _response in enumerate(write_responses):
-            title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
-            ))
-        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
-        for response, error in gathered:
-            assert not error, f"Upload failed (status {error.status}): {error.error}"
-        del response, error
+        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lanraragi)
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> GET ARCHIVE IDS STAGE >>>>>
@@ -1207,17 +1152,7 @@ async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        tasks = []
-        for i, _response in enumerate(write_responses):
-            title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            tasks.append(asyncio.create_task(
-                upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags)
-            ))
-        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
-        for response, error in gathered:
-            assert not error, f"Upload failed (status {error.status}): {error.error}"
-        del response, error
+        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lanraragi)
     # <<<<< UPLOAD STAGE <<<<<
     
     # >>>>> REGENERATE THUMBNAILS STAGE >>>>>
