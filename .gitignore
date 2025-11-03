@@ -1,7 +1,7 @@
 .vscode/
-.cursor/
 
-.claude/
+# Staging directory for integration tests.
+.staging/
 
 # ---> Python
 # Byte-compiled / optimized / DLL files
