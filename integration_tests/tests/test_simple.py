@@ -335,15 +335,17 @@ def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Gen
 async def upload_archives(
     write_responses: List[WriteArchiveResponse], tag_generators: List[TagGenerator],
     npgenerator: np.random.Generator, semaphore: asyncio.Semaphore, lanraragi: LRRClient
-):
+) -> List[UploadArchiveResponse]:
+    responses: List[UploadArchiveResponse] = []
     if ENABLE_SYNC_FALLBACK:
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
             tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
             checksum = compute_upload_checksum(_response.save_path)
-            _, error = await upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            response, error = await upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
             assert not error, f"Upload failed (status {error.status}): {error.error}"
-        return
+            responses.append(response)
+        return responses
     else: 
         tasks = []
         for i, _response in enumerate(write_responses):
@@ -354,9 +356,10 @@ async def upload_archives(
                 upload_archive(lanraragi, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
             ))
         gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
-        for _, error in gathered:
+        for response, error in gathered:
             assert not error, f"Upload failed (status {error.status}): {error.error}"
-        return
+            responses.append(response)
+        return responses
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Cache priming required only for flaky Windows testing environments.")
 @pytest.mark.asyncio
@@ -700,7 +703,9 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lanraragi)
+        upload_responses = await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lanraragi)
+        archive_ids = [response.arcid for response in upload_responses]
+        del upload_responses
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> GET BOOKMARK LINK STAGE >>>>>
