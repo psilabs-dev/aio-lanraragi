@@ -619,7 +619,14 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         the network.
         
         If something goes wrong during setup, the environment will be reset and the data should be removed.
+
+        We'll also need to pre-emptively clean up container contents to prevent virtiofs stale cache bs
+        when testing in MacOS where docker is in a VM.
         """
+        if remove_data and self.lrr_container:
+            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/content'])
+            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/thumb'])
+
         if self.lrr_container:
             self.lrr_container.stop(timeout=1)
             self.logger.debug(f"Stopped container: {self.lrr_container_name}")
