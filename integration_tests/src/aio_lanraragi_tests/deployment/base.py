@@ -1,5 +1,6 @@
 import abc
 import logging
+from pathlib import Path
 import time
 from typing import Optional
 import aiohttp
@@ -86,6 +87,20 @@ class AbstractLRRDeploymentContext(abc.ABC):
     @lrr_api_key.setter
     def lrr_api_key(self, lrr_api_key: Optional[str]):
         self._lrr_api_key = lrr_api_key
+
+    @property
+    @abc.abstractmethod
+    def staging_dir(self) -> Path:
+        """
+        Path to the staging directory.
+        """
+    
+    @property
+    @abc.abstractmethod
+    def archives_dir(self) -> Path:
+        """
+        Path to the archives directory.
+        """
 
     @abc.abstractmethod
     def update_api_key(self, api_key: Optional[str]):

@@ -150,8 +150,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             |- lrr.conf
             |- package.json
             |- run.ps1
-        |- {resource_prefix}contents/
-            |- thumb/
+        |- {resource_prefix}archives/
+        |- {resource_prefix}thumb/
         |- {resource_prefix}temp/           # move temp out to avoid applying unnecessary Shinobu pressure
         |- {resource_prefix}redis/          # dedicated redis directory (instead of using contents)
         |- {resource_prefix}log/
@@ -171,26 +171,19 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     ```
     """
 
+    @override
     @property
     def staging_dir(self) -> Path:
-        """
-        The directory where everything can happen.
-        """
         return self._staging_dir
 
     @staging_dir.setter
     def staging_dir(self, dir: Path):
         self._staging_dir = dir.absolute()
 
+    @override
     @property
-    def contents_dir(self) -> Path:
-        """
-        Absolute path to the entire LRR application. For testing purposes,
-        contents_dir is determined by windist path + resource prefix.
-
-        At the end of testing, the contents_dir should be removed.
-        """
-        contents_dirname = self.resource_prefix + "contents"
+    def archives_dir(self) -> Path:
+        contents_dirname = self.resource_prefix + "archives"
         return self.staging_dir / contents_dirname
     
     @property
@@ -206,7 +199,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Absolute path to the LRR thumbnail directory
         """
-        return self.contents_dir / "thumb"
+        thumb_dirname = self.resource_prefix + "thumb"
+        return self.staging_dir / thumb_dirname
 
     @property
     def logs_dir(self) -> Path:
@@ -409,10 +403,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.debug(f"Copy of windist directory exists: {windist_dir}")
 
         # log the setup resource allocations for user to see
-        self.logger.info(f"Deploying Windows LRR with the following resources: LRR port {lrr_port}, Redis port {redis_port}, content path {self.contents_dir}.")
+        self.logger.info(f"Deploying Windows LRR with the following resources: LRR port {lrr_port}, Redis port {redis_port}, content path {self.archives_dir}.")
 
         # create contents, thumb, temp, log, pid, redis.
-        contents_dir = self.contents_dir
+        contents_dir = self.archives_dir
         thumb_dir = self.thumb_dir
         temp_dir = self.temp_dir
         log_dir = self.logs_dir
@@ -531,7 +525,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Forceful shutdown of LRR and Redis and remove the content path, preparing it for another test.
         """
-        contents_dir = self.contents_dir
+        contents_dir = self.archives_dir
         log_dir = self.logs_dir
         pid_dir = self.pid_dir
         windist_dir = self.windist_dir
@@ -579,7 +573,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             os.chdir(windist_path)
 
             lrr_network = self.lrr_address
-            lrr_data_directory = self.contents_dir
+            lrr_data_directory = self.archives_dir
             lrr_log_directory = self.logs_dir
             lrr_temp_directory = self.temp_dir
             lrr_thumb_directory = self.thumb_dir

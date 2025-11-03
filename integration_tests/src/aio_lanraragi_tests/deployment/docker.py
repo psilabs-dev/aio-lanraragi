@@ -6,6 +6,7 @@ import contextlib
 import logging
 from pathlib import Path
 import tempfile
+import shutil
 import time
 from typing import Optional, override
 import docker
@@ -105,51 +106,39 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def network(self, network: docker.models.networks.Network):
         self._network = network
     
+    @override
     @property
-    def lrr_contents_volume_name(self) -> str:
-        return self.resource_prefix + "lanraragi_contents"
+    def staging_dir(self) -> Path:
+        return self._staging_dir
 
+    @staging_dir.setter
+    def staging_dir(self, dir: Path):
+        self._staging_dir = dir.absolute()
+
+    @override
     @property
-    def lrr_contents_volume(self) -> Optional[docker.models.volumes.Volume]:
+    def archives_dir(self) -> Path:
         """
-        Returns the LANraragi contents volume from attribute if it exists.
-        Otherwise, falls back to finding the LRR volume with the
-        same name, based on initialization settings.
+        Bind mount for LRR container:/home/koyomi/lanraragi/content.
         """
-        volume = None
-        with contextlib.suppress(AttributeError):
-            volume = self._lrr_contents_volume
-        if volume is None:
-            volume = self._get_volume_by_name(self.lrr_contents_volume_name)
-        self._lrr_contents_volume = volume
-        return volume
-
-    @lrr_contents_volume.setter
-    def lrr_contents_volume(self, volume: docker.models.volumes.Volume):
-        self._lrr_contents_volume = volume
+        dirname = self.resource_prefix + "archives"
+        return self.staging_dir / dirname
 
     @property
-    def lrr_thumb_volume_name(self) -> str:
-        return self.resource_prefix + "lanraragi_thumb"
+    def thumb_dir(self) -> Path:
+        """
+        Bind mount for LRR container:/home/koyomi/lanraragi/thumb.
+        """
+        dirname = self.resource_prefix + "thumb"
+        return self.staging_dir / dirname
 
     @property
-    def lrr_thumb_volume(self) -> Optional[docker.models.volumes.Volume]:
+    def redis_dir(self) -> Path:
         """
-        Returns the LANraragi thumb volume from attribute if it exists.
-        Otherwise, falls back to finding the LRR volume with the
-        same name, based on initialization settings.
+        Bind mount for Redis container:/data.
         """
-        volume = None
-        with contextlib.suppress(AttributeError):
-            volume = self._lrr_thumb_volume
-        if volume is None:
-            volume = self._get_volume_by_name(self.lrr_thumb_volume_name)
-        self._lrr_thumb_volume = volume
-        return volume
-
-    @lrr_thumb_volume.setter
-    def lrr_thumb_volume(self, volume: docker.models.volumes.Volume):
-        self._lrr_thumb_volume = volume
+        dirname = self.resource_prefix + "redis"
+        return self.staging_dir / dirname
 
     @property
     def redis_volume_name(self) -> str:
@@ -193,7 +182,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self._is_force_build
 
     def __init__(
-            self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient,
+            self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient, staging_dir: str,
             resource_prefix: str, port_offset: int,
             docker_api: docker.APIClient=None, logger: Optional[logging.Logger]=None,
             global_run_id: int=None, is_allow_uploads: bool=True, is_force_build: bool=False
@@ -209,6 +198,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.git_branch = git_branch
         self._docker_client = docker_client
         self._docker_api = docker_api
+        self.staging_dir = Path(staging_dir)
         if logger is None:
             logger = LOGGER
         self.logger = logger
@@ -247,10 +237,19 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def disable_cors(self):
         return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG enablecors 0")
 
+    def allow_writable_thumb(self):
+        """
+        Try to give koyomi the thumb directory.
+        """
+        return self.lrr_container.exec_run(["sh", "-c", 'chown -R koyomi: /home/koyomi/lanraragi/thumb || true'])
+
     # by default LRR contents directory is owned by root.
     # to make it writable by the koyomi user, we need to change the ownership.
     def allow_uploads(self):
-        return self.lrr_container.exec_run(["sh", "-c", 'chown -R koyomi: content'])
+        # On bind mounts (host directories), chown may fail due to permission constraints.
+        # Make this a best-effort operation and do not fail the setup if it cannot change ownership.
+        self.allow_writable_thumb()
+        return self.lrr_container.exec_run(["sh", "-c", 'chown -R koyomi: /home/koyomi/lanraragi/content || true'])
 
     @override
     def start_lrr(self):
@@ -311,9 +310,33 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             lrr_debug_mode: whether to start LRR with debug mode on
             test_connection_max_retries: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
+        # ensure staging, contents and thumb directories exist
+        staging_dir = self.staging_dir
+        if not staging_dir:
+            raise FileNotFoundError("Staging directory not provided. Use --staging to specify a host directory for bind mounts.")
+        if not staging_dir.exists():
+            raise FileNotFoundError(f"Staging directory {staging_dir} not found.")
+
+        contents_dir = self.archives_dir
+        thumb_dir = self.thumb_dir
+        if contents_dir.exists():
+            self.logger.debug(f"Contents directory exists: {contents_dir}")
+        else:
+            self.logger.debug(f"Creating contents directory: {contents_dir}")
+            contents_dir.mkdir(parents=True, exist_ok=False)
+        if thumb_dir.exists():
+            self.logger.debug(f"Thumb directory exists: {thumb_dir}")
+        else:
+            self.logger.debug(f"Creating thumb directory: {thumb_dir}")
+            thumb_dir.mkdir(parents=True, exist_ok=False)
+
         # log the setup resource allocations for user to see
         # the docker image is not included, haven't decided how to classify it yet.
-        self.logger.info(f"Deploying Docker LRR with the following resources: LRR container {self.lrr_container_name}, Redis container {self.redis_container_name}, LRR contents volume {self.lrr_contents_volume_name}, LRR thumb volume {self.lrr_thumb_volume_name}, redis volume {self.redis_volume_name}, network {self.network_name}")
+        self.logger.info(
+            f"Deploying Docker LRR with the following resources: LRR container {self.lrr_container_name}, "
+            f"Redis container {self.redis_container_name}, contents path {contents_dir}, thumb path {thumb_dir}, "
+            f"redis volume {self.redis_volume_name}, network {self.network_name}"
+        )
 
         # >>>>> IMAGE PREPARATION >>>>>
         image_id = self.lrr_image_name
@@ -354,20 +377,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.debug(f"Network exists: {network_name}.")
 
         # prepare volumes
-        contents_volume_name = self.lrr_contents_volume_name
-        if not self.lrr_contents_volume:
-            self.logger.debug(f"Creating volume: {contents_volume_name}")
-            self.lrr_contents_volume = self.docker_client.volumes.create(name=contents_volume_name)
-        else:
-            self.logger.debug(f"Volume exists: {contents_volume_name}.")
-
-        thumb_volume_name = self.lrr_thumb_volume_name
-        if not self.lrr_thumb_volume:
-            self.logger.debug(f"Creating volume: {thumb_volume_name}")
-            self.lrr_thumb_volume = self.docker_client.volumes.create(name=thumb_volume_name)
-        else:
-            self.logger.debug(f"Volume exists: {thumb_volume_name}.")
-        
         redis_volume_name = self.redis_volume_name
         if not self.redis_volume:
             self.logger.debug(f"Creating volume: {redis_volume_name}")
@@ -408,8 +417,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         # then prepare the LRR container.
         lrr_port = self.lrr_port
         lrr_container_name = self.lrr_container_name
-        lrr_contents_vol_name = self.lrr_contents_volume_name
-        lrr_thumb_vol_name = self.lrr_thumb_volume_name
         lrr_ports = {
             "3000/tcp": lrr_port
         }
@@ -436,8 +443,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.lrr_container = self.docker_client.containers.create(
                 image_id, hostname=lrr_container_name, name=lrr_container_name, detach=True, network=network_name, ports=lrr_ports, environment=lrr_environment,
                 volumes={
-                    lrr_contents_vol_name: {"bind": "/home/koyomi/lanraragi/content", "mode": "rw"},
-                    lrr_thumb_vol_name: {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"}
+                    str(contents_dir): {"bind": "/home/koyomi/lanraragi/content", "mode": "rw"},
+                    str(thumb_dir): {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"}
                 }
             )
             self.logger.debug("LRR container created.")
@@ -604,16 +611,17 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.redis_container:
             self.redis_container.remove(force=True)
             self.logger.debug(f"Removed container: {self.redis_container_name}")
+
         if remove_data:
-            if self.lrr_contents_volume:
-                self.lrr_contents_volume.remove(force=True)
-                self.logger.debug(f"Removed volume: {self.lrr_contents_volume_name}")
-            if self.lrr_thumb_volume:
-                self.lrr_thumb_volume.remove(force=True)
-                self.logger.debug(f"Removed volume: {self.lrr_thumb_volume_name}")
             if self.redis_volume:
                 self.redis_volume.remove(force=True)
                 self.logger.debug(f"Removed volume: {self.redis_volume_name}")
+            if self.archives_dir.exists():
+                shutil.rmtree(self.archives_dir)
+                self.logger.debug(f"Removed contents directory: {self.archives_dir}")
+            if self.thumb_dir.exists():
+                shutil.rmtree(self.thumb_dir)
+                self.logger.debug(f"Removed thumb directory: {self.thumb_dir}")
 
         if hasattr(self, 'network') and self.network:
             self.network.remove()

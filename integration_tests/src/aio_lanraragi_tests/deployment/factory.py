@@ -37,10 +37,11 @@ def generate_deployment(
             git_url: str = request.config.getoption("--git-url")
             git_branch: str = request.config.getoption("--git-branch")
             use_docker_api: bool = request.config.getoption("--docker-api")
+            staging_dir: str = request.config.getoption("--staging")
             docker_client = docker.from_env()
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
             environment = DockerLRRDeploymentContext(
-                build_path, image, git_url, git_branch, docker_client, resource_prefix, port_offset, docker_api=docker_api,
+                build_path, image, git_url, git_branch, docker_client, staging_dir, resource_prefix, port_offset, docker_api=docker_api,
                 global_run_id=global_run_id, is_allow_uploads=True,
                 logger=logger
             )

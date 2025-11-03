@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 import time
 from typing import Any, List
 import pytest
@@ -63,7 +64,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--git-branch", action="store", default=None, help="Branch to checkout; if not supplied, uses the main branch.")
     parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
     parser.addoption("--windist", action="store", default=None, help="Path to the LRR app distribution for Windows.")
-    parser.addoption("--staging", action="store", default=None, help="Path to the LRR staging directory (where all host-based testing and file RW happens).")
+    parser.addoption("--staging", action="store", default=Path.cwd() / ".staging", help="Path to the LRR staging directory (defaults to .staging).")
     parser.addoption("--lrr-debug", action="store_true", default=False, help="Enable debug mode for the LRR logs.")
     parser.addoption("--experimental", action="store_true", default=False, help="Run experimental tests.")
     parser.addoption("--playwright", action="store_true", default=False, help="Run Playwright UI tests. Requires `playwright install`")

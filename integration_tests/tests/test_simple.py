@@ -98,7 +98,7 @@ def resource_prefix() -> Generator[str, None, None]:
 def port_offset() -> Generator[int, None, None]:
     yield 10
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def environment(request: pytest.FixtureRequest, port_offset: int, resource_prefix: str):
     is_lrr_debug_mode: bool = request.config.getoption("--lrr-debug")
     environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
@@ -181,16 +181,21 @@ async def upload_archive(
         while True:
             try:
                 response, error = await client.archive_api.upload_archive(request)
-                if response:
-                    return response, error
-                if error.status == 423: # locked resource
-                    if retry_count >= max_retries:
+                if error:
+                    if error.status == 423: # locked resource
+                        if retry_count >= max_retries:
+                            return None, error
+                        tts = 2 ** retry_count
+                        LOGGER.warning(f"[upload_archive] Locked resource when uploading {filename}. Retrying in {tts}s ({retry_count+1}/{max_retries})...")
+                        await asyncio.sleep(tts)
+                        retry_count += 1
+                        continue
+                    else:
+                        LOGGER.error(f"[upload_archive] Failed to upload {filename} (status: {error.status}): {error.error}")
                         return None, error
-                    tts = 2 ** retry_count
-                    LOGGER.warning(f"Locked resource when uploading {filename}. Retrying in {tts}s ({retry_count+1}/{max_retries})...")
-                    await asyncio.sleep(tts)
-                    retry_count += 1
-                    continue
+
+                LOGGER.debug(f"[upload_archive][{response.arcid}][{filename}]")
+                return response, None
             except asyncio.TimeoutError as timeout_error:
                 # if LRR handles files synchronously then our concurrent uploads may put too much pressure.
                 # employ retry with exponential backoff here as well. This is not considered a server-side
@@ -199,7 +204,7 @@ async def upload_archive(
                     error = LanraragiErrorResponse(error=str(timeout_error), status=408)
                     return None, error
                 tts = 2 ** retry_count
-                LOGGER.warning(f"Encountered timeout exception while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})...")
+                LOGGER.warning(f"[upload_archive] Encountered timeout exception while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})...")
                 await asyncio.sleep(tts)
                 retry_count += 1
                 continue
@@ -226,7 +231,7 @@ async def upload_archive(
                 )
 
                 if not is_connection_refused:
-                    LOGGER.error(f"Encountered error not related to connection while uploading {filename}: os_errno={os_errno}, os_winerr={os_winerr}")
+                    LOGGER.error(f"[upload_archive] Encountered error not related to connection while uploading {filename}: os_errno={os_errno}, os_winerr={os_winerr}")
                     raise client_connector_error
 
                 if retry_count >= max_retries:
@@ -235,7 +240,7 @@ async def upload_archive(
                     raise client_connector_error
                 tts = 2 ** retry_count
                 LOGGER.warning(
-                    f"Connection refused while uploading {filename}, retrying in {tts}s "
+                    f"[upload_archive] Connection refused while uploading {filename}, retrying in {tts}s "
                     f"({retry_count+1}/{max_retries}); os_errno={os_errno}; os_winerr={os_winerr}"
                 )
                 await asyncio.sleep(tts)
@@ -253,7 +258,9 @@ async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semap
                 retry_count += 1
                 if retry_count > 10:
                     return response, error
-                await asyncio.sleep(2 ** retry_count)
+                tts = 2 ** retry_count
+                LOGGER.debug(f"[delete_archive][{arcid}] locked resource error; retrying in {tts}s.")
+                await asyncio.sleep(tts)
                 continue
             return response, error
 
@@ -266,7 +273,9 @@ async def add_archive_to_category(client: LRRClient, category_id: str, arcid: st
                 retry_count += 1
                 if retry_count > 10:
                     return response, error
-                await asyncio.sleep(2 ** retry_count)
+                tts = 2 ** retry_count
+                LOGGER.debug(f"[add_archive_to_category][{category_id}][{arcid}] locked resource error; retrying in {tts}s.")
+                await asyncio.sleep(tts)
                 continue
             return response, error
 
@@ -279,7 +288,9 @@ async def remove_archive_from_category(client: LRRClient, category_id: str, arci
                 retry_count += 1
                 if retry_count > 10:
                     return response, error
-                await asyncio.sleep(2 ** retry_count)
+                tts = 2 ** retry_count
+                LOGGER.debug(f"[remove_archive_from_category][{category_id}][{arcid}] locked resource error; retrying in {tts}s.")
+                await asyncio.sleep(tts)
                 continue
             return response, error
 
@@ -322,7 +333,7 @@ def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Gen
 @pytest.mark.skipif(sys.platform != "win32", reason="Cache priming required only for flaky Windows testing environments.")
 @pytest.mark.asyncio
 @pytest.mark.xfail
-async def test_xfail_catch_flakes(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
+async def test_xfail_catch_flakes(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
     """
     This xfail test case serves no integration testing purpose, other than to prime the cache of flaky testing hosts
     and reduce the chances of subsequent test case failures caused by network flakes, such as remote host connection
@@ -342,6 +353,7 @@ async def test_xfail_catch_flakes(lanraragi: LRRClient, semaphore: asyncio.Semap
     assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
     assert len(response.data) == 0, "Server contains archives!"
     del response, error
+    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UPLOAD STAGE >>>>>
@@ -370,7 +382,7 @@ async def test_xfail_catch_flakes(lanraragi: LRRClient, semaphore: asyncio.Semap
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
+async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
     """
     Creates 100 archives to upload to the LRR server,
     and verifies that this number of archives is correct.
@@ -390,6 +402,7 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
     assert len(response.data) == 0, "Server contains archives!"
     del response, error
+    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UPLOAD STAGE >>>>>
@@ -457,7 +470,7 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
+async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
     """
     Simulates a read archive operation.
     """
@@ -473,6 +486,7 @@ async def test_archive_read(lanraragi: LRRClient, semaphore: asyncio.Semaphore, 
     assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
     assert len(response.data) == 0, "Server contains archives!"
     del response, error
+    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UPLOAD STAGE >>>>>
@@ -648,7 +662,7 @@ async def test_category(lanraragi: LRRClient):
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
+async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
     """
     Creates 100 archives to upload to the LRR server, with an emphasis on testing category/archive addition/removal
     and asynchronous operations.
@@ -676,6 +690,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
     assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
     assert len(response.data) == 0, "Server contains archives!"
     del response, error
+    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UPLOAD STAGE >>>>>
@@ -782,7 +797,7 @@ async def test_archive_category_interaction(lanraragi: LRRClient, semaphore: asy
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
+async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
     """
     Very basic functional test of the search API.
     
@@ -804,6 +819,7 @@ async def test_search_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
     assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
     assert len(response.data) == 0, "Server contains archives!"
     del response, error
+    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UPLOAD STAGE >>>>>
@@ -922,7 +938,7 @@ async def test_shinobu_api(lanraragi: LRRClient):
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
+async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
     """
     Very basic functional test of the database API.
     Does not test drop database or get backup.
@@ -933,6 +949,7 @@ async def test_database_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, 
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
     LOGGER.debug("Established connection with test LRR server.")
+    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
     # <<<<< TEST CONNECTION STAGE <<<<<
     
     # >>>>> UPLOAD STAGE >>>>>
@@ -995,7 +1012,7 @@ async def test_drop_database(lanraragi: LRRClient):
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
+async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
     """
     Very basic functional test of the tankoubon API.
     """
@@ -1005,6 +1022,7 @@ async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore,
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
     LOGGER.debug("Established connection with test LRR server.")
+    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
     # <<<<< TEST CONNECTION STAGE <<<<<
     
     # >>>>> UPLOAD STAGE >>>>>
@@ -1097,7 +1115,7 @@ async def test_tankoubon_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore,
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
+async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
     """
     Basic functional test of miscellaneous API.
     """
@@ -1107,6 +1125,7 @@ async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npge
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
     LOGGER.debug("Established connection with test LRR server.")
+    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
     # <<<<< TEST CONNECTION STAGE <<<<<
     
     # >>>>> UPLOAD STAGE >>>>>
@@ -1165,7 +1184,7 @@ async def test_misc_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npge
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
+async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
     """
     Very basic functional test of the minion API.
     """
@@ -1175,6 +1194,7 @@ async def test_minion_api(lanraragi: LRRClient, semaphore: asyncio.Semaphore, np
     response, error = await lanraragi.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
     LOGGER.debug("Established connection with test LRR server.")
+    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
     # <<<<< TEST CONNECTION STAGE <<<<<
     
     # >>>>> UPLOAD STAGE >>>>>
