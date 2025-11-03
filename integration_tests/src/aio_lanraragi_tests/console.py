@@ -32,7 +32,7 @@ def get_deployment(
 
     docker_client = docker.from_env()
     environment = DockerLRRDeploymentContext(
-        build_path, image, git_url, git_branch, docker_client, STAGING_RESOURCE_PREFIX, STAGING_PORT_OFFSET, docker_api=docker_api,
+        build_path, image, git_url, git_branch, docker_client, ".staging", STAGING_RESOURCE_PREFIX, STAGING_PORT_OFFSET, docker_api=docker_api,
         global_run_id=0, is_allow_uploads=True, is_force_build=True
     )
     return environment
