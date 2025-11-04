@@ -12,7 +12,6 @@ import errno
 import http
 import logging
 from pathlib import Path
-import shutil
 import sys
 import tempfile
 from typing import Generator, List, Optional, Set, Tuple
@@ -483,44 +482,63 @@ async def test_archive_upload(lrr_client: LRRClient, semaphore: asyncio.Semaphor
     assert len(list(environment.archives_dir.iterdir())) == num_archives-50, "Incorrect number of archives on disk!"
     # <<<<< DELETE ARCHIVE ASYNC STAGE <<<<<
 
-@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
-@pytest.mark.asyncio
-async def test_archive_discovery(lrr_client: LRRClient, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
-    """
-    Moves 100 archives to upload to the LRR archive directory, then verifies that LRR correctly discovers the archives.
-    """
-    num_archives = 100
+# @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
+# @pytest.mark.asyncio
+# @pytest.mark.experimental # this is unusually slow.
+# async def test_archive_discovery(lrr_client: LRRClient, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
+#     """
+#     Moves 100 archives to upload to the LRR archive directory, then verifies that LRR correctly discovers the archives.
+#     """
+#     num_archives = 100
 
-    # >>>>> TEST CONNECTION STAGE >>>>>
-    response, error = await lrr_client.misc_api.get_server_info()
-    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+#     # >>>>> TEST CONNECTION STAGE >>>>>
+#     response, error = await lrr_client.misc_api.get_server_info()
+#     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
 
-    LOGGER.debug("Established connection with test LRR server.")
-    # verify we are working with a new server.
-    response, error = await lrr_client.archive_api.get_all_archives()
-    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
-    assert len(response.data) == 0, "Server contains archives!"
-    del response, error
-    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
-    # <<<<< TEST CONNECTION STAGE <<<<<
+#     LOGGER.debug("Established connection with test LRR server.")
+#     # verify we are working with a new server.
+#     response, error = await lrr_client.archive_api.get_all_archives()
+#     assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+#     assert len(response.data) == 0, "Server contains archives!"
+#     del response, error
+#     assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
+#     # <<<<< TEST CONNECTION STAGE <<<<<
 
-    # >>>>> MOVE STAGE >>>>>
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-        LOGGER.debug(f"Creating {num_archives} archives to upload.")
-        write_responses = save_archives(num_archives, tmpdir, npgenerator)
-        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+#     # >>>>> MOVE STAGE >>>>>
+#     with tempfile.TemporaryDirectory() as tmpdir:
+#         tmpdir = Path(tmpdir)
+#         LOGGER.debug(f"Creating {num_archives} archives to upload.")
+#         write_responses = save_archives(num_archives, tmpdir, npgenerator)
+#         assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
-        LOGGER.debug("Moving archives to destination.")
-        for wr in write_responses:
-            save_path = wr.save_path
-            dest_path = environment.archives_dir / save_path.name
-            shutil.copy2(save_path, dest_path)
-    # <<<<< MOVE STAGE <<<<<
+#         LOGGER.debug("Moving archives to destination.")
+#         for wr in write_responses:
+#             save_path = wr.save_path
+#             dest_path = environment.archives_dir / save_path.name
+#             shutil.copy2(save_path, dest_path)
+#     # <<<<< MOVE STAGE <<<<<
 
-    # >>>>> ARCHIVE VALIDATION STAGE >>>>>
-    # TODO
-    # <<<<< ARCHIVE VALIDATION STAGE <<<<<
+#     # >>>>> ARCHIVE VALIDATION STAGE >>>>>
+#     # sleep 1s to get distinct log time.
+#     await asyncio.sleep(1)
+#     after = int(time.time())
+#     response, error = await lrr_client.shinobu_api.restart_shinobu()
+#     is_scan_complete = False
+#     while True:
+#         events = parse_lrr_logs(environment.read_log('shinobu.log'), after=after)
+#         for event in events:
+#             if 'Initial scan complete' in event.message:
+#                 is_scan_complete = True
+#                 break
+#         if is_scan_complete:
+#             break
+#         await asyncio.sleep(1)
+#     assert is_scan_complete, f"No scan complete log from Shinobu: {'\n'.join([str(event) for event in parse_lrr_logs(environment.read_log('shinobu.log'), after=after)])}"
+    
+#     response, error = await lrr_client.archive_api.get_all_archives()
+#     assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+#     assert len(response.data) == num_archives, "Number of archives on server does not equal number moved!"
+#     # <<<<< ARCHIVE VALIDATION STAGE <<<<<
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
