@@ -56,10 +56,10 @@ async def test_two_deployment_basic_api(request: pytest.FixtureRequest):
         env_2.setup(lrr_debug_mode=is_lrr_debug_mode, with_api_key=True)
 
         async with (
-            env_1.lrr_client() as lrr_1,
-            env_2.lrr_client() as lrr_2,
+            env_1.lrr_client() as lrr_client_1,
+            env_2.lrr_client() as lrr_client_2,
         ):
-            for lrr in [lrr_1, lrr_2]:
+            for lrr in [lrr_client_1, lrr_client_2]:
                 _, error = await lrr.archive_api.get_all_archives()
                 assert not error, f"Failed to get all archives on address {lrr.lrr_base_url} (status {error.status}): {error.error}"
                 _, error = await lrr.shinobu_api.get_shinobu_status()
