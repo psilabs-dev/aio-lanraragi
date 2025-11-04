@@ -125,6 +125,15 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         dirname = self.resource_prefix + "archives"
         return self.staging_dir / dirname
 
+    @override
+    @property
+    def logs_dir(self) -> Path:
+        """
+        Bind mount for LRR container:/home/koyomi/lanraragi/log.
+        """
+        dirname = self.resource_prefix + "log"
+        return self.staging_dir / dirname
+
     @property
     def thumb_dir(self) -> Path:
         """
@@ -342,6 +351,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         contents_dir = self.archives_dir
         thumb_dir = self.thumb_dir
+        logs_dir = self.logs_dir
         if contents_dir.exists():
             self.logger.debug(f"Contents directory exists: {contents_dir}")
         else:
@@ -352,12 +362,17 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         else:
             self.logger.debug(f"Creating thumb directory: {thumb_dir}")
             thumb_dir.mkdir(parents=True, exist_ok=False)
+        if logs_dir.exists():
+            self.logger.debug(f"Logs directory exists: {logs_dir}")
+        else:
+            self.logger.debug(f"Creating logs dir: {logs_dir}")
+            logs_dir.mkdir(parents=True, exist_ok=False)
 
         # log the setup resource allocations for user to see
         # the docker image is not included, haven't decided how to classify it yet.
         self.logger.info(
             f"Deploying Docker LRR with the following resources: LRR container {self.lrr_container_name}, "
-            f"Redis container {self.redis_container_name}, contents path {contents_dir}, thumb path {thumb_dir}, "
+            f"Redis container {self.redis_container_name}, contents path {contents_dir}, thumb path {thumb_dir}, logs path {logs_dir}, "
             f"redis volume {self.redis_volume_name}, network {self.network_name}"
         )
 
@@ -469,7 +484,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 image_id, hostname=lrr_container_name, name=lrr_container_name, detach=True, network=network_name, ports=lrr_ports, environment=lrr_environment,
                 volumes={
                     str(contents_dir): {"bind": "/home/koyomi/lanraragi/content", "mode": "rw"},
-                    str(thumb_dir): {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"}
+                    str(thumb_dir): {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"},
+                    str(logs_dir): {"bind": "/home/koyomi/lanraragi/log", "mode": "rw"},
                 }
             )
             self.logger.debug("LRR container created.")
@@ -628,8 +644,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         when testing in MacOS where docker is in a VM.
         """
         if remove_data and self.lrr_container:
-            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/content'])
-            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/thumb'])
+            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/content/*'])
+            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/thumb/*'])
+            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/log/*'])
 
         if self.lrr_container:
             self.lrr_container.stop(timeout=1)
@@ -654,6 +671,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if self.thumb_dir.exists():
                 shutil.rmtree(self.thumb_dir)
                 self.logger.debug(f"Removed thumb directory: {self.thumb_dir}")
+            if self.logs_dir.exists():
+                shutil.rmtree(self.logs_dir)
+                self.logger.debug(f"Removed logs directory: {self.logs_dir}")
 
         if hasattr(self, 'network') and self.network:
             self.network.remove()

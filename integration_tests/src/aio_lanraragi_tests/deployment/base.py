@@ -2,7 +2,7 @@ import abc
 import logging
 from pathlib import Path
 import time
-from typing import Optional
+from typing import Literal, Optional
 import aiohttp
 import requests
 
@@ -100,6 +100,13 @@ class AbstractLRRDeploymentContext(abc.ABC):
     def archives_dir(self) -> Path:
         """
         Path to the archives directory.
+        """
+
+    @property
+    @abc.abstractmethod
+    def logs_dir(self) -> Path:
+        """
+        Path to the logs directory.
         """
 
     @abc.abstractmethod
@@ -275,6 +282,13 @@ class AbstractLRRDeploymentContext(abc.ABC):
             for line in log_text.split('\n'):
                 if line.strip():
                     self.logger.log(log_level, f"LRR: {line}")
+
+    def read_log(self, log_file: Literal['lanraragi.log', 'minion.log', 'redis.log', 'shinobu.log']) -> str:
+        """
+        Read a log file from logs directory.
+        """
+        with open(self.logs_dir / log_file, 'r') as f:
+            return f.read()
 
     def lrr_client(
         self, ssl: bool=True, 

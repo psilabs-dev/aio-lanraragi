@@ -194,6 +194,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         redis_dirname = self.resource_prefix + "redis"
         return self.staging_dir / redis_dirname
 
+    @override
     @property
     def thumb_dir(self) -> Path:
         """
@@ -202,6 +203,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         thumb_dirname = self.resource_prefix + "thumb"
         return self.staging_dir / thumb_dirname
 
+    @override
     @property
     def logs_dir(self) -> Path:
         logs_dir = self.resource_prefix + "log"
