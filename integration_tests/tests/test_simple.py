@@ -447,6 +447,9 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
     arcs_delete_sync = response.data[:5]
     arcs_delete_async = response.data[5:50]
     assert len(response.data) == num_archives, "Number of archives on server does not equal number uploaded!"
+
+    # validate number of archives actually in the file system.
+    assert len(list(environment.archives_dir.iterdir())) == num_archives, "Number of archives on disk does not equal number uploaded!"
     # <<<<< VALIDATE UPLOAD COUNT STAGE <<<<<
 
     # >>>>> GET DATABASE BACKUP STAGE >>>>>
@@ -462,7 +465,8 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
         assert not error, f"Failed to delete archive {archive.arcid} with status {error.status} and error: {error.error}"
     response, error = await lanraragi.archive_api.get_all_archives()
     assert not error, f"Failed to get archive data (status {error.status}): {error.error}"
-    assert len(response.data) == 100-5, "Incorrect number of archives in server!"
+    assert len(response.data) == num_archives-5, "Incorrect number of archives in server!"
+    assert len(list(environment.archives_dir.iterdir())) == num_archives-5, "Incorrect number of archives on disk!"
     # <<<<< DELETE ARCHIVE SYNC STAGE <<<<<
 
     # >>>>> DELETE ARCHIVE ASYNC STAGE >>>>>
@@ -474,7 +478,8 @@ async def test_archive_upload(lanraragi: LRRClient, semaphore: asyncio.Semaphore
         assert not error, f"Delete archive failed (status {error.status}): {error.error}"
     response, error = await lanraragi.archive_api.get_all_archives()
     assert not error, f"Failed to get archive data (status {error.status}): {error.error}"
-    assert len(response.data) == 100-50, "Incorrect number of archives in server!"
+    assert len(response.data) == num_archives-50, "Incorrect number of archives in server!"
+    assert len(list(environment.archives_dir.iterdir())) == num_archives-50, "Incorrect number of archives on disk!"
     # <<<<< DELETE ARCHIVE ASYNC STAGE <<<<<
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
