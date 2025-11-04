@@ -211,6 +211,7 @@ async def upload_archive(
                 retry_count += 1
                 continue
             except aiohttp.client_exceptions.ClientConnectorError as client_connector_error:
+                # ClientConnectorError is a subclass of ClientOSError.
                 inner_os_error: OSError = client_connector_error.os_error
                 os_errno: Optional[int] = getattr(inner_os_error, "errno", None)
                 os_winerr: Optional[int] = getattr(inner_os_error, "winerror", None)
@@ -248,7 +249,16 @@ async def upload_archive(
                 await asyncio.sleep(tts)
                 retry_count += 1
                 continue
-
+            except aiohttp.client_exceptions.ClientOSError as client_os_error:
+                # this also happens sometimes.
+                if retry_count >= max_retries:
+                    error = LanraragiErrorResponse(error=str(client_os_error), status=408)
+                    return None, error
+                tts = 2 ** retry_count
+                LOGGER.warning(f"[upload_archive] Encountered client OS error while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})...")
+                await asyncio.sleep(tts)
+                retry_count += 1
+                continue
             # just raise whatever else comes up because we should handle them explicitly anyways
 
 async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[DeleteArchiveResponse, LanraragiErrorResponse]:
