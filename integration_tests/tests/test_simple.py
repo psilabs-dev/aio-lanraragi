@@ -8,19 +8,18 @@ We add a flake tank at the front, and rerun test cases in Windows on flake error
 """
 
 import asyncio
-import errno
 import http
 import logging
 from pathlib import Path
 import sys
 import tempfile
-from typing import Dict, Generator, List, Optional, Set, Tuple
+from typing import Dict, Generator, List, Tuple
+from aio_lanraragi_tests.helpers import upload_archive
 import numpy as np
 import pytest
 import playwright.async_api
 import pytest_asyncio
 import aiohttp
-import aiohttp.client_exceptions
 from urllib.parse import urlparse, parse_qs
 
 from lanraragi.clients.client import LRRClient
@@ -35,7 +34,6 @@ from lanraragi.models.archive import (
     GetArchiveThumbnailRequest,
     UpdateArchiveThumbnailRequest,
     UpdateReadingProgressionRequest,
-    UploadArchiveRequest,
     UploadArchiveResponse,
 )
 from lanraragi.models.base import (
@@ -175,97 +173,6 @@ async def get_bookmark_category_detail(client: LRRClient, semaphore: asyncio.Sem
         response, error = await client.category_api.get_category(GetCategoryRequest(category_id=category_id))
         assert not error, f"Failed to get category (status {error.status}): {error.error}"
         return (response, error)
-
-async def upload_archive(
-    client: LRRClient, save_path: Path, filename: str, semaphore: asyncio.Semaphore, checksum: str=None, title: str=None, tags: str=None,
-    max_retries: int=4
-) -> Tuple[UploadArchiveResponse, LanraragiErrorResponse]:
-    async with semaphore:
-        with open(save_path, 'rb') as f:  # noqa: ASYNC230
-            file = f.read()
-            request = UploadArchiveRequest(file=file, filename=filename, title=title, tags=tags, file_checksum=checksum)
-
-        retry_count = 0
-        while True:
-            try:
-                response, error = await client.archive_api.upload_archive(request)
-                if error:
-                    if error.status == 423: # locked resource
-                        if retry_count >= max_retries:
-                            return None, error
-                        tts = 2 ** retry_count
-                        LOGGER.warning(f"[upload_archive] Locked resource when uploading {filename}. Retrying in {tts}s ({retry_count+1}/{max_retries})...")
-                        await asyncio.sleep(tts)
-                        retry_count += 1
-                        continue
-                    else:
-                        LOGGER.error(f"[upload_archive] Failed to upload {filename} (status: {error.status}): {error.error}")
-                        return None, error
-
-                LOGGER.debug(f"[upload_archive][{response.arcid}][{filename}]")
-                return response, None
-            except asyncio.TimeoutError as timeout_error:
-                # if LRR handles files synchronously then our concurrent uploads may put too much pressure.
-                # employ retry with exponential backoff here as well. This is not considered a server-side
-                # problem.
-                if retry_count >= max_retries:
-                    error = LanraragiErrorResponse(error=str(timeout_error), status=408)
-                    return None, error
-                tts = 2 ** retry_count
-                LOGGER.warning(f"[upload_archive] Encountered timeout exception while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})...")
-                await asyncio.sleep(tts)
-                retry_count += 1
-                continue
-            except aiohttp.client_exceptions.ClientConnectorError as client_connector_error:
-                # ClientConnectorError is a subclass of ClientOSError.
-                inner_os_error: OSError = client_connector_error.os_error
-                os_errno: Optional[int] = getattr(inner_os_error, "errno", None)
-                os_winerr: Optional[int] = getattr(inner_os_error, "winerror", None)
-
-                POSIX_REFUSED: Set[int] = {errno.ECONNREFUSED}
-                if hasattr(errno, "WSAECONNREFUSED"):
-                    POSIX_REFUSED.add(errno.WSAECONNREFUSED)
-                if hasattr(errno, "WSAECONNRESET"):
-                    POSIX_REFUSED.add(errno.WSAECONNRESET)
-
-                # 64: The specified network name is no longer available
-                # 1225: ERROR_CONNECTION_REFUSED
-                # 10054: An existing connection was forcibly closed by the remote host
-                # 10061: WSAECONNREFUSED
-                WIN_REFUSED = {64, 1225, 10054, 10061}
-                is_connection_refused = (
-                    (os_winerr in WIN_REFUSED) or
-                    (os_errno in POSIX_REFUSED) or
-                    isinstance(inner_os_error, ConnectionRefusedError)
-                )
-
-                if not is_connection_refused:
-                    LOGGER.error(f"[upload_archive] Encountered error not related to connection while uploading {filename}: os_errno={os_errno}, os_winerr={os_winerr}")
-                    raise client_connector_error
-
-                if retry_count >= max_retries:
-                    error = LanraragiErrorResponse(error=str(client_connector_error), status=408)
-                    # return None, error
-                    raise client_connector_error
-                tts = 2 ** retry_count
-                LOGGER.warning(
-                    f"[upload_archive] Connection refused while uploading {filename}, retrying in {tts}s "
-                    f"({retry_count+1}/{max_retries}); os_errno={os_errno}; os_winerr={os_winerr}"
-                )
-                await asyncio.sleep(tts)
-                retry_count += 1
-                continue
-            except aiohttp.client_exceptions.ClientOSError as client_os_error:
-                # this also happens sometimes.
-                if retry_count >= max_retries:
-                    error = LanraragiErrorResponse(error=str(client_os_error), status=408)
-                    return None, error
-                tts = 2 ** retry_count
-                LOGGER.warning(f"[upload_archive] Encountered client OS error while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})...")
-                await asyncio.sleep(tts)
-                retry_count += 1
-                continue
-            # just raise whatever else comes up because we should handle them explicitly anyways
 
 async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[DeleteArchiveResponse, LanraragiErrorResponse]:
     retry_count = 0
