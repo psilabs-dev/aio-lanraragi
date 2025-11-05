@@ -131,18 +131,18 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
             if hasattr(item.session, 'lrr_environments') and item.session.lrr_environments:
                 environments_by_prefix: Dict[str, AbstractLRRDeploymentContext] = item.session.lrr_environments
                 for prefix, environment in environments_by_prefix.items():
-                    logger.error(f"\n\n >>>>> LRR LOGS (prefix: \"{prefix}\") >>>>>")
+                    logger.error(f">>>>> LRR LOGS (prefix: \"{prefix}\") >>>>>")
                     lrr_logs = environment.read_log('lanraragi.log')
                     lines = lrr_logs.split('\n')[-100:]
                     for line in lines:
                         logger.error(line)
-                    logger.error(f"<<<<< LRR LOGS (prefix: \"{prefix}\") <<<<<\n\n")
-                    logger.error(f"\n\n >>>>> SHINOBU LOGS (prefix: \"{prefix}\") >>>>>")
+                    logger.error(f"<<<<< LRR LOGS (prefix: \"{prefix}\") <<<<<")
+                    logger.error(f">>>>> SHINOBU LOGS (prefix: \"{prefix}\") >>>>>")
                     shinobu_logs = environment.read_log('shinobu.log')
                     lines = shinobu_logs.split('\n')[-100:]
                     for line in lines:
                         logger.error(line)
-                    logger.error(f"<<<<< SHINOBU LOGS (prefix: \"{prefix}\") <<<<<\n\n")
+                    logger.error(f"<<<<< SHINOBU LOGS (prefix: \"{prefix}\") <<<<<")
             else:
                 logger.info("No environment available.")
         except Exception as e:
