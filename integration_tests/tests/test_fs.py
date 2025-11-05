@@ -1,0 +1,339 @@
+"""
+Filesystem-related integration tests.
+"""
+
+import asyncio
+import errno
+import logging
+import tempfile
+import aiohttp
+import numpy as np
+from pathlib import Path
+import shutil
+import sys
+from typing import Dict, Generator, List, Optional, Set, Tuple
+import pytest
+
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.factory import generate_deployment
+
+from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
+from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
+from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
+from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, TagGenerator, WriteArchiveRequest, WriteArchiveResponse
+from aio_lanraragi_tests.common import compute_upload_checksum
+import pytest_asyncio
+
+from lanraragi.clients.client import LRRClient
+from lanraragi.models.archive import DeleteArchiveRequest, DeleteArchiveResponse, UploadArchiveRequest, UploadArchiveResponse
+from lanraragi.models.base import LanraragiErrorResponse
+
+LOGGER = logging.getLogger(__name__)
+ENABLE_SYNC_FALLBACK = False
+
+@pytest.fixture
+def resource_prefix() -> Generator[str, None, None]:
+    yield "test_"
+
+@pytest.fixture
+def port_offset() -> Generator[int, None, None]:
+    yield 10
+
+@pytest.fixture
+def is_lrr_debug_mode(request: pytest.FixtureRequest) -> Generator[bool, None, None]:
+    yield request.config.getoption("--lrr-debug")
+
+@pytest.fixture
+def environment(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int) -> Generator[AbstractLRRDeploymentContext, None, None]:
+    environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
+    request.session.lrr_environment = environment
+
+    # configure environments to session
+    environments: Dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
+    request.session.lrr_environments = environments
+
+    yield environment
+    environment.teardown(remove_data=True)
+
+@pytest.fixture
+def symlink_archive_dir(environment: AbstractLRRDeploymentContext) -> Generator[Path, None, None]:
+    """
+    Creates symlink for archives dir (which should not be created yet)
+    """
+    archives_dir = environment.archives_dir
+    symlink_dir = environment.staging_dir / (archives_dir.name + "_sym") # e.g. "/archives_sym"
+    symlink_dir.mkdir(parents=True, exist_ok=True)
+    archives_dir.symlink_to(symlink_dir, target_is_directory=True)
+    yield symlink_dir
+
+    try:
+        archives_dir.unlink()
+    except Exception as e:
+        LOGGER.error(f"Unhandled exception when removing archives directory {archives_dir}: ", e)
+
+    try:
+        shutil.rmtree(symlink_dir)
+    except Exception as e:
+        LOGGER.error(f"Unhandled exception when removing symlink directory {symlink_dir}: ", e)
+
+@pytest.fixture
+def npgenerator(request: pytest.FixtureRequest) -> Generator[np.random.Generator, None, None]:
+    seed: int = int(request.config.getoption("npseed"))
+    generator = np.random.default_rng(seed)
+    yield generator
+
+@pytest.fixture
+def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
+    yield asyncio.BoundedSemaphore(value=8)
+
+@pytest_asyncio.fixture
+async def client_session() -> Generator[aiohttp.ClientSession, None, None]:
+    session = aiohttp.ClientSession()
+    yield session
+    await session.close()
+
+async def upload_archive(
+    client: LRRClient, save_path: Path, filename: str, semaphore: asyncio.Semaphore, checksum: str=None, title: str=None, tags: str=None,
+    max_retries: int=4
+) -> Tuple[UploadArchiveResponse, LanraragiErrorResponse]:
+    async with semaphore:
+        with open(save_path, 'rb') as f:  # noqa: ASYNC230
+            file = f.read()
+            request = UploadArchiveRequest(file=file, filename=filename, title=title, tags=tags, file_checksum=checksum)
+
+        retry_count = 0
+        while True:
+            try:
+                response, error = await client.archive_api.upload_archive(request)
+                if error:
+                    if error.status == 423: # locked resource
+                        if retry_count >= max_retries:
+                            return None, error
+                        tts = 2 ** retry_count
+                        LOGGER.warning(f"[upload_archive] Locked resource when uploading {filename}. Retrying in {tts}s ({retry_count+1}/{max_retries})...")
+                        await asyncio.sleep(tts)
+                        retry_count += 1
+                        continue
+                    else:
+                        LOGGER.error(f"[upload_archive] Failed to upload {filename} (status: {error.status}): {error.error}")
+                        return None, error
+
+                LOGGER.debug(f"[upload_archive][{response.arcid}][{filename}]")
+                return response, None
+            except asyncio.TimeoutError as timeout_error:
+                # if LRR handles files synchronously then our concurrent uploads may put too much pressure.
+                # employ retry with exponential backoff here as well. This is not considered a server-side
+                # problem.
+                if retry_count >= max_retries:
+                    error = LanraragiErrorResponse(error=str(timeout_error), status=408)
+                    return None, error
+                tts = 2 ** retry_count
+                LOGGER.warning(f"[upload_archive] Encountered timeout exception while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})...")
+                await asyncio.sleep(tts)
+                retry_count += 1
+                continue
+            except aiohttp.client_exceptions.ClientConnectorError as client_connector_error:
+                # ClientConnectorError is a subclass of ClientOSError.
+                inner_os_error: OSError = client_connector_error.os_error
+                os_errno: Optional[int] = getattr(inner_os_error, "errno", None)
+                os_winerr: Optional[int] = getattr(inner_os_error, "winerror", None)
+
+                POSIX_REFUSED: Set[int] = {errno.ECONNREFUSED}
+                if hasattr(errno, "WSAECONNREFUSED"):
+                    POSIX_REFUSED.add(errno.WSAECONNREFUSED)
+                if hasattr(errno, "WSAECONNRESET"):
+                    POSIX_REFUSED.add(errno.WSAECONNRESET)
+
+                # 64: The specified network name is no longer available
+                # 1225: ERROR_CONNECTION_REFUSED
+                # 10054: An existing connection was forcibly closed by the remote host
+                # 10061: WSAECONNREFUSED
+                WIN_REFUSED = {64, 1225, 10054, 10061}
+                is_connection_refused = (
+                    (os_winerr in WIN_REFUSED) or
+                    (os_errno in POSIX_REFUSED) or
+                    isinstance(inner_os_error, ConnectionRefusedError)
+                )
+
+                if not is_connection_refused:
+                    LOGGER.error(f"[upload_archive] Encountered error not related to connection while uploading {filename}: os_errno={os_errno}, os_winerr={os_winerr}")
+                    raise client_connector_error
+
+                if retry_count >= max_retries:
+                    error = LanraragiErrorResponse(error=str(client_connector_error), status=408)
+                    # return None, error
+                    raise client_connector_error
+                tts = 2 ** retry_count
+                LOGGER.warning(
+                    f"[upload_archive] Connection refused while uploading {filename}, retrying in {tts}s "
+                    f"({retry_count+1}/{max_retries}); os_errno={os_errno}; os_winerr={os_winerr}"
+                )
+                await asyncio.sleep(tts)
+                retry_count += 1
+                continue
+            except aiohttp.client_exceptions.ClientOSError as client_os_error:
+                # this also happens sometimes.
+                if retry_count >= max_retries:
+                    error = LanraragiErrorResponse(error=str(client_os_error), status=408)
+                    return None, error
+                tts = 2 ** retry_count
+                LOGGER.warning(f"[upload_archive] Encountered client OS error while uploading {filename}, retrying in {tts}s ({retry_count+1}/{max_retries})...")
+                await asyncio.sleep(tts)
+                retry_count += 1
+                continue
+            # just raise whatever else comes up because we should handle them explicitly anyways
+
+async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[DeleteArchiveResponse, LanraragiErrorResponse]:
+    retry_count = 0
+    async with semaphore:
+        while True:
+            response, error = await client.archive_api.delete_archive(DeleteArchiveRequest(arcid=arcid))
+            if error and error.status == 423: # locked resource
+                retry_count += 1
+                if retry_count > 10:
+                    return response, error
+                tts = 2 ** retry_count
+                LOGGER.debug(f"[delete_archive][{arcid}] locked resource error; retrying in {tts}s.")
+                await asyncio.sleep(tts)
+                continue
+            return response, error
+
+def pmf(t: float) -> float:
+    return 2 ** (-t * 100)
+
+def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Generator) -> List[WriteArchiveResponse]:
+    requests = []
+    responses = []
+    for archive_id in range(num_archives):
+        create_page_requests = []
+        archive_name = f"archive-{str(archive_id+1).zfill(len(str(num_archives)))}"
+        filename = f"{archive_name}.zip"
+        save_path = work_dir / filename
+        num_pages = np_generator.integers(10, 20)
+        for page_id in range(num_pages):
+            page_text = f"{archive_name}-pg-{str(page_id+1).zfill(len(str(num_pages)))}"
+            page_filename = f"{page_text}.png"
+            create_page_request = CreatePageRequest(1080, 1920, page_filename, image_format='PNG', text=page_text)
+            create_page_requests.append(create_page_request)        
+        requests.append(WriteArchiveRequest(create_page_requests, save_path, ArchivalStrategyEnum.ZIP))
+    responses = write_archives_to_disk(requests)
+    return responses
+
+async def upload_archives(
+    write_responses: List[WriteArchiveResponse], tag_generators: List[TagGenerator],
+    npgenerator: np.random.Generator, semaphore: asyncio.Semaphore, lrr_client: LRRClient
+) -> List[UploadArchiveResponse]:
+    responses: List[UploadArchiveResponse] = []
+    if ENABLE_SYNC_FALLBACK:
+        for i, _response in enumerate(write_responses):
+            title = f"Archive {i}"
+            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
+            checksum = compute_upload_checksum(_response.save_path)
+            response, error = await upload_archive(lrr_client, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+            responses.append(response)
+        return responses
+    else: 
+        tasks = []
+        for i, _response in enumerate(write_responses):
+            title = f"Archive {i}"
+            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
+            checksum = compute_upload_checksum(_response.save_path)
+            tasks.append(asyncio.create_task(
+                upload_archive(lrr_client, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            ))
+        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        for response, error in gathered:
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+            responses.append(response)
+        return responses
+
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
+@pytest.mark.asyncio
+async def test_archive_upload_to_symlinked_dir(
+    symlink_archive_dir: Path, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, is_lrr_debug_mode: bool,
+    environment: AbstractLRRDeploymentContext, client_session: aiohttp.ClientSession
+):
+    """
+    Tests archive uploads into a symlink directory. Similar to test_simple.py::test_archive_upload
+    """
+    assert environment.archives_dir.is_symlink(), "Archives directory is not symbolic link!"
+    num_archives = 100
+
+    # start up server.
+    environment.setup(with_api_key=True, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
+    lrr_client = environment.lrr_client(client_session=client_session)
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+
+    LOGGER.debug("Established connection with test LRR server.")
+    # verify we are working with a new server.
+    response, error = await lrr_client.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+    assert len(response.data) == 0, "Server contains archives!"
+    del response, error
+    assert not any(symlink_archive_dir.iterdir()), "Archive directory is not empty!"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    tag_generators = create_tag_generators(100, pmf)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        LOGGER.debug(f"Creating {num_archives} archives to upload.")
+        write_responses = save_archives(num_archives, tmpdir, npgenerator)
+        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+
+        # archive metadata
+        LOGGER.debug("Uploading archives to server.")
+        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lrr_client)
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> VALIDATE UPLOAD COUNT STAGE >>>>>
+    LOGGER.debug("Validating upload counts.")
+    response, error = await lrr_client.archive_api.get_all_archives()
+    assert not error, f"Failed to get archive data (status {error.status}): {error.error}"
+
+    # get this data for archive deletion.
+    arcs_delete_sync = response.data[:5]
+    arcs_delete_async = response.data[5:50]
+    assert len(response.data) == num_archives, "Number of archives on server does not equal number uploaded!"
+
+    # validate number of archives actually in the file system.
+    assert len(list(symlink_archive_dir.iterdir())) == num_archives, "Number of archives on disk does not equal number uploaded!"
+    # <<<<< VALIDATE UPLOAD COUNT STAGE <<<<<
+
+    # >>>>> GET DATABASE BACKUP STAGE >>>>>
+    response, error = await lrr_client.database_api.get_database_backup()
+    assert not error, f"Failed to get database backup (status {error.status}): {error.error}"
+    assert len(response.archives) == num_archives, "Number of archives in database backup does not equal number uploaded!"
+    del response, error
+    # <<<<< GET DATABASE BACKUP STAGE <<<<<
+
+    # >>>>> DELETE ARCHIVE SYNC STAGE >>>>>
+    for archive in arcs_delete_sync:
+        response, error = await lrr_client.archive_api.delete_archive(DeleteArchiveRequest(arcid=archive.arcid))
+        assert not error, f"Failed to delete archive {archive.arcid} with status {error.status} and error: {error.error}"
+    response, error = await lrr_client.archive_api.get_all_archives()
+    assert not error, f"Failed to get archive data (status {error.status}): {error.error}"
+    assert len(response.data) == num_archives-5, "Incorrect number of archives in server!"
+    assert len(list(symlink_archive_dir.iterdir())) == num_archives-5, "Incorrect number of archives on disk!"
+    # <<<<< DELETE ARCHIVE SYNC STAGE <<<<<
+
+    # >>>>> DELETE ARCHIVE ASYNC STAGE >>>>>
+    tasks = []
+    for archive in arcs_delete_async:
+        tasks.append(asyncio.create_task(delete_archive(lrr_client, archive.arcid, semaphore)))
+    gathered: List[Tuple[DeleteArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+    for response, error in gathered:
+        assert not error, f"Delete archive failed (status {error.status}): {error.error}"
+    response, error = await lrr_client.archive_api.get_all_archives()
+    assert not error, f"Failed to get archive data (status {error.status}): {error.error}"
+    assert len(response.data) == num_archives-50, "Incorrect number of archives in server!"
+    assert len(list(symlink_archive_dir.iterdir())) == num_archives-50, "Incorrect number of archives on disk!"
+    # <<<<< DELETE ARCHIVE ASYNC STAGE <<<<<
+
+    # # no error logs
+    # # TODO: there are error logs (tankoubon missing archive ID)
+    # expect_no_error_logs(environment)
