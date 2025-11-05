@@ -229,38 +229,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.is_allow_uploads = is_allow_uploads
         self._is_force_build = is_force_build
 
-    @override
-    def update_api_key(self, api_key: Optional[str]):
-        self.lrr_api_key = api_key
-        if api_key is None:
-            return self._exec_redis_cli("SELECT 2\nHDEL LRR_CONFIG apikey")
-        else:
-            return self._exec_redis_cli(f"SELECT 2\nHSET LRR_CONFIG apikey {api_key}")
-
-    @override
-    def enable_nofun_mode(self):
-        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG nofunmode 1")
-
-    @override
-    def disable_nofun_mode(self):
-        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG nofunmode 0")
-
-    @override
-    def enable_lrr_debug_mode(self):
-        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG enable_devmode 1")
-    
-    @override
-    def disable_lrr_debug_mode(self):
-        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG enable_devmode 0")
-
-    @override
-    def enable_cors(self):
-        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG enablecors 1")
-
-    @override
-    def disable_cors(self):
-        return self._exec_redis_cli("SELECT 2\nHSET LRR_CONFIG enablecors 0")
-
     def allow_writable_thumb(self):
         """
         Try to give koyomi the thumb directory.
@@ -285,7 +253,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     
     @override
     def start_redis(self):
-        return self.redis_container.start()
+        resp = self.redis_container.start()
+        return resp
 
     @override
     def stop_lrr(self, timeout: int=10):
@@ -489,32 +458,21 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         # start redis
         self.logger.debug(f"Starting container: {self.redis_container_name}")
-        self.redis_container.start()
+        self.start_redis()
+        self.test_redis_connection()
         self.logger.debug("Redis container started.")
         self.logger.debug("Running Redis post-startup configuration.")
         if with_api_key:
-            resp = self.update_api_key(DEFAULT_API_KEY)
-            if resp.exit_code != 0:
-                raise DeploymentException(f"Failed to add API key to server: {resp}")
-
+            self.update_api_key(DEFAULT_API_KEY)
         if with_nofunmode:
-            resp = self.enable_nofun_mode()
-            if resp.exit_code != 0:
-                raise DeploymentException(f"Failed to enable nofunmode: {resp}")
-
+            self.enable_nofun_mode()
         if lrr_debug_mode:
-            resp = self.enable_lrr_debug_mode()
-            if resp.exit_code  != 0:
-                raise DeploymentException(f"Failed to enable debug mode for LRR: {resp}")
+            self.enable_lrr_debug_mode()
         if enable_cors:
-            resp = self.enable_cors()
-            if resp.exit_code != 0:
-                raise DeploymentException(f"Failed to enable CORS: {resp}")
+            self.enable_cors()
         else:
-            resp = self.disable_cors()
-            if resp.exit_code != 0:
-                raise DeploymentException(f"Failed to disable CORS: {resp}")
-        self.logger.debug("Redis server is ready.")
+            self.disable_cors()
+        self.logger.debug("Redis post-connect configuration complete.")
 
         # start lrr
         self.start_lrr()

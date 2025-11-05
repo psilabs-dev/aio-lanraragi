@@ -286,45 +286,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger = logger
 
     @override
-    def update_api_key(self, api_key: Optional[str]):
-        self.lrr_api_key = api_key
-        self.redis_client.select(2)
-        if api_key is None:
-            self.redis_client.hdel("LRR_CONFIG", "apikey")
-        else:
-            self.redis_client.hset("LRR_CONFIG", "apikey", api_key)
-
-    @override
-    def enable_nofun_mode(self):
-        self.redis_client.select(2)
-        self.redis_client.hset("LRR_CONFIG", "nofunmode", "1")
-
-    @override
-    def disable_nofun_mode(self):
-        self.redis_client.select(2)
-        self.redis_client.hset("LRR_CONFIG", "nofunmode", "0")
-
-    @override
-    def enable_lrr_debug_mode(self):
-        self.redis_client.select(2)
-        self.redis_client.hset("LRR_CONFIG", "enable_devmode", "1")
-
-    @override
-    def disable_lrr_debug_mode(self):
-        self.redis_client.select(2)
-        self.redis_client.hset("LRR_CONFIG", "enable_devmode", "0")
-
-    @override
-    def enable_cors(self):
-        self.redis_client.select(2)
-        self.redis_client.hset("LRR_CONFIG", "enablecors", "1")
-
-    @override
-    def disable_cors(self):
-        self.redis_client.select(2)
-        self.redis_client.hset("LRR_CONFIG", "enablecors", "0")
-
-    @override
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
         test_connection_max_retries: int=4
@@ -405,11 +366,11 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         # the LRR process, so we will always recreate it.
         if is_port_available(redis_port):
             self.start_redis()
-            self._test_redis_connection()
+            self.test_redis_connection()
             self.logger.debug(f"Redis service is established on port {redis_port}.")
         else:
             # TODO: this throws an exception if not redis on port or redis broken
-            self._test_redis_connection()
+            self.test_redis_connection()
             self.logger.debug(f"Running Redis service confirmed on port {redis_port}, skipping startup.")
         if with_api_key:
             self.update_api_key(DEFAULT_API_KEY)
@@ -448,11 +409,11 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         redis_port = self.redis_port
         if is_port_available(redis_port):
             self.start_redis()
-            self._test_redis_connection()
+            self.test_redis_connection()
             self.logger.debug(f"Redis service is established on port {redis_port}.")
         else:
             # TODO: this throws an exception if not redis on port or redis broken
-            self._test_redis_connection()
+            self.test_redis_connection()
             self.logger.debug(f"Running Redis service confirmed on port {redis_port}, skipping startup.")
         self.logger.debug("Started Redis.")
 
@@ -722,21 +683,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 normalized_lines = [line.replace(b'\r\n', b'\n') for line in lines]
                 return b''.join(normalized_lines[-tail:])
         return b"No LRR logs available."
-
-    def _test_redis_connection(self, max_retries: int=4):
-        self.logger.debug("Connecting to Redis...")
-        retry_count = 0
-        while True:
-            try:
-                self.redis_client.ping()
-                break
-            except redis.exceptions.ConnectionError:
-                if retry_count >= max_retries:
-                    raise
-                time_to_sleep = 2 ** (retry_count + 1)
-                self.logger.warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
-                retry_count += 1
-                time.sleep(time_to_sleep)
 
     # TODO: I hope we don't have to use this.
     def _kill_lrr_perl_processes_by_path(self):

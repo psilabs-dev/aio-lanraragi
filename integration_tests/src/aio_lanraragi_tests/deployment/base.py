@@ -4,6 +4,7 @@ from pathlib import Path
 import time
 from typing import Optional
 import aiohttp
+import redis
 import requests
 
 from lanraragi.clients.client import LRRClient
@@ -158,45 +159,14 @@ class AbstractLRRDeploymentContext(abc.ABC):
     def shinobu_logs_path(self) -> Path:
         return self.logs_dir / "shinobu.log"
 
-    @abc.abstractmethod
-    def update_api_key(self, api_key: Optional[str]):
+    @property
+    def redis_client(self) -> redis.Redis:
         """
-        Add an API key to the LRR environment.
-
-        Args:
-            `api_key`: API key to add to redis. If set to None, will remove it from the database.
+        Redis client for this LRR deployment
         """
-        ...
-
-    @abc.abstractmethod
-    def enable_nofun_mode(self):
-        ...
-
-    @abc.abstractmethod
-    def disable_nofun_mode(self):
-        ...
-
-    @abc.abstractmethod
-    def enable_lrr_debug_mode(self):
-        ...
-    
-    @abc.abstractmethod
-    def disable_lrr_debug_mode(self):
-        ...
-
-    @abc.abstractmethod
-    def enable_cors(self):
-        """
-        Enable CORS for the LRR instance by updating configuration.
-        """
-        ...
-
-    @abc.abstractmethod
-    def disable_cors(self):
-        """
-        Disable CORS for the LRR instance by updating configuration.
-        """
-        ...
+        if not hasattr(self, "_redis_client") or not self._redis_client:
+            self._redis_client = redis.Redis(host="127.0.0.1", port=self.redis_port, decode_responses=True)
+        return self._redis_client
 
     @abc.abstractmethod
     def setup(
@@ -281,6 +251,59 @@ class AbstractLRRDeploymentContext(abc.ABC):
             `tail`: max number of lines to keep from last line.
         """
 
+    def update_api_key(self, api_key: Optional[str]):
+        """
+        Insert/update LRR API key (or remove if None is passed).
+        """
+        self.lrr_api_key = api_key
+        self.redis_client.select(2)
+        if api_key is None:
+            self.redis_client.hdel("LRR_CONFIG", "apikey")
+        else:
+            self.redis_client.hset("LRR_CONFIG", "apikey", api_key)
+
+    def enable_nofun_mode(self):
+        """
+        Enable nofun mode.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "nofunmode", "1")
+
+    def disable_nofun_mode(self):
+        """
+        Disable nofun mode.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "nofunmode", "0")
+
+    def enable_lrr_debug_mode(self):
+        """
+        Enable debug logs.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "enable_devmode", "1")
+
+    def disable_lrr_debug_mode(self):
+        """
+        Disable debug logs.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "enable_devmode", "0")
+
+    def enable_cors(self):
+        """
+        Enable CORS.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "enablecors", "1")
+
+    def disable_cors(self):
+        """
+        Disable CORS.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "enablecors", "0")
+
     def test_lrr_connection(self, port: int, test_connection_max_retries: int=4):
         """
         Test the LRR connection with retry and exponential backoff.
@@ -316,6 +339,21 @@ class AbstractLRRDeploymentContext(abc.ABC):
                     self.display_lrr_logs()
                     self.teardown(remove_data=True)
                     raise DeploymentException("Failed to connect to the LRR server!")
+
+    def test_redis_connection(self, max_retries: int=4):
+        self.logger.debug("Connecting to Redis...")
+        retry_count = 0
+        while True:
+            try:
+                self.redis_client.ping()
+                break
+            except redis.exceptions.ConnectionError:
+                if retry_count >= max_retries:
+                    raise
+                time_to_sleep = 2 ** (retry_count + 1)
+                self.logger.warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
+                retry_count += 1
+                time.sleep(time_to_sleep)
 
     def display_lrr_logs(self, tail: int=100, log_level: int=logging.ERROR):
         """
