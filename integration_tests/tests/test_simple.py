@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 import sys
 import tempfile
-from typing import Generator, List, Optional, Set, Tuple
+from typing import Dict, Generator, List, Optional, Set, Tuple
 import numpy as np
 import pytest
 import playwright.async_api
@@ -105,7 +105,11 @@ def environment(request: pytest.FixtureRequest, port_offset: int, resource_prefi
     is_lrr_debug_mode: bool = request.config.getoption("--lrr-debug")
     environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
     environment.setup(with_api_key=True, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
-    request.session.lrr_environment = environment
+
+    # configure environments to session
+    environments: Dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
+    request.session.lrr_environments = environments
+
     yield environment
     environment.teardown(remove_data=True)
 

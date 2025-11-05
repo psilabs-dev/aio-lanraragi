@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 import time
-from typing import Any, List
+from typing import Any, Dict, List
 import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
@@ -128,12 +128,13 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
         else:
             logger.error(f"Test failed: dumping logs... ({item.nodeid})")
         try:
-            if hasattr(item.session, 'lrr_environment') and isinstance(item.session.lrr_environment, AbstractLRRDeploymentContext):
-                environment = item.session.lrr_environment
-                logger.error("\n\n >>>>> LRR LOGS >>>>>")
-                environment.display_lrr_logs()
-                logger.error("<<<<< LRR LOGS <<<<<\n\n")
+            if hasattr(item.session, 'lrr_environments') and item.session.lrr_environments:
+                environments_by_prefix: Dict[str, AbstractLRRDeploymentContext] = item.session.lrr_environments
+                for prefix, environment in environments_by_prefix.items():
+                    logger.error(f"\n\n >>>>> LRR LOGS (prefix: \"{prefix}\") >>>>>")
+                    environment.display_lrr_logs()
+                    logger.error(f"<<<<< LRR LOGS (prefix: \"{prefix}\") <<<<<\n\n")
             else:
-                logger.warning("LRR environment not available in session for failure debugging")
+                logger.info("No environment available.")
         except Exception as e:
             logger.error(f"Failed to dump failure info: {e}")

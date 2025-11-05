@@ -2,7 +2,7 @@ import asyncio
 import logging
 import aiohttp
 import numpy as np
-from typing import Generator, List
+from typing import Dict, Generator, List
 import playwright.async_api
 from pydantic import BaseModel, Field
 import pytest
@@ -39,6 +39,11 @@ def is_lrr_debug_mode(request: pytest.FixtureRequest) -> Generator[bool, None, N
 def environment(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int) -> Generator[AbstractLRRDeploymentContext, None, None]:
     environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
     request.session.lrr_environment = environment
+
+    # configure environments to session
+    environments: Dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
+    request.session.lrr_environments = environments
+
     yield environment
     environment.teardown(remove_data=True)
 
