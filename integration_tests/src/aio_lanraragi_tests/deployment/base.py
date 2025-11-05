@@ -312,6 +312,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
     def display_lrr_logs(self, tail: int=100, log_level: int=logging.ERROR):
         """
         Display LRR logs to (error) output, used for debugging.
+        This is still used by containers, in case log files do not exist.
 
         Args:
             tail: show up to how many lines from the last output
