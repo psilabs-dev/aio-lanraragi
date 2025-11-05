@@ -603,7 +603,7 @@ async def test_archive_read(lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_category(lrr_client: LRRClient):
+async def test_category(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Runs sanity tests against the category and bookmark link API.
 
