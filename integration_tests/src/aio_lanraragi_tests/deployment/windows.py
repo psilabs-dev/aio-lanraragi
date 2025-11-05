@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 import ctypes
 import redis
-import redis.exceptions
 import shutil
 import subprocess
 import time
