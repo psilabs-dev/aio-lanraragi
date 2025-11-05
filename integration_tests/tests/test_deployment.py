@@ -1,13 +1,23 @@
 import logging
 from typing import Dict
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 import pytest
 
 from aio_lanraragi_tests.common import is_port_available
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.log_parse import parse_lrr_logs
 
 LOGGER = logging.getLogger(__name__)
+
+def expect_no_error_logs(environment: AbstractLRRDeploymentContext):
+    """
+    Expect no error severity logs.
+    """
+    for event in parse_lrr_logs(environment.read_log(environment.lanraragi_logs_path)):
+        assert event.severity_level != 'error', "LANraragi process emitted error logs."
+    for event in parse_lrr_logs(environment.read_log(environment.shinobu_logs_path)):
+        assert event.severity_level != 'error', "Shinobu process emitted error logs."
 
 def test_two_deployment_toggling(request: pytest.FixtureRequest):
     """
@@ -49,6 +59,10 @@ def test_two_deployment_toggling(request: pytest.FixtureRequest):
 
         env_1.start()
         assert not is_port_available(env_1.lrr_port), f"Port {env_1.lrr_port} should not be available!"
+
+        # check logs for errors
+        expect_no_error_logs(env_1)
+        expect_no_error_logs(env_2)
     finally:
         env_1.teardown(remove_data=True)
         env_2.teardown(remove_data=True)
@@ -77,6 +91,9 @@ async def test_two_deployment_basic_api(request: pytest.FixtureRequest):
                 _, error = await lrr.shinobu_api.get_shinobu_status()
                 assert not error, f"Failed to get shinobu status on address {lrr.lrr_base_url} (status {error.status}): {error.error}"
 
+        # check logs for errors
+        expect_no_error_logs(env_1)
+        expect_no_error_logs(env_2)
     finally:
         env_1.teardown(remove_data=True)
         env_2.teardown(remove_data=True)

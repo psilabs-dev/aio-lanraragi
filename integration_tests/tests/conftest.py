@@ -132,13 +132,13 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
                 environments_by_prefix: Dict[str, AbstractLRRDeploymentContext] = item.session.lrr_environments
                 for prefix, environment in environments_by_prefix.items():
                     logger.error(f">>>>> LRR LOGS (prefix: \"{prefix}\") >>>>>")
-                    lrr_logs = environment.read_log('lanraragi.log')
+                    lrr_logs = environment.read_log(environment.lanraragi_logs_path)
                     lines = lrr_logs.split('\n')[-100:]
                     for line in lines:
                         logger.error(line)
                     logger.error(f"<<<<< LRR LOGS (prefix: \"{prefix}\") <<<<<")
                     logger.error(f">>>>> SHINOBU LOGS (prefix: \"{prefix}\") >>>>>")
-                    shinobu_logs = environment.read_log('shinobu.log')
+                    shinobu_logs = environment.read_log(environment.shinobu_logs_path)
                     lines = shinobu_logs.split('\n')[-100:]
                     for line in lines:
                         logger.error(line)

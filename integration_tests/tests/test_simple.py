@@ -89,6 +89,7 @@ from aio_lanraragi_tests.archive_generation.models import (
 )
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
+from aio_lanraragi_tests.log_parse import parse_lrr_logs
 
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False # for debugging.
@@ -376,6 +377,15 @@ async def upload_archives(
             responses.append(response)
         return responses
 
+def expect_no_error_logs(environment: AbstractLRRDeploymentContext):
+    """
+    Expect no error severity logs.
+    """
+    for event in parse_lrr_logs(environment.read_log(environment.lanraragi_logs_path)):
+        assert event.severity_level != 'error', "LANraragi process emitted error logs."
+    for event in parse_lrr_logs(environment.read_log(environment.shinobu_logs_path)):
+        assert event.severity_level != 'error', "Shinobu process emitted error logs."
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Cache priming required only for flaky Windows testing environments.")
 @pytest.mark.asyncio
 @pytest.mark.xfail
@@ -414,6 +424,9 @@ async def test_xfail_catch_flakes(lrr_client: LRRClient, semaphore: asyncio.Sema
         LOGGER.debug("Uploading archives to server.")
         await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lrr_client)
     # <<<<< UPLOAD STAGE <<<<<
+
+    # no error logs
+    expect_no_error_logs(environment)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -496,6 +509,9 @@ async def test_archive_upload(lrr_client: LRRClient, semaphore: asyncio.Semaphor
     assert len(response.data) == num_archives-50, "Incorrect number of archives in server!"
     assert len(list(environment.archives_dir.iterdir())) == num_archives-50, "Incorrect number of archives on disk!"
     # <<<<< DELETE ARCHIVE ASYNC STAGE <<<<<
+
+    # no error logs
+    expect_no_error_logs(environment)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -581,6 +597,9 @@ async def test_archive_read(lrr_client: LRRClient, semaphore: asyncio.Semaphore,
     for response, error in results:
         assert not error, f"Failed to complete task (status {error.status}): {error.error}"
     # <<<<< SIMULATE READ ARCHIVE STAGE <<<<<
+
+    # no error logs
+    expect_no_error_logs(environment)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -678,6 +697,9 @@ async def test_category(lrr_client: LRRClient):
     assert not response.category_id, "Deleting a category linked to bookmark should unlink bookmark!"
     del response, error
     # <<<<< UNLINK BOOKMARK <<<<<
+
+    # no error logs
+    expect_no_error_logs(environment)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -837,6 +859,9 @@ async def test_archive_category_interaction(lrr_client: LRRClient, semaphore: as
     del resp_cleared, err_cleared
     # <<<<< VERIFY ARCHIVE CATEGORY MEMBERSHIP CLEARED VIA ARCHIVE API <<<<<
 
+    # no error logs
+    expect_no_error_logs(environment)
+
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_search_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
@@ -906,9 +931,12 @@ async def test_search_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, n
     del response, error
     # <<<<< DISCARD SEARCH CACHE STAGE <<<<<
 
+    # no error logs
+    expect_no_error_logs(environment)
+
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_shinobu_api(lrr_client: LRRClient):
+async def test_shinobu_api(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Very basic functional test of Shinobu API. Does not test concurrent API calls against shinobu.
     """
@@ -968,6 +996,9 @@ async def test_shinobu_api(lrr_client: LRRClient):
     del response, error
     # <<<<< GET SHINOBU STATUS STAGE <<<<<
 
+    # no error logs
+    expect_no_error_logs(environment)
+
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_database_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
@@ -1009,9 +1040,12 @@ async def test_database_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore,
     del response, error
     # <<<<< CLEAN DATABASE STAGE <<<<<
 
+    # no error logs
+    expect_no_error_logs(environment)
+
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_drop_database(lrr_client: LRRClient):
+async def test_drop_database(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test drop database API by dropping database and verifying that client has no permissions.
     """
@@ -1031,6 +1065,9 @@ async def test_drop_database(lrr_client: LRRClient):
     response, error = await lrr_client.shinobu_api.get_shinobu_status()
     assert error and error.status == 401, f"Expected no permissions, got status {error.status}."
     # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # no error logs
+    expect_no_error_logs(environment)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -1125,6 +1162,9 @@ async def test_tankoubon_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore
     del response, error
     # <<<<< DELETE TANKOUBON STAGE <<<<<
 
+    # no error logs
+    expect_no_error_logs(environment)
+
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_misc_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
@@ -1184,6 +1224,9 @@ async def test_misc_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npg
     del response, error
     # <<<<< REGENERATE THUMBNAILS STAGE <<<<<
 
+    # no error logs
+    expect_no_error_logs(environment)
+
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_minion_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
@@ -1232,9 +1275,12 @@ async def test_minion_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, n
     del response, error
     # <<<<< GET MINION JOB DETAILS STAGE <<<<<
 
+    # no error logs
+    expect_no_error_logs(environment)
+
 @pytest.mark.asyncio
 @pytest.mark.experimental
-async def test_openapi_invalid_request(lrr_client: LRRClient):
+async def test_openapi_invalid_request(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Verify that OpenAPI request validation works.
     """
@@ -1245,6 +1291,9 @@ async def test_openapi_invalid_request(lrr_client: LRRClient):
     )
     assert status == 400, f"Expected bad request status from malformed arcid, got {status}"
     assert "String is too short" in content, f"Expected \"String is too short\" in response, got: {content}"
+
+    # no error logs
+    expect_no_error_logs(environment)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio

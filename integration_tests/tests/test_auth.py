@@ -12,6 +12,7 @@ from lanraragi.clients.client import LRRClient
 
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.log_parse import parse_lrr_logs
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE, LRR_LOGIN_TITLE
 
 LOGGER = logging.getLogger(__name__)
@@ -22,6 +23,15 @@ class ApiAuthMatrixParams(BaseModel):
     is_api_key_configured_server: bool
     is_api_key_configured_client: bool
     is_matching_api_key: bool = Field(..., description="Set to False if not is_api_key_configured_server or not is_api_key_configured_client")
+
+def expect_no_error_logs(environment: AbstractLRRDeploymentContext):
+    """
+    Expect no error severity logs.
+    """
+    for event in parse_lrr_logs(environment.read_log(environment.lanraragi_logs_path)):
+        assert event.severity_level != 'error', "LANraragi process emitted error logs."
+    for event in parse_lrr_logs(environment.read_log(environment.shinobu_logs_path)):
+        assert event.severity_level != 'error', "Shinobu process emitted error logs."
 
 @pytest.fixture
 def resource_prefix() -> Generator[str, None, None]:
@@ -72,7 +82,7 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) -> Generator[LRR
 
 async def sample_test_api_auth_matrix(
     is_nofunmode: bool, is_api_key_configured_server: bool, is_api_key_configured_client: bool,
-    is_matching_api_key: bool, deployment_context: AbstractLRRDeploymentContext, lrr_client: LRRClient
+    is_matching_api_key: bool, environment: AbstractLRRDeploymentContext, lrr_client: LRRClient
 ):
     # sanity check.
     if is_matching_api_key and ((not is_api_key_configured_client) or (not is_api_key_configured_server)):
@@ -80,13 +90,13 @@ async def sample_test_api_auth_matrix(
 
     # configuration stage.
     if is_nofunmode:
-        deployment_context.enable_nofun_mode()
+        environment.enable_nofun_mode()
     else:
-        deployment_context.disable_nofun_mode()
+        environment.disable_nofun_mode()
     if is_api_key_configured_server:
-        deployment_context.update_api_key(DEFAULT_API_KEY)
+        environment.update_api_key(DEFAULT_API_KEY)
     else:
-        deployment_context.update_api_key(None)
+        environment.update_api_key(None)
     if is_api_key_configured_client:
         if is_matching_api_key:
             lrr_client.update_api_key(DEFAULT_API_KEY)
@@ -113,7 +123,7 @@ async def sample_test_api_auth_matrix(
             return require_valid_api_key
 
     # apply configurations
-    deployment_context.restart()
+    environment.restart()
 
     # test public endpoint.
     endpoint_is_public = True
@@ -157,6 +167,9 @@ async def sample_test_api_auth_matrix(
         assert await page.title() == expected_title
         await browser.close()
 
+    # check logs for errors
+    expect_no_error_logs(environment)
+
 @pytest.mark.asyncio
 @pytest.mark.playwright
 async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient):
@@ -177,6 +190,9 @@ async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploym
         await page.click("input[type='submit'][value='Login']")
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_INDEX_TITLE
+
+    # check logs for errors
+    expect_no_error_logs(environment)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -199,6 +215,9 @@ async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploym
         assert "Wrong Password." in await page.content()
         assert await page.title() == LRR_LOGIN_TITLE
 
+    # check logs for errors
+    expect_no_error_logs(environment)
+
 @pytest.mark.asyncio
 @pytest.mark.playwright
 async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient):
@@ -220,6 +239,9 @@ async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploym
         await page.wait_for_load_state("networkidle")
         assert "Wrong Password." in await page.content()
         assert await page.title() == LRR_LOGIN_TITLE
+
+    # check logs for errors
+    expect_no_error_logs(environment)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -271,6 +293,9 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
         await page.goto(lrr_client.lrr_base_url)
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_LOGIN_TITLE
+
+    # check logs for errors
+    expect_no_error_logs(environment)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -352,6 +377,9 @@ async def test_disable_cors_preflight(environment: AbstractLRRDeploymentContext,
         assert "Access-Control-Allow-Methods" not in headers, "Allowed methods not present in headers when CORS is enabled."
         assert "Access-Control-Allow-Origin" not in headers, "Allowed origin not present in headers when CORS is enabled."
 
+    # check logs for errors
+    expect_no_error_logs(environment)
+
 @pytest.mark.asyncio
 async def test_enable_cors_preflight(environment: AbstractLRRDeploymentContext, lrr_client: LRRClient, is_lrr_debug_mode: bool):
     """
@@ -379,3 +407,6 @@ async def test_enable_cors_preflight(environment: AbstractLRRDeploymentContext, 
         expected_allowed_origin = "*"
         actual_allowed_origin = headers["Access-Control-Allow-Origin"].strip()
         assert actual_allowed_origin == expected_allowed_origin, "CORS allowed origin does not match."
+
+    # check logs for errors
+    expect_no_error_logs(environment)
