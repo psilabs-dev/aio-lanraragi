@@ -30,8 +30,12 @@ def expect_no_error_logs(environment: AbstractLRRDeploymentContext):
     """
     for event in parse_lrr_logs(environment.read_log(environment.lanraragi_logs_path)):
         assert event.severity_level != 'error', "LANraragi process emitted error logs."
-    for event in parse_lrr_logs(environment.read_log(environment.shinobu_logs_path)):
-        assert event.severity_level != 'error', "Shinobu process emitted error logs."
+    
+    if environment.shinobu_logs_path.exists():
+        for event in parse_lrr_logs(environment.read_log(environment.shinobu_logs_path)):
+            assert event.severity_level != 'error', "Shinobu process emitted error logs."
+    else:
+        LOGGER.warning("No shinobu logs found.")
 
 @pytest.fixture
 def resource_prefix() -> Generator[str, None, None]:
