@@ -1,3 +1,4 @@
+import aiofiles
 import asyncio
 import errno
 import logging
@@ -26,8 +27,8 @@ async def upload_archive(
     """
 
     async with semaphore:
-        with open(save_path, 'rb') as f:  # noqa: ASYNC230
-            file = f.read()
+        async with aiofiles.open(save_path, 'rb') as f:
+            file = await f.read()
             request = UploadArchiveRequest(file=file, filename=filename, title=title, tags=tags, file_checksum=checksum)
 
         retry_count = 0
