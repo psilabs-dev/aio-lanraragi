@@ -3,25 +3,12 @@ from typing import Dict
 import pytest
 
 from aio_lanraragi_tests.common import is_port_available
+from aio_lanraragi_tests.helpers import expect_no_error_logs
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.log_parse import parse_lrr_logs
 
 LOGGER = logging.getLogger(__name__)
-
-def expect_no_error_logs(environment: AbstractLRRDeploymentContext):
-    """
-    Expect no error severity logs.
-    """
-    for event in parse_lrr_logs(environment.read_log(environment.lanraragi_logs_path)):
-        assert event.severity_level != 'error', "LANraragi process emitted error logs."
-    
-    if environment.shinobu_logs_path.exists():
-        for event in parse_lrr_logs(environment.read_log(environment.shinobu_logs_path)):
-            assert event.severity_level != 'error', "Shinobu process emitted error logs."
-    else:
-        LOGGER.warning("No shinobu logs found.")
 
 def test_two_deployment_toggling(request: pytest.FixtureRequest):
     """

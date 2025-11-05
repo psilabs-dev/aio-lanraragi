@@ -10,10 +10,10 @@ import pytest_asyncio
 
 from lanraragi.clients.client import LRRClient
 
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE, LRR_LOGIN_TITLE
+from aio_lanraragi_tests.helpers import expect_no_error_logs
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.log_parse import parse_lrr_logs
-from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE, LRR_LOGIN_TITLE
 
 LOGGER = logging.getLogger(__name__)
 
@@ -23,19 +23,6 @@ class ApiAuthMatrixParams(BaseModel):
     is_api_key_configured_server: bool
     is_api_key_configured_client: bool
     is_matching_api_key: bool = Field(..., description="Set to False if not is_api_key_configured_server or not is_api_key_configured_client")
-
-def expect_no_error_logs(environment: AbstractLRRDeploymentContext):
-    """
-    Expect no error severity logs.
-    """
-    for event in parse_lrr_logs(environment.read_log(environment.lanraragi_logs_path)):
-        assert event.severity_level != 'error', "LANraragi process emitted error logs."
-    
-    if environment.shinobu_logs_path.exists():
-        for event in parse_lrr_logs(environment.read_log(environment.shinobu_logs_path)):
-            assert event.severity_level != 'error', "Shinobu process emitted error logs."
-    else:
-        LOGGER.warning("No shinobu logs found.")
 
 @pytest.fixture
 def resource_prefix() -> Generator[str, None, None]:

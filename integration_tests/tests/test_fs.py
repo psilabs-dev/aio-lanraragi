@@ -5,7 +5,6 @@ Filesystem-related integration tests.
 import asyncio
 import logging
 import tempfile
-from aio_lanraragi_tests.helpers import upload_archive
 import aiohttp
 import numpy as np
 from pathlib import Path
@@ -16,6 +15,7 @@ import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
+from aio_lanraragi_tests.helpers import expect_no_error_logs, upload_archive
 
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
@@ -156,6 +156,48 @@ async def upload_archives(
             assert not error, f"Upload failed (status {error.status}): {error.error}"
             responses.append(response)
         return responses
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Cache priming required only for flaky Windows testing environments.")
+@pytest.mark.asyncio
+@pytest.mark.xfail
+async def test_xfail_catch_flakes(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
+    """
+    This xfail test case serves no integration testing purpose, other than to prime the cache of flaky testing hosts
+    and reduce the chances of subsequent test case failures caused by network flakes, such as remote host connection
+    closures or connection refused errors resulting from high client request pressure to unprepared host.
+
+    Therefore, occasional test case failures here are expected and ignored.
+    """
+    num_archives = 100
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+
+    LOGGER.debug("Established connection with test LRR server.")
+    # verify we are working with a new server.
+    response, error = await lrr_client.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+    assert len(response.data) == 0, "Server contains archives!"
+    del response, error
+    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    tag_generators = create_tag_generators(100, pmf)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        LOGGER.debug(f"Creating {num_archives} archives to upload.")
+        write_responses = save_archives(num_archives, tmpdir, npgenerator)
+        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+
+        # archive metadata
+        LOGGER.debug("Uploading archives to server.")
+        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lrr_client)
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # no error logs
+    expect_no_error_logs(environment)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio

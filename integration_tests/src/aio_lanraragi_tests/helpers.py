@@ -10,6 +10,9 @@ from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import UploadArchiveRequest, UploadArchiveResponse
 from lanraragi.models.base import LanraragiErrorResponse
 
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.log_parse import parse_lrr_logs
+
 LOGGER = logging.getLogger(__name__)
 
 async def upload_archive(
@@ -108,3 +111,16 @@ async def upload_archive(
                 retry_count += 1
                 continue
             # just raise whatever else comes up because we should handle them explicitly anyways
+
+def expect_no_error_logs(environment: AbstractLRRDeploymentContext):
+    """
+    Assert no logs with error level severity in LRR and Shinobu.
+    """
+    for event in parse_lrr_logs(environment.read_log(environment.lanraragi_logs_path)):
+        assert event.severity_level != 'error', "LANraragi process emitted error logs."
+    
+    if environment.shinobu_logs_path.exists():
+        for event in parse_lrr_logs(environment.read_log(environment.shinobu_logs_path)):
+            assert event.severity_level != 'error', "Shinobu process emitted error logs."
+    else:
+        LOGGER.warning("No shinobu logs found.")

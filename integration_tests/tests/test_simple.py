@@ -14,7 +14,6 @@ from pathlib import Path
 import sys
 import tempfile
 from typing import Dict, Generator, List, Tuple
-from aio_lanraragi_tests.helpers import upload_archive
 import numpy as np
 import pytest
 import playwright.async_api
@@ -75,6 +74,7 @@ from lanraragi.models.tankoubon import (
     UpdateTankoubonRequest,
 )
 
+from aio_lanraragi_tests.helpers import expect_no_error_logs, upload_archive
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.common import LRR_INDEX_TITLE, compute_upload_checksum
@@ -87,7 +87,6 @@ from aio_lanraragi_tests.archive_generation.models import (
 )
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
-from aio_lanraragi_tests.log_parse import parse_lrr_logs
 
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False # for debugging.
@@ -283,19 +282,6 @@ async def upload_archives(
             assert not error, f"Upload failed (status {error.status}): {error.error}"
             responses.append(response)
         return responses
-
-def expect_no_error_logs(environment: AbstractLRRDeploymentContext):
-    """
-    Expect no error severity logs.
-    """
-    for event in parse_lrr_logs(environment.read_log(environment.lanraragi_logs_path)):
-        assert event.severity_level != 'error', "LANraragi process emitted error logs."
-    
-    if environment.shinobu_logs_path.exists():
-        for event in parse_lrr_logs(environment.read_log(environment.shinobu_logs_path)):
-            assert event.severity_level != 'error', "Shinobu process emitted error logs."
-    else:
-        LOGGER.warning("No shinobu logs found.")
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Cache priming required only for flaky Windows testing environments.")
 @pytest.mark.asyncio
