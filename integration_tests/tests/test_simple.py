@@ -30,6 +30,7 @@ from lanraragi.models.archive import (
     DeleteArchiveRequest,
     DeleteArchiveResponse,
     ExtractArchiveRequest,
+    GetArchiveCategoriesRequest,
     GetArchiveMetadataRequest,
     GetArchiveThumbnailRequest,
     UpdateArchiveThumbnailRequest,
@@ -693,8 +694,9 @@ async def test_archive_category_interaction(lrr_client: LRRClient, semaphore: as
     6. check that 0 archives are in the bookmark category
     7. add 50 archives to bookmark asynchronously
     8. check that 50 archives are in the bookmark category
-    9. remove 50 archives from bookmark asynchronously
-    10. check that 0 archives are in the bookmark category
+    9. check archive category membership
+    10. remove 50 archives from bookmark asynchronously
+    11. check that 0 archives are in the bookmark category
     """
     num_archives = 100
 
@@ -749,6 +751,21 @@ async def test_archive_category_interaction(lrr_client: LRRClient, semaphore: as
     del response, error
     # <<<<< GET CATEGORY SYNC STAGE <<<<<
 
+    # >>>>> VERIFY ARCHIVE CATEGORY MEMBERSHIP VIA ARCHIVE API (SYNC) >>>>>
+    # One included archive should report the bookmark category; one excluded should not.
+    resp_in, err_in = await lrr_client.archive_api.get_archive_categories(GetArchiveCategoriesRequest(arcid=archive_ids[55]))
+    assert not err_in, f"Failed to get archive categories (status {err_in.status}): {err_in.error}"
+    cat_ids_in = {c.category_id for c in resp_in.categories}
+    assert bookmark_cat_id in cat_ids_in, "Archive expected in bookmark category but was not reported by /archives/:id/categories"
+    del resp_in, err_in
+
+    resp_out, err_out = await lrr_client.archive_api.get_archive_categories(GetArchiveCategoriesRequest(arcid=archive_ids[10]))
+    assert not err_out, f"Failed to get archive categories (status {err_out.status}): {err_out.error}"
+    cat_ids_out = {c.category_id for c in resp_out.categories}
+    assert bookmark_cat_id not in cat_ids_out, "Archive not in bookmark category was incorrectly reported by /archives/:id/categories"
+    del resp_out, err_out
+    # <<<<< VERIFY ARCHIVE CATEGORY MEMBERSHIP VIA ARCHIVE API (SYNC) <<<<<
+
     # >>>>> REMOVE ARCHIVE FROM CATEGORY SYNC STAGE >>>>>
     for arcid in archive_ids[50:]:
         response, error = await remove_archive_from_category(lrr_client, bookmark_cat_id, arcid, semaphore)
@@ -775,6 +792,14 @@ async def test_archive_category_interaction(lrr_client: LRRClient, semaphore: as
     assert set(response.archives) == set(archive_ids[:50]), "Archives in bookmark category do not match!"
     del response, error
     # <<<<< GET CATEGORY ASYNC STAGE <<<<<
+
+    # >>>>> ARCHIVE CATEGORY MEMBERSHIP >>>>>
+    response, error = await lrr_client.archive_api.get_archive_categories(GetArchiveCategoriesRequest(arcid=archive_ids[25]))
+    assert not error, f"Failed to get archive categories (status {error.status}): {error.error}"
+    cat_ids_in2 = {c.category_id for c in response.categories}
+    assert bookmark_cat_id in cat_ids_in2, "Archive expected in bookmark category after async add was not reported"
+    del response, error
+    # <<<<< ARCHIVE CATEGORY MEMBERSHIP <<<<<
 
     # >>>>> GET DATABASE BACKUP STAGE >>>>>
     response, error = await lrr_client.database_api.get_database_backup()
@@ -803,6 +828,14 @@ async def test_archive_category_interaction(lrr_client: LRRClient, semaphore: as
     assert len(response.archives) == 0, "Number of archives in bookmark category does not equal 0!"
     del response, error
     # <<<<< GET CATEGORY STAGE <<<<<
+
+    # >>>>> VERIFY ARCHIVE CATEGORY MEMBERSHIP CLEARED VIA ARCHIVE API >>>>>
+    resp_cleared, err_cleared = await lrr_client.archive_api.get_archive_categories(GetArchiveCategoriesRequest(arcid=archive_ids[25]))
+    assert not err_cleared, f"Failed to get archive categories (status {err_cleared.status}): {err_cleared.error}"
+    cat_ids_cleared = {c.category_id for c in resp_cleared.categories}
+    assert bookmark_cat_id not in cat_ids_cleared, "Archive still reported in bookmark category after removal"
+    del resp_cleared, err_cleared
+    # <<<<< VERIFY ARCHIVE CATEGORY MEMBERSHIP CLEARED VIA ARCHIVE API <<<<<
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
