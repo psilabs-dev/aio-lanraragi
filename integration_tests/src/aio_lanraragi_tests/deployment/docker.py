@@ -112,10 +112,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def staging_dir(self) -> Path:
         return self._staging_dir
 
-    @staging_dir.setter
-    def staging_dir(self, dir: Path):
-        self._staging_dir = dir.absolute()
-
     @override
     @property
     def archives_dir(self) -> Path:
@@ -226,7 +222,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.git_branch = git_branch
         self._docker_client = docker_client
         self._docker_api = docker_api
-        self.staging_dir = Path(staging_dir)
+        self._staging_dir = Path(staging_dir)
         if logger is None:
             logger = LOGGER
         self.logger = logger
@@ -339,6 +335,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Args:
             with_api_key: whether to add a default API key to LRR
             with_nofunmode: whether to start LRR with nofunmode on
+            enable_cors: whether to enable/disable CORS during startup
             lrr_debug_mode: whether to start LRR with debug mode on
             test_connection_max_retries: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
@@ -639,9 +636,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         the network.
         
         If something goes wrong during setup, the environment will be reset and the data should be removed.
-
-        We'll also need to pre-emptively clean up container contents to prevent virtiofs stale cache bs
-        when testing in MacOS where docker is in a VM.
         """
         if remove_data and self.lrr_container:
             self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/content/*'])

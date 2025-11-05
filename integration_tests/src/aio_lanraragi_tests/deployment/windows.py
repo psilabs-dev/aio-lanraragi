@@ -128,57 +128,12 @@ class _WindowsConsole(AbstractContextManager):
 class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     """
     Set up a LANraragi environment on Windows. Requires a win-dist path and staging directory to be provided.
-
-    Staging directory is out of windist dir, and handles all the files that belong to this deployment.
-    This directory is supplied by the user, which should represent an isolated deployment environment.
-    The reason we need a staging directory, is that we want to reproduce the docker effect of an isolated
-    workspace, where each directory within this parent is a volume which can be cleaned up, giving us a 
-    volume inventory when running tests.
-
-    Staging dir will have the following structure. When tearing down and removing everything, will
-    remove all directories with the appropriate resource prefix.
-    ```
-    /path/to/original/win-dist/             # we won't try to touch this.
-    /path/to/staging_dir/
-        |- {resource_prefix}win-dist/
-            |- lib/
-            |- locales/
-            |- public/
-            |- runtime/
-            |- script/
-            |- templates/
-            |- lrr.conf
-            |- package.json
-            |- run.ps1
-        |- {resource_prefix}archives/
-        |- {resource_prefix}thumb/
-        |- {resource_prefix}temp/           # move temp out to avoid applying unnecessary Shinobu pressure
-        |- {resource_prefix}redis/          # dedicated redis directory (instead of using contents)
-        |- {resource_prefix}log/
-            |- lanraragi.log
-            |- redis.log
-        |- {resource_prefix}pid/
-            |- redis.pid
-            |- server.pid
-    ```
-
-    Then, we can open up concurrent testing like this:
-    ```
-    /path/to/staging_dir/
-        |- test_1_resources/
-        |- test_2_resources/
-        |- ...
-    ```
     """
 
     @override
     @property
     def staging_dir(self) -> Path:
         return self._staging_dir
-
-    @staging_dir.setter
-    def staging_dir(self, dir: Path):
-        self._staging_dir = dir.absolute()
 
     @override
     @property
@@ -323,7 +278,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.resource_prefix = resource_prefix
         self.port_offset = port_offset
 
-        self.staging_dir = Path(staging_directory)
+        self._staging_dir = Path(staging_directory)
         self.original_windist_dir = Path(windist_path)
 
         if logger is None:

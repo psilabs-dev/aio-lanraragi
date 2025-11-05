@@ -93,6 +93,47 @@ class AbstractLRRDeploymentContext(abc.ABC):
     def staging_dir(self) -> Path:
         """
         Path to the staging directory.
+
+        Staging directory handles all the files that belong to this deployment.
+        This directory is supplied by the user, which should represent an isolated deployment environment.
+        The reason we need a staging directory, is that we want to reproduce the docker effect of an isolated
+        workspace, where each directory within this parent is a volume which can be cleaned up, giving us a 
+        volume inventory when running tests.
+
+        Staging dir will have the following structure. When tearing down and removing everything, will
+        remove all directories with the appropriate resource prefix.
+        ```
+        /path/to/original/win-dist/             # we won't try to touch this. (windows only)
+        /path/to/staging_dir/
+            |- {resource_prefix}win-dist/       # windows only
+                |- lib/
+                |- locales/
+                |- public/
+                |- runtime/
+                |- script/
+                |- templates/
+                |- lrr.conf
+                |- package.json
+                |- run.ps1
+            |- {resource_prefix}archives/       # holds LRR archives
+            |- {resource_prefix}thumb/          # holds LRR thumbnails
+            |- {resource_prefix}temp/           # move temp out to avoid applying unnecessary Shinobu pressure (windows only)
+            |- {resource_prefix}redis/          # dedicated redis directory (instead of using contents). Windows only
+            |- {resource_prefix}log/            # holds LRR logs
+                |- lanraragi.log
+                |- redis.log
+            |- {resource_prefix}pid/            # holds PID files (windows only)
+                |- redis.pid
+                |- server.pid
+        ```
+
+        Then, we can open up concurrent testing like this:
+        ```
+        /path/to/staging_dir/
+            |- test_1_resources/
+            |- test_2_resources/
+            |- ...
+        ```
         """
     
     @property
