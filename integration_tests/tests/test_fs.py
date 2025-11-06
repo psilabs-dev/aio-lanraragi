@@ -12,6 +12,7 @@ import shutil
 import sys
 from typing import Dict, Generator, List, Tuple
 import pytest
+import pytest_asyncio
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
@@ -22,7 +23,6 @@ from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
 from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, TagGenerator, WriteArchiveRequest, WriteArchiveResponse
 from aio_lanraragi_tests.common import compute_upload_checksum
-import pytest_asyncio
 
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import DeleteArchiveRequest, DeleteArchiveResponse, UploadArchiveResponse
