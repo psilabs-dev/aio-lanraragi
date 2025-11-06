@@ -1,6 +1,7 @@
 import logging
+from pathlib import Path
 import time
-from typing import Any, List
+from typing import Any, Dict, List
 import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
@@ -63,7 +64,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--git-branch", action="store", default=None, help="Branch to checkout; if not supplied, uses the main branch.")
     parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
     parser.addoption("--windist", action="store", default=None, help="Path to the LRR app distribution for Windows.")
-    parser.addoption("--staging", action="store", default=None, help="Path to the LRR staging directory (where all host-based testing and file RW happens).")
+    parser.addoption("--staging", action="store", default=Path.cwd() / ".staging", help="Path to the LRR staging directory (defaults to .staging).")
     parser.addoption("--lrr-debug", action="store_true", default=False, help="Enable debug mode for the LRR logs.")
     parser.addoption("--experimental", action="store_true", default=False, help="Run experimental tests.")
     parser.addoption("--playwright", action="store_true", default=False, help="Run Playwright UI tests. Requires `playwright install`")
@@ -127,12 +128,22 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
         else:
             logger.error(f"Test failed: dumping logs... ({item.nodeid})")
         try:
-            if hasattr(item.session, 'lrr_environment') and isinstance(item.session.lrr_environment, AbstractLRRDeploymentContext):
-                environment = item.session.lrr_environment
-                logger.error("\n\n >>>>> LRR LOGS >>>>>")
-                environment.display_lrr_logs()
-                logger.error("<<<<< LRR LOGS <<<<<\n\n")
+            if hasattr(item.session, 'lrr_environments') and item.session.lrr_environments:
+                environments_by_prefix: Dict[str, AbstractLRRDeploymentContext] = item.session.lrr_environments
+                for prefix, environment in environments_by_prefix.items():
+                    logger.error(f">>>>> LRR LOGS (prefix: \"{prefix}\") >>>>>")
+                    lrr_logs = environment.read_log(environment.lanraragi_logs_path)
+                    lines = lrr_logs.split('\n')[-100:]
+                    for line in lines:
+                        logger.error(line)
+                    logger.error(f"<<<<< LRR LOGS (prefix: \"{prefix}\") <<<<<")
+                    logger.error(f">>>>> SHINOBU LOGS (prefix: \"{prefix}\") >>>>>")
+                    shinobu_logs = environment.read_log(environment.shinobu_logs_path)
+                    lines = shinobu_logs.split('\n')[-100:]
+                    for line in lines:
+                        logger.error(line)
+                    logger.error(f"<<<<< SHINOBU LOGS (prefix: \"{prefix}\") <<<<<")
             else:
-                logger.warning("LRR environment not available in session for failure debugging")
+                logger.info("No environment available.")
         except Exception as e:
             logger.error(f"Failed to dump failure info: {e}")

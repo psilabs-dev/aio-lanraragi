@@ -2,7 +2,7 @@ import asyncio
 import logging
 import aiohttp
 import numpy as np
-from typing import Generator, List
+from typing import Dict, Generator, List
 import playwright.async_api
 from pydantic import BaseModel, Field
 import pytest
@@ -10,9 +10,10 @@ import pytest_asyncio
 
 from lanraragi.clients.client import LRRClient
 
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE, LRR_LOGIN_TITLE
+from aio_lanraragi_tests.helpers import expect_no_error_logs
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE, LRR_LOGIN_TITLE
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,6 +40,11 @@ def is_lrr_debug_mode(request: pytest.FixtureRequest) -> Generator[bool, None, N
 def environment(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int) -> Generator[AbstractLRRDeploymentContext, None, None]:
     environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
     request.session.lrr_environment = environment
+
+    # configure environments to session
+    environments: Dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
+    request.session.lrr_environments = environments
+
     yield environment
     environment.teardown(remove_data=True)
 
@@ -53,7 +59,7 @@ def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
     yield asyncio.BoundedSemaphore(value=8)
 
 @pytest_asyncio.fixture
-async def lanraragi(environment: AbstractLRRDeploymentContext) -> Generator[LRRClient, None, None]:
+async def lrr_client(environment: AbstractLRRDeploymentContext) -> Generator[LRRClient, None, None]:
     """
     Provides a LRRClient for testing with proper async cleanup.
     """
@@ -67,7 +73,7 @@ async def lanraragi(environment: AbstractLRRDeploymentContext) -> Generator[LRRC
 
 async def sample_test_api_auth_matrix(
     is_nofunmode: bool, is_api_key_configured_server: bool, is_api_key_configured_client: bool,
-    is_matching_api_key: bool, deployment_context: AbstractLRRDeploymentContext, lrr_client: LRRClient
+    is_matching_api_key: bool, environment: AbstractLRRDeploymentContext, lrr_client: LRRClient
 ):
     # sanity check.
     if is_matching_api_key and ((not is_api_key_configured_client) or (not is_api_key_configured_server)):
@@ -75,13 +81,13 @@ async def sample_test_api_auth_matrix(
 
     # configuration stage.
     if is_nofunmode:
-        deployment_context.enable_nofun_mode()
+        environment.enable_nofun_mode()
     else:
-        deployment_context.disable_nofun_mode()
+        environment.disable_nofun_mode()
     if is_api_key_configured_server:
-        deployment_context.update_api_key(DEFAULT_API_KEY)
+        environment.update_api_key(DEFAULT_API_KEY)
     else:
-        deployment_context.update_api_key(None)
+        environment.update_api_key(None)
     if is_api_key_configured_client:
         if is_matching_api_key:
             lrr_client.update_api_key(DEFAULT_API_KEY)
@@ -108,7 +114,7 @@ async def sample_test_api_auth_matrix(
             return require_valid_api_key
 
     # apply configurations
-    deployment_context.restart()
+    environment.restart()
 
     # test public endpoint.
     endpoint_is_public = True
@@ -152,9 +158,12 @@ async def sample_test_api_auth_matrix(
         assert await page.title() == expected_title
         await browser.close()
 
+    # check logs for errors
+    expect_no_error_logs(environment)
+
 @pytest.mark.asyncio
 @pytest.mark.playwright
-async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lanraragi: LRRClient):
+async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient):
     """
     Login with correct password.
     """
@@ -163,7 +172,7 @@ async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploym
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
-        await page.goto(lanraragi.lrr_base_url)
+        await page.goto(lrr_client.lrr_base_url)
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_LOGIN_TITLE
 
@@ -173,9 +182,12 @@ async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploym
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_INDEX_TITLE
 
+    # check logs for errors
+    expect_no_error_logs(environment)
+
 @pytest.mark.asyncio
 @pytest.mark.playwright
-async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lanraragi: LRRClient):
+async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient):
     """
     Login without password.
     """
@@ -184,7 +196,7 @@ async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploym
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
-        await page.goto(lanraragi.lrr_base_url)
+        await page.goto(lrr_client.lrr_base_url)
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_LOGIN_TITLE
 
@@ -194,9 +206,12 @@ async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploym
         assert "Wrong Password." in await page.content()
         assert await page.title() == LRR_LOGIN_TITLE
 
+    # check logs for errors
+    expect_no_error_logs(environment)
+
 @pytest.mark.asyncio
 @pytest.mark.playwright
-async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lanraragi: LRRClient):
+async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient):
     """
     Login with wrong password.
     """
@@ -205,7 +220,7 @@ async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploym
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
-        await page.goto(lanraragi.lrr_base_url)
+        await page.goto(lrr_client.lrr_base_url)
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_LOGIN_TITLE
 
@@ -216,9 +231,12 @@ async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploym
         assert "Wrong Password." in await page.content()
         assert await page.title() == LRR_LOGIN_TITLE
 
+    # check logs for errors
+    expect_no_error_logs(environment)
+
 @pytest.mark.asyncio
 @pytest.mark.playwright
-async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lanraragi: LRRClient):
+async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient):
     """
     Simulate UI: enable nofunmode and check that login is enforced.
     """
@@ -226,7 +244,7 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
-        await page.goto(lanraragi.lrr_base_url)
+        await page.goto(lrr_client.lrr_base_url)
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_INDEX_TITLE
 
@@ -263,14 +281,17 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
-        await page.goto(lanraragi.lrr_base_url)
+        await page.goto(lrr_client.lrr_base_url)
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_LOGIN_TITLE
+
+    # check logs for errors
+    expect_no_error_logs(environment)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
 async def test_api_auth_matrix(
-    environment: AbstractLRRDeploymentContext, lanraragi: LRRClient, npgenerator: np.random.Generator, is_lrr_debug_mode: bool
+    environment: AbstractLRRDeploymentContext, lrr_client: LRRClient, npgenerator: np.random.Generator, is_lrr_debug_mode: bool
 ):
     """
     Test the following situation combinations:
@@ -321,11 +342,11 @@ async def test_api_auth_matrix(
         LOGGER.info(f"Test configuration ({i+1}/{num_tests}): is_nofunmode={test_param.is_nofunmode}, is_apikey_configured_server={test_param.is_api_key_configured_server}, is_apikey_configured_client={test_param.is_api_key_configured_client}, is_matching_api_key={test_param.is_matching_api_key}")
         await sample_test_api_auth_matrix(
             test_param.is_nofunmode, test_param.is_api_key_configured_server, test_param.is_api_key_configured_client,
-            test_param.is_matching_api_key, environment, lanraragi
+            test_param.is_matching_api_key, environment, lrr_client
         )
 
 @pytest.mark.asyncio
-async def test_disable_cors_preflight(environment: AbstractLRRDeploymentContext, lanraragi: LRRClient, is_lrr_debug_mode: bool):
+async def test_disable_cors_preflight(environment: AbstractLRRDeploymentContext, lrr_client: LRRClient, is_lrr_debug_mode: bool):
     """
     Test preflight header response from server when CORS is not configured.
     This is the default behavior for LRR.
@@ -333,7 +354,7 @@ async def test_disable_cors_preflight(environment: AbstractLRRDeploymentContext,
     Tests will be done with a privileged endpoint.
     """
     environment.setup(enable_cors=False, lrr_debug_mode=is_lrr_debug_mode)
-    api = lanraragi.build_url("/api/shinobu")
+    api = lrr_client.build_url("/api/shinobu")
     async with (
         aiohttp.ClientSession(headers={"Origin": "https://www.example.com"}) as session,
         session.options(api) as response
@@ -347,13 +368,16 @@ async def test_disable_cors_preflight(environment: AbstractLRRDeploymentContext,
         assert "Access-Control-Allow-Methods" not in headers, "Allowed methods not present in headers when CORS is enabled."
         assert "Access-Control-Allow-Origin" not in headers, "Allowed origin not present in headers when CORS is enabled."
 
+    # check logs for errors
+    expect_no_error_logs(environment)
+
 @pytest.mark.asyncio
-async def test_enable_cors_preflight(environment: AbstractLRRDeploymentContext, lanraragi: LRRClient, is_lrr_debug_mode: bool):
+async def test_enable_cors_preflight(environment: AbstractLRRDeploymentContext, lrr_client: LRRClient, is_lrr_debug_mode: bool):
     """
     Test preflight header response from server when CORS is enabled.
     """
     environment.setup(enable_cors=True, lrr_debug_mode=is_lrr_debug_mode)
-    api = lanraragi.build_url("/api/shinobu")
+    api = lrr_client.build_url("/api/shinobu")
     async with (
         aiohttp.ClientSession(headers={"Origin": "https://www.example.com"}) as session,
         session.options(api) as response
@@ -374,3 +398,6 @@ async def test_enable_cors_preflight(environment: AbstractLRRDeploymentContext, 
         expected_allowed_origin = "*"
         actual_allowed_origin = headers["Access-Control-Allow-Origin"].strip()
         assert actual_allowed_origin == expected_allowed_origin, "CORS allowed origin does not match."
+
+    # check logs for errors
+    expect_no_error_logs(environment)

@@ -51,12 +51,22 @@ def _process_get_archive_metadata_response(content: str) -> GetArchiveMetadataRe
 
 def _process_get_archive_categories_response(content: str) -> GetArchiveCategoriesResponse:
     response_j = json.loads(content)
+    categories_data: List[dict] = response_j.get("categories", response_j)
     categories: List[GetArchiveCategoriesCatRecord] = []
-    for category in response_j:
+    for category in categories_data:
         archives = category.get("archives")
         id = category.get("id")
         name = category.get("name")
-        pinned = category.get("pinned") == "1"
+
+        # cast pinned to bool.
+        pinned = category.get("pinned")
+        if isinstance(pinned, str):
+            pinned = pinned == "1"
+        elif isinstance(pinned, (int, bool)):
+            pinned = bool(pinned)
+        else:
+            pinned = False
+
         search = category.get("search")
         categories.append(GetArchiveCategoriesCatRecord(archives=archives, category_id=id, name=name, pinned=pinned, search=search))
     response = GetArchiveCategoriesResponse(categories=categories)

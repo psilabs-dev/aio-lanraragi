@@ -48,13 +48,19 @@ jobs:
           pip install .
           playwright install
           
+      - name: Create staging directory
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/staging"
+
       - name: Run integration tests
         run: |
           cd integration_tests
           export CI=true
+          export DOCKER_BUILDKIT=1
           pytest tests --log-cli-level=INFO \
             --git-url=https://github.com/difegue/LANraragi.git \
             --git-branch=dev \
+            --staging "$GITHUB_WORKSPACE/staging" \
             --playwright \
             --docker-api \
             --npseed 42

@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 import ctypes
 import redis
-import redis.exceptions
 import shutil
 import subprocess
 import time
@@ -128,86 +127,29 @@ class _WindowsConsole(AbstractContextManager):
 class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     """
     Set up a LANraragi environment on Windows. Requires a win-dist path and staging directory to be provided.
-
-    Staging directory is out of windist dir, and handles all the files that belong to this deployment.
-    This directory is supplied by the user, which should represent an isolated deployment environment.
-    The reason we need a staging directory, is that we want to reproduce the docker effect of an isolated
-    workspace, where each directory within this parent is a volume which can be cleaned up, giving us a 
-    volume inventory when running tests.
-
-    Staging dir will have the following structure. When tearing down and removing everything, will
-    remove all directories with the appropriate resource prefix.
-    ```
-    /path/to/original/win-dist/             # we won't try to touch this.
-    /path/to/staging_dir/
-        |- {resource_prefix}win-dist/
-            |- lib/
-            |- locales/
-            |- public/
-            |- runtime/
-            |- script/
-            |- templates/
-            |- lrr.conf
-            |- package.json
-            |- run.ps1
-        |- {resource_prefix}contents/
-            |- thumb/
-        |- {resource_prefix}temp/           # move temp out to avoid applying unnecessary Shinobu pressure
-        |- {resource_prefix}redis/          # dedicated redis directory (instead of using contents)
-        |- {resource_prefix}log/
-            |- lanraragi.log
-            |- redis.log
-        |- {resource_prefix}pid/
-            |- redis.pid
-            |- server.pid
-    ```
-
-    Then, we can open up concurrent testing like this:
-    ```
-    /path/to/staging_dir/
-        |- test_1_resources/
-        |- test_2_resources/
-        |- ...
-    ```
     """
 
+    @override
     @property
     def staging_dir(self) -> Path:
-        """
-        The directory where everything can happen.
-        """
         return self._staging_dir
 
-    @staging_dir.setter
-    def staging_dir(self, dir: Path):
-        self._staging_dir = dir.absolute()
-
+    @override
     @property
-    def contents_dir(self) -> Path:
-        """
-        Absolute path to the entire LRR application. For testing purposes,
-        contents_dir is determined by windist path + resource prefix.
-
-        At the end of testing, the contents_dir should be removed.
-        """
-        contents_dirname = self.resource_prefix + "contents"
+    def archives_dir(self) -> Path:
+        contents_dirname = self.resource_prefix + "archives"
         return self.staging_dir / contents_dirname
-    
-    @property
-    def redis_dir(self) -> Path:
-        """
-        Absolute path to the Redis application (according to runfile, is same as contents dir)
-        """
-        redis_dirname = self.resource_prefix + "redis"
-        return self.staging_dir / redis_dirname
 
+    @override
     @property
     def thumb_dir(self) -> Path:
         """
         Absolute path to the LRR thumbnail directory
         """
-        return self.contents_dir / "thumb"
+        thumb_dirname = self.resource_prefix + "thumb"
+        return self.staging_dir / thumb_dirname
 
+    @override
     @property
     def logs_dir(self) -> Path:
         logs_dir = self.resource_prefix + "log"
@@ -327,51 +269,12 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.resource_prefix = resource_prefix
         self.port_offset = port_offset
 
-        self.staging_dir = Path(staging_directory)
+        self._staging_dir = Path(staging_directory)
         self.original_windist_dir = Path(windist_path)
 
         if logger is None:
             logger = LOGGER
         self.logger = logger
-
-    @override
-    def update_api_key(self, api_key: Optional[str]):
-        self.lrr_api_key = api_key
-        self.redis_client.select(2)
-        if api_key is None:
-            self.redis_client.hdel("LRR_CONFIG", "apikey")
-        else:
-            self.redis_client.hset("LRR_CONFIG", "apikey", api_key)
-
-    @override
-    def enable_nofun_mode(self):
-        self.redis_client.select(2)
-        self.redis_client.hset("LRR_CONFIG", "nofunmode", "1")
-
-    @override
-    def disable_nofun_mode(self):
-        self.redis_client.select(2)
-        self.redis_client.hset("LRR_CONFIG", "nofunmode", "0")
-
-    @override
-    def enable_lrr_debug_mode(self):
-        self.redis_client.select(2)
-        self.redis_client.hset("LRR_CONFIG", "enable_devmode", "1")
-
-    @override
-    def disable_lrr_debug_mode(self):
-        self.redis_client.select(2)
-        self.redis_client.hset("LRR_CONFIG", "enable_devmode", "0")
-
-    @override
-    def enable_cors(self):
-        self.redis_client.select(2)
-        self.redis_client.hset("LRR_CONFIG", "enablecors", "1")
-
-    @override
-    def disable_cors(self):
-        self.redis_client.select(2)
-        self.redis_client.hset("LRR_CONFIG", "enablecors", "0")
 
     @override
     def setup(
@@ -409,10 +312,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.debug(f"Copy of windist directory exists: {windist_dir}")
 
         # log the setup resource allocations for user to see
-        self.logger.info(f"Deploying Windows LRR with the following resources: LRR port {lrr_port}, Redis port {redis_port}, content path {self.contents_dir}.")
+        self.logger.info(f"Deploying Windows LRR with the following resources: LRR port {lrr_port}, Redis port {redis_port}, content path {self.archives_dir}.")
 
         # create contents, thumb, temp, log, pid, redis.
-        contents_dir = self.contents_dir
+        contents_dir = self.archives_dir
         thumb_dir = self.thumb_dir
         temp_dir = self.temp_dir
         log_dir = self.logs_dir
@@ -454,11 +357,11 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         # the LRR process, so we will always recreate it.
         if is_port_available(redis_port):
             self.start_redis()
-            self._test_redis_connection()
+            self.test_redis_connection()
             self.logger.debug(f"Redis service is established on port {redis_port}.")
         else:
             # TODO: this throws an exception if not redis on port or redis broken
-            self._test_redis_connection()
+            self.test_redis_connection()
             self.logger.debug(f"Running Redis service confirmed on port {redis_port}, skipping startup.")
         if with_api_key:
             self.update_api_key(DEFAULT_API_KEY)
@@ -497,11 +400,11 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         redis_port = self.redis_port
         if is_port_available(redis_port):
             self.start_redis()
-            self._test_redis_connection()
+            self.test_redis_connection()
             self.logger.debug(f"Redis service is established on port {redis_port}.")
         else:
             # TODO: this throws an exception if not redis on port or redis broken
-            self._test_redis_connection()
+            self.test_redis_connection()
             self.logger.debug(f"Running Redis service confirmed on port {redis_port}, skipping startup.")
         self.logger.debug("Started Redis.")
 
@@ -531,7 +434,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Forceful shutdown of LRR and Redis and remove the content path, preparing it for another test.
         """
-        contents_dir = self.contents_dir
+        contents_dir = self.archives_dir
         log_dir = self.logs_dir
         pid_dir = self.pid_dir
         windist_dir = self.windist_dir
@@ -579,7 +482,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             os.chdir(windist_path)
 
             lrr_network = self.lrr_address
-            lrr_data_directory = self.contents_dir
+            lrr_data_directory = self.archives_dir
             lrr_log_directory = self.logs_dir
             lrr_temp_directory = self.temp_dir
             lrr_thumb_directory = self.thumb_dir
@@ -771,21 +674,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 normalized_lines = [line.replace(b'\r\n', b'\n') for line in lines]
                 return b''.join(normalized_lines[-tail:])
         return b"No LRR logs available."
-
-    def _test_redis_connection(self, max_retries: int=4):
-        self.logger.debug("Connecting to Redis...")
-        retry_count = 0
-        while True:
-            try:
-                self.redis_client.ping()
-                break
-            except redis.exceptions.ConnectionError:
-                if retry_count >= max_retries:
-                    raise
-                time_to_sleep = 2 ** (retry_count + 1)
-                self.logger.warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
-                retry_count += 1
-                time.sleep(time_to_sleep)
 
     # TODO: I hope we don't have to use this.
     def _kill_lrr_perl_processes_by_path(self):

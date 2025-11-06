@@ -1,8 +1,10 @@
 import abc
 import logging
+from pathlib import Path
 import time
 from typing import Optional
 import aiohttp
+import redis
 import requests
 
 from lanraragi.clients.client import LRRClient
@@ -87,45 +89,92 @@ class AbstractLRRDeploymentContext(abc.ABC):
     def lrr_api_key(self, lrr_api_key: Optional[str]):
         self._lrr_api_key = lrr_api_key
 
+    @property
     @abc.abstractmethod
-    def update_api_key(self, api_key: Optional[str]):
+    def staging_dir(self) -> Path:
         """
-        Add an API key to the LRR environment.
+        Path to the staging directory.
 
-        Args:
-            `api_key`: API key to add to redis. If set to None, will remove it from the database.
+        Staging directory handles all the files that belong to this deployment.
+        This directory is supplied by the user, which should represent an isolated deployment environment.
+        The reason we need a staging directory, is that we want to reproduce the docker effect of an isolated
+        workspace, where each directory within this parent is a volume which can be cleaned up, giving us a 
+        volume inventory when running tests.
+
+        Staging dir will have the following structure. When tearing down and removing everything, will
+        remove all directories with the appropriate resource prefix.
+        ```
+        /path/to/original/win-dist/             # we won't try to touch this. (windows only)
+        /path/to/staging_dir/
+            |- {resource_prefix}win-dist/       # windows only
+                |- lib/
+                |- locales/
+                |- public/
+                |- runtime/
+                |- script/
+                |- templates/
+                |- lrr.conf
+                |- package.json
+                |- run.ps1
+            |- {resource_prefix}archives/       # holds LRR archives
+            |- {resource_prefix}thumb/          # holds LRR thumbnails
+            |- {resource_prefix}temp/           # move temp out to avoid applying unnecessary Shinobu pressure (windows only)
+            |- {resource_prefix}redis/          # dedicated redis directory (instead of using contents). Windows only
+            |- {resource_prefix}log/            # holds LRR logs
+                |- lanraragi.log
+                |- redis.log
+            |- {resource_prefix}pid/            # holds PID files (windows only)
+                |- redis.pid
+                |- server.pid
+        ```
+
+        Then, we can open up concurrent testing like this:
+        ```
+        /path/to/staging_dir/
+            |- test_1_resources/
+            |- test_2_resources/
+            |- ...
+        ```
         """
-        ...
-
-    @abc.abstractmethod
-    def enable_nofun_mode(self):
-        ...
-
-    @abc.abstractmethod
-    def disable_nofun_mode(self):
-        ...
-
-    @abc.abstractmethod
-    def enable_lrr_debug_mode(self):
-        ...
     
+    @property
     @abc.abstractmethod
-    def disable_lrr_debug_mode(self):
-        ...
+    def archives_dir(self) -> Path:
+        """
+        Path to the archives directory.
+        """
 
+    @property
     @abc.abstractmethod
-    def enable_cors(self):
+    def logs_dir(self) -> Path:
         """
-        Enable CORS for the LRR instance by updating configuration.
+        Path to the logs directory.
         """
-        ...
 
-    @abc.abstractmethod
-    def disable_cors(self):
+    @property
+    def lanraragi_logs_path(self) -> Path:
+        return self.logs_dir / "lanraragi.log"
+
+    @property
+    def shinobu_logs_path(self) -> Path:
+        return self.logs_dir / "shinobu.log"
+
+    @property
+    def redis_dir(self) -> Path:
         """
-        Disable CORS for the LRR instance by updating configuration.
+        Path to Redis database directory.
         """
-        ...
+        redis_dirname = self.resource_prefix + "redis"
+        return self.staging_dir / redis_dirname
+
+    @property
+    def redis_client(self) -> redis.Redis:
+        """
+        Redis client for this LRR deployment
+        """
+        if not hasattr(self, "_redis_client") or not self._redis_client:
+            self._redis_client = redis.Redis(host="127.0.0.1", port=self.redis_port, decode_responses=True)
+        return self._redis_client
 
     @abc.abstractmethod
     def setup(
@@ -210,6 +259,59 @@ class AbstractLRRDeploymentContext(abc.ABC):
             `tail`: max number of lines to keep from last line.
         """
 
+    def update_api_key(self, api_key: Optional[str]):
+        """
+        Insert/update LRR API key (or remove if None is passed).
+        """
+        self.lrr_api_key = api_key
+        self.redis_client.select(2)
+        if api_key is None:
+            self.redis_client.hdel("LRR_CONFIG", "apikey")
+        else:
+            self.redis_client.hset("LRR_CONFIG", "apikey", api_key)
+
+    def enable_nofun_mode(self):
+        """
+        Enable nofun mode.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "nofunmode", "1")
+
+    def disable_nofun_mode(self):
+        """
+        Disable nofun mode.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "nofunmode", "0")
+
+    def enable_lrr_debug_mode(self):
+        """
+        Enable debug logs.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "enable_devmode", "1")
+
+    def disable_lrr_debug_mode(self):
+        """
+        Disable debug logs.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "enable_devmode", "0")
+
+    def enable_cors(self):
+        """
+        Enable CORS.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "enablecors", "1")
+
+    def disable_cors(self):
+        """
+        Disable CORS.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "enablecors", "0")
+
     def test_lrr_connection(self, port: int, test_connection_max_retries: int=4):
         """
         Test the LRR connection with retry and exponential backoff.
@@ -246,9 +348,25 @@ class AbstractLRRDeploymentContext(abc.ABC):
                     self.teardown(remove_data=True)
                     raise DeploymentException("Failed to connect to the LRR server!")
 
+    def test_redis_connection(self, max_retries: int=4):
+        self.logger.debug("Connecting to Redis...")
+        retry_count = 0
+        while True:
+            try:
+                self.redis_client.ping()
+                break
+            except redis.exceptions.ConnectionError:
+                if retry_count >= max_retries:
+                    raise
+                time_to_sleep = 2 ** (retry_count + 1)
+                self.logger.warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
+                retry_count += 1
+                time.sleep(time_to_sleep)
+
     def display_lrr_logs(self, tail: int=100, log_level: int=logging.ERROR):
         """
         Display LRR logs to (error) output, used for debugging.
+        This is still used by containers, in case log files do not exist.
 
         Args:
             tail: show up to how many lines from the last output
@@ -260,6 +378,13 @@ class AbstractLRRDeploymentContext(abc.ABC):
             for line in log_text.split('\n'):
                 if line.strip():
                     self.logger.log(log_level, f"LRR: {line}")
+
+    def read_log(self, log_file: str) -> str:
+        """
+        Read a log file from logs directory.
+        """
+        with open(log_file, 'r') as f:
+            return f.read()
 
     def lrr_client(
         self, ssl: bool=True, 

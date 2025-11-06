@@ -17,6 +17,11 @@ Install `aio-lanraragi` from the root directory, then:
 cd integration_tests && pip install .
 ```
 
+Enable BuildKit (or prepend it for your tests):
+```sh
+export DOCKER_BUILDKIT=1
+```
+
 > All of the following are run within `aio-lanraragi/integration_tests/`.
 
 Run integration tests on the official Docker image ("difegue/lanraragi"):

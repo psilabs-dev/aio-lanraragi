@@ -1,0 +1,45 @@
+[2025-10-31 06:26:38] [LANraragi] [info] LANraragi 0.9.50 started. (Production Mode)
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: Chaika.moe
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: Chaika.moe api.json
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: ComicInfo
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: Copy Archive Tags
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: Tag Copier
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: Add Timestamp Tag
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: EHDL info.txt
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: E-Hentai
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: eze
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: FAKKU
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: GalleryDL
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: HDoujin
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: HentaiAtHome plugin
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: Hentag
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: Hentag Online Lookups
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: Hitomi
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: koromo
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: Koushoku/Koharu.yaml
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: Mayriad's EH Master Script
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: Pixiv
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: Filename Parsing
+[2025-10-31 06:26:38] [LANraragi] [info] Plugin Detected: nHentai
+[2025-10-31 06:26:38] [LANraragi] [info] Script Detected: Subfolders to Categories
+[2025-10-31 06:26:38] [LANraragi] [info] Script Detected: Source Finder
+[2025-10-31 06:26:38] [LANraragi] [info] Script Detected: nHentai Source Converter
+[2025-10-31 06:26:38] [LANraragi] [info] Downloader Detected: Chaika.moe Downloader
+[2025-10-31 06:26:38] [LANraragi] [info] Downloader Detected: E*Hentai Downloader
+[2025-10-31 06:26:38] [LANraragi] [info] Downloader Detected: Pixiv Downloader
+[2025-10-31 06:26:38] [LANraragi] [info] Successfully connected to Minion database.
+[2025-10-31 06:26:38] [Tag Stats] [info] Building stat indexes... (1677 archives, 0 tankoubons)
+[2025-10-31 06:26:38] [Metrics] [info] Cleaned up 101 metrics keys from previous session
+[2025-10-31 06:26:38] [LANraragi] [info] Metrics collection is enabled.
+[2025-10-31 06:26:38] [LANraragi] [info] Routing done! Ready to receive requests.
+[2025-10-31 06:26:40] [Tag Stats] [info] Stat indexes built! (1677 archives, 0 tankoubons)
+[2025-11-04 20:48:42] [LANraragi] [warn] Failed login attempt with password 'kamimamita' from 10.0.10.100
+[2025-11-04 20:48:45] [LANraragi] [info] Successful login attempt from 10.0.10.100
+[2025-11-04 20:48:52] [LANraragi] [error] Maketext error: [maketext doesn't know how to say:
+Enable Metrics
+as needed at /home/koyomi/lanraragi/script/../lib/LANraragi/Utils/I18NInitializer.pm line 48.
+]
+[2025-11-04 20:48:52] [LANraragi] [error] Maketext error: [maketext doesn't know how to say:
+Enable metrics collection and serve them through the metrics endpoint in the Prometheus exposition format.
+as needed at /home/koyomi/lanraragi/script/../lib/LANraragi/Utils/I18NInitializer.pm line 48.
+]
