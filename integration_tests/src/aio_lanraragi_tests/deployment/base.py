@@ -160,6 +160,14 @@ class AbstractLRRDeploymentContext(abc.ABC):
         return self.logs_dir / "shinobu.log"
 
     @property
+    def redis_dir(self) -> Path:
+        """
+        Path to Redis database directory.
+        """
+        redis_dirname = self.resource_prefix + "redis"
+        return self.staging_dir / redis_dirname
+
+    @property
     def redis_client(self) -> redis.Redis:
         """
         Redis client for this LRR deployment

@@ -147,29 +147,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self.staging_dir / dirname
 
     @property
-    def redis_volume_name(self) -> str:
-        return self.resource_prefix + "redis_volume"
-
-    @property
-    def redis_volume(self) -> Optional[docker.models.volumes.Volume]:
-        """
-        Returns the Redis volume from attribute if it exists.
-        Otherwise, falls back to finding the Redis volume with the
-        same name, based on initialization settings.
-        """
-        volume = None
-        with contextlib.suppress(AttributeError):
-            volume = self._redis_volume
-        if volume is None:
-            volume = self._get_volume_by_name(self.redis_volume_name)
-        self._redis_volume = volume
-        return volume
-
-    @redis_volume.setter
-    def redis_volume(self, volume: docker.models.volumes.Volume):
-        self._redis_volume = volume
-
-    @property
     def docker_client(self) -> docker.DockerClient:
         return self._docker_client
 
@@ -308,7 +285,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             lrr_debug_mode: whether to start LRR with debug mode on
             test_connection_max_retries: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
-        # ensure staging, contents and thumb directories exist
+        # ensure staging, contents, thumb, and Redis directories exist
         staging_dir = self.staging_dir
         if not staging_dir:
             raise FileNotFoundError("Staging directory not provided. Use --staging to specify a host directory for bind mounts.")
@@ -318,6 +295,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         contents_dir = self.archives_dir
         thumb_dir = self.thumb_dir
         logs_dir = self.logs_dir
+        redis_dir = self.redis_dir
         if contents_dir.exists():
             self.logger.debug(f"Contents directory exists: {contents_dir}")
         else:
@@ -333,13 +311,19 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         else:
             self.logger.debug(f"Creating logs dir: {logs_dir}")
             logs_dir.mkdir(parents=True, exist_ok=False)
+        if redis_dir.exists():
+            self.logger.debug(f"Redis directory exists: {redis_dir}")
+        else:
+            self.logger.debug(f"Creating Redis dir: {redis_dir}")
+            redis_dir.mkdir(parents=True, exist_ok=False)
 
         # log the setup resource allocations for user to see
         # the docker image is not included, haven't decided how to classify it yet.
         self.logger.info(
-            f"Deploying Docker LRR with the following resources: LRR container {self.lrr_container_name}, "
-            f"Redis container {self.redis_container_name}, contents path {contents_dir}, thumb path {thumb_dir}, logs path {logs_dir}, "
-            f"redis volume {self.redis_volume_name}, network {self.network_name}"
+            f"Deploying Docker LRR with the following resources: "
+            f"LRR container {self.lrr_container_name}, Redis container {self.redis_container_name}, "
+            f"contents path {contents_dir}, thumb path {thumb_dir}, logs path {logs_dir}, redis path {redis_dir}, "
+            f"network {self.network_name}"
         )
 
         # >>>>> IMAGE PREPARATION >>>>>
@@ -380,14 +364,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         else:
             self.logger.debug(f"Network exists: {network_name}.")
 
-        # prepare volumes
-        redis_volume_name = self.redis_volume_name
-        if not self.redis_volume:
-            self.logger.debug(f"Creating volume: {redis_volume_name}")
-            self.redis_volume = self.docker_client.volumes.create(name=redis_volume_name)
-        else:
-            self.logger.debug(f"Volume exists: {redis_volume_name}.")
-
         # prepare the redis container first.
         redis_port = self.redis_port
         redis_container_name = self.redis_container_name
@@ -408,13 +384,14 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.redis_container = self.docker_client.containers.create(
                 DEFAULT_REDIS_DOCKER_TAG,
                 name=redis_container_name,
+                user=f"{self.lrr_uid}:{self.lrr_gid}",  # unix UID:GID
                 hostname=redis_container_name,
                 detach=True,
                 network=network_name,
                 ports=redis_ports,
                 healthcheck=redis_healthcheck,
                 volumes={
-                    redis_volume_name: {"bind": "/data", "mode": "rw"}
+                    str(redis_dir): {"bind": "/data", "mode": "rw"}
                 }
             )
 
@@ -426,8 +403,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         }
         lrr_environment = [
             f"LRR_REDIS_ADDRESS={redis_container_name}:{DEFAULT_REDIS_PORT}",
-            f"LRR_UID={self.lrr_uid}",
-            f"LRR_GID={self.lrr_gid}"
+            f"LRR_UID={self.lrr_uid}",  # unix UID
+            f"LRR_GID={self.lrr_gid}"   # unix GID
         ]
         create_lrr_container = False
         if self.lrr_container:
@@ -592,31 +569,36 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Reset docker test environment (LRR and Redis containers, testing network) between tests.
         Stops containers, then removes them. Then, removes the data (if applied). Finally removes
         the network.
+
+        To handle potential FS stale cache issues, a forceful removal will be attempted within containers,
+        before they are shut down and an external bind mount source removal is invoked.
         
         If something goes wrong during setup, the environment will be reset and the data should be removed.
         """
         if remove_data and self.lrr_container:
-            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/content/*'])
-            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/thumb/*'])
-            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/log/*'])
-
+            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/content/*'], user='koyomi')
+            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/thumb/*'], user='koyomi')
+            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/log/*'], user='koyomi')
         if self.lrr_container:
             self.lrr_container.stop(timeout=1)
             self.logger.debug(f"Stopped container: {self.lrr_container_name}")
-        if self.redis_container:
-            self.redis_container.stop(timeout=1)
-            self.logger.debug(f"Stopped container: {self.redis_container_name}")
         if self.lrr_container:
             self.lrr_container.remove(v=True, force=True)
             self.logger.debug(f"Removed container: {self.lrr_container_name}")
+
+        if remove_data and self.redis_container:
+            self.redis_container.exec_run(["bash", "-c", "rm -rf /data/*"], user='redis')
+        if self.redis_container:
+            self.redis_container.stop(timeout=1)
+            self.logger.debug(f"Stopped container: {self.redis_container_name}")
         if self.redis_container:
             self.redis_container.remove(v=True, force=True)
             self.logger.debug(f"Removed container: {self.redis_container_name}")
 
         if remove_data:
-            if self.redis_volume:
-                self.redis_volume.remove(force=True)
-                self.logger.debug(f"Removed volume: {self.redis_volume_name}")
+            if self.redis_dir.exists():
+                shutil.rmtree(self.redis_dir)
+                self.logger.debug(f"Removed redis directory: {self.redis_dir}")
             if self.archives_dir.exists():
                 shutil.rmtree(self.archives_dir)
                 self.logger.debug(f"Removed contents directory: {self.archives_dir}")

@@ -139,14 +139,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def archives_dir(self) -> Path:
         contents_dirname = self.resource_prefix + "archives"
         return self.staging_dir / contents_dirname
-    
-    @property
-    def redis_dir(self) -> Path:
-        """
-        Absolute path to the Redis application (according to runfile, is same as contents dir)
-        """
-        redis_dirname = self.resource_prefix + "redis"
-        return self.staging_dir / redis_dirname
 
     @override
     @property
