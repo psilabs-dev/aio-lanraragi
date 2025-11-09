@@ -8,11 +8,17 @@ import logging
 from pathlib import Path
 import re
 import sys
+import time
 from typing import Dict, List, Set
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest, WriteArchiveResponse
 import numpy as np
+import aiofiles
+
+from lanraragi.clients.client import LRRClient
+from aio_lanraragi_tests.helpers import upload_archive
+from aio_lanraragi_tests.common import compute_upload_checksum
 
 LOGGER = logging.getLogger(__name__)
 
@@ -62,11 +68,17 @@ def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Gen
     """
     requests = []
     responses = []
+    # ensure sharded subdirectories with up to 1,000 archives each
+    num_subdirs = (num_archives - 1) // 1000 + 1
+    subdir_digits = len(str(max(0, num_subdirs - 1)))
     for archive_id in range(num_archives):
         create_page_requests = []
         archive_name = f"archive-{str(archive_id+1).zfill(len(str(num_archives)))}"
         filename = f"{archive_name}.zip"
-        save_path = work_dir / filename
+        subdir_name = str(archive_id // 1000).zfill(subdir_digits or 1)
+        subdir_path = work_dir / subdir_name
+        subdir_path.mkdir(parents=True, exist_ok=True)
+        save_path = subdir_path / filename
         num_pages = np_generator.integers(1, 2)
         for page_id in range(num_pages):
             page_text = f"{archive_name}-pg-{str(page_id+1).zfill(len(str(num_pages)))}"
@@ -202,8 +214,64 @@ def generate_archives(
 
     LOGGER.info(f"Wrote metadata for {num_archives} archives to {metadata_path}")
 
-async def upload_archives():
-    ...
+async def upload_archives(lrr_address: str):
+    """
+    Upload all archives from the benchmark data directory using metadata.json.
+    """
+    start = time.time()
+    data_dir = get_data_dir()
+    archives_dir = get_archives_dir()
+    metadata_path = get_metadata_json_file()
+    api_key = "lanraragi"
+
+    if not data_dir.exists() or not archives_dir.exists() or not metadata_path.exists():
+        print(f"Missing benchmark data. Expected directories/files:\n - {data_dir}\n - {archives_dir}\n - {metadata_path}")
+        sys.exit(1)
+
+    async with aiofiles.open(metadata_path, "r") as f:
+        metadata: Dict[str, Dict[str, object]] = json.loads(await f.read())
+
+    base_url = lrr_address
+    concurrency = 1
+    max_retries = 4
+
+    semaphore = asyncio.BoundedSemaphore(value=concurrency)
+    async def upload_one(client: LRRClient, file_path: Path, title: str, tags_csv: str) -> tuple[bool, str]:
+        filename = file_path.name
+        checksum = compute_upload_checksum(file_path)
+        response, error = await upload_archive(
+            client=client,
+            save_path=file_path,
+            filename=filename,
+            semaphore=semaphore,
+            checksum=checksum,
+            title=title,
+            tags=tags_csv,
+            max_retries=max_retries
+        )
+        assert not error, f"Failed to upload archive {file_path}: {error.error}"
+        LOGGER.info(f"[upload_archives] uploaded {filename} -> {response.arcid}")
+        return True, filename
+
+    # include archives in subdirectories as well
+    files = sorted([p for p in archives_dir.rglob("*.zip") if p.is_file()])
+    if not files:
+        LOGGER.info("No archives found to upload.")
+        return
+
+    async with LRRClient(lrr_base_url=base_url, lrr_api_key=api_key) as lrr_client:
+        tasks: List[asyncio.Task] = []
+        for file_path in files:
+            meta = metadata[file_path.name]
+            title = str(meta["title"])
+            tag_list = meta["tag_list"]
+            tags_csv = ",".join(tag_list)
+            tasks.append(asyncio.create_task(upload_one(lrr_client, file_path, title, tags_csv)))
+
+        await asyncio.gather(*tasks)
+    
+    end = time.time()
+    LOGGER.info(f"Done uploading archives after {end-start}s.")
 
 async def main():
     parser = argparse.ArgumentParser()
@@ -215,10 +283,12 @@ async def main():
     generate_subparser.add_argument("--tags", type=int, default=200_000, help="Number of tags to use for benchmarking.")
     generate_subparser.add_argument("--seed", type=int, default=42, help="RNG seed to pass.")
 
-    subparsers.add_parser("upload", help="Upload all archives to LRR with metadata.")
+    upload_subparser = subparsers.add_parser("upload", help="Upload all archives to LRR with metadata.")
+    upload_subparser.add_argument("--lrr-address", type=str, default="http://127.0.0.1:3001", help="Base URL for the LRR instance")
     subparsers.add_parser("benchmark", help="Run benchmark of LRR.")
 
     args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO)
 
     try:
         match args.command:
@@ -236,7 +306,7 @@ async def main():
                 if not get_data_dir().exists():
                     print(f"Benchmark directory does not exist: {get_data_dir()}")
                     sys.exit(1)
-                await upload_archives()
+                await upload_archives(args.lrr_address)
 
             case "benchmark":
                 await benchmark()
