@@ -1,5 +1,8 @@
 .vscode/
 
+# Benchmarking
+.benchmark/
+
 # Staging directory for integration tests.
 .staging/
 
