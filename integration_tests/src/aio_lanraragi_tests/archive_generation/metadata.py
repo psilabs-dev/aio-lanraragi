@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Callable, List
+from typing import Callable, Dict, List
 
 from aio_lanraragi_tests.archive_generation.models import TagGenerator
 
@@ -23,6 +23,8 @@ def get_tag_assignments(tag_generators: List[TagGenerator], generator: np.random
     
     Generator is for reproducibility.
     """
+    if not generator:
+        generator = np.random.default_rng()
     tags = []
     for tg in tag_generators:
         add_to_tags = generator.binomial(1, tg.assign_probability, 1)[0] if generator else np.random.binomial(1, tg.assign_probability, 1)[0]
