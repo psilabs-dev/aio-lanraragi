@@ -1,5 +1,6 @@
 """
-Utilities for generating arcidx to tagidx-list distributions following zipfs law.
+Utilities for generating arcidx to tagidx-list zipfian distributions.
+zipf's law: https://en.wikipedia.org/wiki/Zipf%27s_law
 """
 
 import collections
@@ -57,7 +58,7 @@ def get_archive_idx_to_tag_idxs_map(
 
 if __name__ == "__main__":
     """
-    Evaluate the shape of the zipf distribution.
+    Evaluate the shape of a zipfian distribution.
     """
     import argparse
     import matplotlib.pyplot as plt
@@ -89,7 +90,7 @@ if __name__ == "__main__":
 
         images_per_tag_arr = np.array(list(tag_freq.values()))
 
-        # Rank–popularity log–log plot (like interpret_data)
+        # Rank–popularity log–log plot
         sorted_pop = np.sort(images_per_tag_arr)[::-1]
         ranks = np.arange(1, len(sorted_pop) + 1)
 
