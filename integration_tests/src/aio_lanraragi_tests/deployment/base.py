@@ -1,6 +1,7 @@
 import abc
 import logging
 from pathlib import Path
+import shutil
 import time
 from typing import Optional
 import aiohttp
@@ -258,6 +259,42 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Args:
             `tail`: max number of lines to keep from last line.
         """
+
+    def get_redis_backup_dir(self, backup_id: str) -> Path:
+        backup_dirname = self.resource_prefix + f"redis_backup_{backup_id}"
+        backup_dir = self.staging_dir / backup_dirname
+        return backup_dir
+
+    def backup_redis_data(self, backup_id: str) -> Path:
+        """
+        Make a copy of the current redis database (for benchmarking purposes).
+        Returns the path to the backup directory.
+
+        Redis DB should probably be down.
+        """
+        backup_dir = self.get_redis_backup_dir(backup_id)
+        if backup_dir.exists():
+            self.logger.info(f"Removing existing backup: {backup_dir}")
+            shutil.rmtree(backup_dir)
+        shutil.copy2(self.redis_dir, backup_dir)
+        self.logger.debug(f"Backup {backup_id} OK")
+        return backup_dir
+
+    def restore_redis_backup(self, backup_id: str):
+        """
+        Restore from redis backup (for benchmarking purposes). Ensure that redis is shutdown.
+        """
+        try:
+            self.redis_client.ping()
+            raise DeploymentException(f"Cannot restore from backup {backup_id} while database is live!")
+        except redis.exceptions.ConnectionError:
+            pass
+        backup_dir = self.get_redis_backup_dir(backup_id)
+        if self.redis_dir.exists():
+            self.logger.info(f"Removing existing database info: {self.redis_dir}")
+            shutil.rmtree(self.redis_dir)
+        shutil.copy2(backup_dir, self.redis_dir)
+        self.logger.debug(f"Restore from backup {backup_id} OK")
 
     def update_api_key(self, api_key: Optional[str]):
         """
