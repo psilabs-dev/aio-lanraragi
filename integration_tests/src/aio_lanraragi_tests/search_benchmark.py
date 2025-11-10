@@ -21,7 +21,10 @@ from aio_lanraragi_tests.archive_generation.archive import write_archives_to_dis
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.metadata.zipf_utils import get_archive_idx_to_tag_idxs_map
 from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest, WriteArchiveResponse
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, compute_archive_id
 from aio_lanraragi_tests.exceptions import DeploymentException
+from aio_lanraragi_tests.helpers import upload_archive
+import aiofiles
 import numpy as np
 import shutil
 import sys
@@ -30,7 +33,11 @@ from typing import Dict, List, Optional
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 import docker
 
+from lanraragi.clients.client import LRRClient
+
 LOGGER = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 DEFAULT_STAGING_DIR = str(Path.cwd() / ".staging")
 DEFAULT_RESOURCE_PREFIX = "benchmark_search_"
 DEFAULT_PORT_OFFSET = 2
@@ -151,6 +158,12 @@ def generate(staging_dir: str=None):
     archive_idx_to_tag_idx_list = get_archive_idx_to_tag_idxs_map(DEFAULT_NUM_ARCHIVES, DEFAULT_NUM_TAGS, 20, np_generator)
     archive_idx_to_artist_idx_list = get_archive_idx_to_tag_idxs_map(DEFAULT_NUM_ARCHIVES, DEFAULT_ARTISTS, 1, np_generator)
 
+    arcidx_to_arcid: Dict[int, str] = {}
+    for arcidx, response in enumerate(responses):
+        save_path = response.save_path
+        arcid = compute_archive_id(save_path)
+        arcidx_to_arcid[arcidx] = arcid
+
     tag_idx_to_tag_id: Dict[int, str] = {idx: f"tag-{idx}" for idx in range(DEFAULT_NUM_TAGS)}
     artist_idx_to_artist_id: Dict[int, str] = {artistidx: f"artist:artist-{artistidx}" for artistidx in range(DEFAULT_ARTISTS)}
 
@@ -158,7 +171,8 @@ def generate(staging_dir: str=None):
         'archives': [{
             'path': str(response.save_path),
             'tag_list': [tag_idx_to_tag_id[idx] for idx in archive_idx_to_tag_idx_list[arcidx]] + [artist_idx_to_artist_id[idx] for idx in archive_idx_to_artist_idx_list[arcidx]],
-            'title': f"title-{arcidx}"
+            'title': f"title-{arcidx}",
+            'arcid': arcidx_to_arcid[arcidx],
         } for arcidx, response in enumerate(responses)]
     }
 
@@ -175,8 +189,40 @@ def generate(staging_dir: str=None):
         print("Data generation validation failed.")
         sys.exit(1)
 
-def require_upload() -> bool:
-    # TODO: check all archives are present with metadata.
+async def require_upload(lrr_client: LRRClient, archives) -> bool:
+    """
+    Validate the uploads have gone through.
+    """
+    arcid_to_archive_local = {
+        archive["arcid"]: archive for archive in archives
+    }
+
+    num_archives = len(archives)
+
+    response, error = await lrr_client.archive_api.get_all_archives()
+    if error:
+        LOGGER.error(f"Failed to get all archives from LRR: {error.error}")
+        return False
+
+    num_archives_in_lrr = len(response.data)
+    if num_archives_in_lrr != num_archives:
+        LOGGER.error(f"Number of archives in LRR {num_archives_in_lrr} does not match {num_archives}.")
+        return False
+    
+    for archive in response.data:
+        if archive.arcid not in arcid_to_archive_local:
+            LOGGER.error(f"Archive {archive.arcid} not found locally.")
+            return False
+        local_archive = arcid_to_archive_local[archive.arcid]
+        title = local_archive["title"]
+        tag_list = local_archive["tag_list"]
+        if archive.title != title:
+            LOGGER.error(f"Local title \"{title}\" != \"{archive.title}\"")
+            return False
+        if not set(archive.tags.split(',')).issuperset(set(tag_list)):
+            LOGGER.error(f"Local archive includes tags not in LRR: {','.join(tag_list)} (remote: {archive.tags})")
+            return False
+    
     return True
 
 async def upload(staging_dir: str):
@@ -190,8 +236,33 @@ async def upload(staging_dir: str):
 
     d = get_deployment(staging_dir=staging_dir)
     lrr_client = d.lrr_client() # default creds are used so we don't need to care about configuration
+    lrr_client.update_api_key(DEFAULT_API_KEY)
+    generate_result_path = __get_synthetic_data_dir(staging_dir) / "generated_data.json"
+    async with aiofiles.open(generate_result_path, 'r') as f:
+        data = json.loads(await f.read())
     try:
-        print("Uploaded archives") # TODO: implement archive upload logic.
+        print("Uploading archives...")
+        sem = asyncio.BoundedSemaphore(value=4)
+
+        tasks = []
+        archives = data["archives"]
+        for archive in archives:
+            save_path = Path(archive["path"])
+            filename = save_path.name
+            title = archive["title"]
+            tag_list = archive["tag_list"]
+            tags = ",".join(tag_list)
+            tasks.append(asyncio.create_task(upload_archive(
+                lrr_client, save_path, filename, sem, title=title, tags=tags, allow_duplicates=True
+            )))
+        await asyncio.gather(*tasks)
+        print("All archives uploaded; checking archive count...")
+    
+        if not await require_upload(lrr_client, archives):
+            print("Failed upload validation.")
+            sys.exit(1)
+        else:
+            print("Upload validation OK.")
     finally:
         await lrr_client.close()
 
