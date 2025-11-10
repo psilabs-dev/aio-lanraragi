@@ -33,7 +33,6 @@ from lanraragi.models.archive import (
     GetArchiveThumbnailRequest,
     UpdateArchiveThumbnailRequest,
     UpdateReadingProgressionRequest,
-    UploadArchiveResponse,
 )
 from lanraragi.models.base import (
     LanraragiErrorResponse,
@@ -74,19 +73,10 @@ from lanraragi.models.tankoubon import (
     UpdateTankoubonRequest,
 )
 
-from aio_lanraragi_tests.helpers import expect_no_error_logs, upload_archive
+from aio_lanraragi_tests.helpers import expect_no_error_logs, save_archives, upload_archive, upload_archives
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.common import LRR_INDEX_TITLE, compute_upload_checksum
-from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
-from aio_lanraragi_tests.archive_generation.models import (
-    CreatePageRequest,
-    TagGenerator,
-    WriteArchiveRequest,
-    WriteArchiveResponse,
-)
-from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
-from aio_lanraragi_tests.archive_generation.metadata import create_tag_generators, get_tag_assignments
+from aio_lanraragi_tests.common import LRR_INDEX_TITLE
 
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False # for debugging.
@@ -236,56 +226,6 @@ async def retry_on_lock(operation_func, max_retries: int = 10) -> Tuple[Lanrarag
 def pmf(t: float) -> float:
     return 2 ** (-t * 100)
 
-def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Generator) -> List[WriteArchiveResponse]:
-    requests = []
-    responses = []
-    for archive_id in range(num_archives):
-        create_page_requests = []
-        archive_name = f"archive-{str(archive_id+1).zfill(len(str(num_archives)))}"
-        filename = f"{archive_name}.zip"
-        save_path = work_dir / filename
-        num_pages = np_generator.integers(10, 20)
-        for page_id in range(num_pages):
-            page_text = f"{archive_name}-pg-{str(page_id+1).zfill(len(str(num_pages)))}"
-            page_filename = f"{page_text}.png"
-            # create_page_request = CreatePageRequest(1080, 1920, page_filename, image_format='PNG', text=page_text)
-            create_page_request = CreatePageRequest(
-                width=1080, height=1920, filename=page_filename, image_format='PNG', text=page_text
-            )
-            create_page_requests.append(create_page_request)        
-        requests.append(WriteArchiveRequest(create_page_requests=create_page_requests, save_path=save_path, archival_strategy=ArchivalStrategyEnum.ZIP))
-    responses = write_archives_to_disk(requests)
-    return responses
-
-async def upload_archives(
-    write_responses: List[WriteArchiveResponse], tag_generators: List[TagGenerator],
-    npgenerator: np.random.Generator, semaphore: asyncio.Semaphore, lrr_client: LRRClient
-) -> List[UploadArchiveResponse]:
-    responses: List[UploadArchiveResponse] = []
-    if ENABLE_SYNC_FALLBACK:
-        for i, _response in enumerate(write_responses):
-            title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
-            response, error = await upload_archive(lrr_client, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
-            assert not error, f"Upload failed (status {error.status}): {error.error}"
-            responses.append(response)
-        return responses
-    else: 
-        tasks = []
-        for i, _response in enumerate(write_responses):
-            title = f"Archive {i}"
-            tags = ','.join(get_tag_assignments(tag_generators, npgenerator))
-            checksum = compute_upload_checksum(_response.save_path)
-            tasks.append(asyncio.create_task(
-                upload_archive(lrr_client, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
-            ))
-        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
-        for response, error in gathered:
-            assert not error, f"Upload failed (status {error.status}): {error.error}"
-            responses.append(response)
-        return responses
-
 @pytest.mark.skipif(sys.platform != "win32", reason="Cache priming required only for flaky Windows testing environments.")
 @pytest.mark.asyncio
 @pytest.mark.xfail
@@ -313,7 +253,6 @@ async def test_xfail_catch_flakes(lrr_client: LRRClient, semaphore: asyncio.Sema
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UPLOAD STAGE >>>>>
-    tag_generators = create_tag_generators(100, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         LOGGER.debug(f"Creating {num_archives} archives to upload.")
@@ -322,7 +261,7 @@ async def test_xfail_catch_flakes(lrr_client: LRRClient, semaphore: asyncio.Sema
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lrr_client)
+        await upload_archives(write_responses, npgenerator, semaphore, lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
     # <<<<< UPLOAD STAGE <<<<<
 
     # no error logs
@@ -354,7 +293,6 @@ async def test_archive_upload(lrr_client: LRRClient, semaphore: asyncio.Semaphor
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UPLOAD STAGE >>>>>
-    tag_generators = create_tag_generators(100, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         LOGGER.debug(f"Creating {num_archives} archives to upload.")
@@ -363,7 +301,7 @@ async def test_archive_upload(lrr_client: LRRClient, semaphore: asyncio.Semaphor
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lrr_client)
+        await upload_archives(write_responses, npgenerator, semaphore, lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> VALIDATE UPLOAD COUNT STAGE >>>>>
@@ -436,7 +374,6 @@ async def test_archive_read(lrr_client: LRRClient, semaphore: asyncio.Semaphore,
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UPLOAD STAGE >>>>>
-    tag_generators = create_tag_generators(100, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         LOGGER.debug(f"Creating {num_archives} archives to upload.")
@@ -445,7 +382,7 @@ async def test_archive_read(lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lrr_client)
+        await upload_archives(write_responses, npgenerator, semaphore, lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> GET ALL ARCHIVES STAGE >>>>>
@@ -638,7 +575,6 @@ async def test_archive_category_interaction(lrr_client: LRRClient, semaphore: as
 
     # >>>>> UPLOAD STAGE >>>>>
     archive_ids = []
-    tag_generators = create_tag_generators(100, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         LOGGER.debug(f"Creating {num_archives} archives to upload.")
@@ -647,7 +583,7 @@ async def test_archive_category_interaction(lrr_client: LRRClient, semaphore: as
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        upload_responses = await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lrr_client)
+        upload_responses = await upload_archives(write_responses, npgenerator, semaphore, lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
         archive_ids = [response.arcid for response in upload_responses]
         del upload_responses
     # <<<<< UPLOAD STAGE <<<<<
@@ -791,7 +727,6 @@ async def test_search_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, n
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UPLOAD STAGE >>>>>
-    tag_generators = create_tag_generators(num_archives, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         LOGGER.debug(f"Creating {num_archives} archives to upload.")
@@ -800,7 +735,7 @@ async def test_search_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, n
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lrr_client)
+        await upload_archives(write_responses, npgenerator, semaphore, lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> SEARCH STAGE >>>>>
@@ -917,7 +852,6 @@ async def test_database_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore,
     # <<<<< TEST CONNECTION STAGE <<<<<
     
     # >>>>> UPLOAD STAGE >>>>>
-    tag_generators = create_tag_generators(num_archives, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         LOGGER.debug(f"Creating {num_archives} archives to upload.")
@@ -926,7 +860,7 @@ async def test_database_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lrr_client)
+        await upload_archives(write_responses, npgenerator, semaphore, lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> GET STATISTICS STAGE >>>>>
@@ -986,7 +920,6 @@ async def test_tankoubon_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore
     # <<<<< TEST CONNECTION STAGE <<<<<
     
     # >>>>> UPLOAD STAGE >>>>>
-    tag_generators = create_tag_generators(num_archives, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         LOGGER.debug(f"Creating {num_archives} archives to upload.")
@@ -995,7 +928,7 @@ async def test_tankoubon_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lrr_client)
+        await upload_archives(write_responses, npgenerator, semaphore, lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> GET ARCHIVE IDS STAGE >>>>>
@@ -1082,7 +1015,6 @@ async def test_misc_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npg
     # <<<<< TEST CONNECTION STAGE <<<<<
     
     # >>>>> UPLOAD STAGE >>>>>
-    tag_generators = create_tag_generators(num_archives, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         LOGGER.debug(f"Creating {num_archives} archives to upload.")
@@ -1091,7 +1023,7 @@ async def test_misc_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npg
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lrr_client)
+        await upload_archives(write_responses, npgenerator, semaphore, lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> GET ARCHIVE IDS STAGE >>>>>
@@ -1144,7 +1076,6 @@ async def test_minion_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, n
     # <<<<< TEST CONNECTION STAGE <<<<<
     
     # >>>>> UPLOAD STAGE >>>>>
-    tag_generators = create_tag_generators(num_archives, pmf)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         LOGGER.debug(f"Creating {num_archives} archives to upload.")
@@ -1153,7 +1084,7 @@ async def test_minion_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, n
 
         # archive metadata
         LOGGER.debug("Uploading archives to server.")
-        await upload_archives(write_responses, tag_generators, npgenerator, semaphore, lrr_client)
+        await upload_archives(write_responses, npgenerator, semaphore, lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
     # <<<<< UPLOAD STAGE <<<<<
     
     # >>>>> REGENERATE THUMBNAILS STAGE >>>>>

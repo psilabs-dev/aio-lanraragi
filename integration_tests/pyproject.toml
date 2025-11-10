@@ -10,6 +10,7 @@ dependencies = [
     "aiofiles",
     "docker",
     "git-python",
+    "matplotlib",
     "numpy",
     "pillow",
     "playwright",
