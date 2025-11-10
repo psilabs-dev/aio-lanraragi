@@ -17,6 +17,14 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+import aiofiles
+import docker
+import numpy as np
+import shutil
+import sys
+from typing import Dict, List, Optional
+
+from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.metadata.zipf_utils import get_archive_idx_to_tag_idxs_map
@@ -24,14 +32,6 @@ from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, Wri
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, compute_archive_id
 from aio_lanraragi_tests.exceptions import DeploymentException
 from aio_lanraragi_tests.helpers import upload_archive
-import aiofiles
-import numpy as np
-import shutil
-import sys
-from typing import Dict, List, Optional
-
-from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
-import docker
 
 from lanraragi.clients.client import LRRClient
 
