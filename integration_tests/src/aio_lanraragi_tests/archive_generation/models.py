@@ -1,12 +1,18 @@
+import enum
 from pathlib import Path
 from PIL import Image
-from typing import List, Tuple, Union
+from pydantic import BaseModel, ConfigDict
+from typing import List, Optional, Tuple, Union
 
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 
 LIGHT_GRAY = (200, 200, 200)
 
-class Page:
+class CreatePageResponseStatus(enum.Enum):
+    SUCCESS = 'success'
+    FAILURE = 'failure'
+
+class Page(BaseModel):
 
     width: int
     height: int
@@ -16,72 +22,53 @@ class Page:
     lower_boundary: int
     margin: int
     font_size: int
-    image: Image.Image
-    first_n_bytes: int
+    image: Optional[Image.Image] = None
+    first_n_bytes: Optional[int] = None
     image_format: str
     text: str
     filename: str
 
-    def close(self):
-        if isinstance(self.image, Image.Image):
-            self.image.close()
-        self.image = None
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-class CreatePageRequest:
+class CreatePageRequest(BaseModel):
     """
     Request to create a Page object, which contains an Image object
     in memory.
     """
 
-    def __init__(
-            self, width: int, height: int, filename: str,
-            background_color: Union[str, Tuple[int, int, int]]=LIGHT_GRAY,
-            first_n_bytes: int=None,
-            image_format: str='PNG',
-            text: str=None
-    ):
-        self.width = width
-        self.height = height
-        self.filename = filename
-        self.background_color = background_color
-        self.first_n_bytes = first_n_bytes
-        self.image_format = image_format
-        self.text = text
+    width: int
+    height: int
+    filename: str
+    background_color: Union[str, Tuple[int, int, int]] = LIGHT_GRAY
+    first_n_bytes: Optional[int] = None
+    image_format: str = 'PNG'
+    text: Optional[str] = None
 
-class CreatePageResponseStatus:
-    SUCCESS = 0
-    FAILURE = 1
-
-class CreatePageResponse:
+class CreatePageResponse(BaseModel):
     """
     Response from passing a CreatePageRequest object to create_page.
     """
-    page: Page
+    page: Optional[Page] = None
     status: CreatePageResponseStatus
-    error: str
+    error: Optional[str] = None
 
-class WriteArchiveRequest:
+class WriteArchiveRequest(BaseModel):
     """
     Request to write to an archive on disk based on a sequence of create
     page requests.
     """
 
-    def __init__(
-        self, create_page_requests: List[CreatePageRequest],
-        save_path: Path,
-        archival_strategy: ArchivalStrategyEnum=ArchivalStrategyEnum.ZIP,
-    ):
-        self.create_page_requests = create_page_requests
-        self.save_path = save_path
-        self.archival_strategy = archival_strategy
+    create_page_requests: List[CreatePageRequest]
+    save_path: Path
+    archival_strategy: ArchivalStrategyEnum
 
-class WriteArchiveResponseStatus:
-    SUCCESS = 0
-    FAILURE = 1
+class WriteArchiveResponseStatus(enum.Enum):
+    SUCCESS = 'success'
+    FAILURE = 'failure'
 
-class WriteArchiveResponse:
+class WriteArchiveResponse(BaseModel):
     status: WriteArchiveResponseStatus
-    error: str
+    error: Optional[str] = None
     save_path: Path
 
 class TagGenerator:
