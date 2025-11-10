@@ -1,9 +1,15 @@
+from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
+from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
+from aio_lanraragi_tests.archive_generation.metadata.zipf_utils import get_archive_idx_to_tag_idxs_map
+from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest, WriteArchiveResponse
+from aio_lanraragi_tests.common import compute_upload_checksum
 import aiofiles
 import asyncio
 import errno
 import logging
+import numpy as np
 from pathlib import Path
-from typing import Optional, Set, Tuple
+from typing import List, Optional, Set, Tuple
 
 import aiohttp
 
@@ -125,3 +131,62 @@ def expect_no_error_logs(environment: AbstractLRRDeploymentContext):
             assert event.severity_level != 'error', "Shinobu process emitted error logs."
     else:
         LOGGER.warning("No shinobu logs found.")
+
+async def upload_archives(
+    write_responses: List[WriteArchiveResponse],
+    npgenerator: np.random.Generator, semaphore: asyncio.Semaphore, lrr_client: LRRClient, force_sync: bool=False
+) -> List[UploadArchiveResponse]:
+    responses: List[UploadArchiveResponse] = []
+
+    num_archives = len(write_responses)
+    num_tags = 100
+    arcidx_to_tagidx_list = get_archive_idx_to_tag_idxs_map(num_archives, num_tags, 20, generator=npgenerator)
+
+    if force_sync:
+        for i, _response in enumerate(write_responses):
+            title = f"Archive {i}"
+            tag_idx_list = arcidx_to_tagidx_list[i]
+            tag_list = [f"tag-{t}" for t in tag_idx_list]
+            tags = ','.join(tag_list)
+            checksum = compute_upload_checksum(_response.save_path)
+            response, error = await upload_archive(lrr_client, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+            responses.append(response)
+        return responses
+    else: 
+        tasks = []
+        for i, _response in enumerate(write_responses):
+            title = f"Archive {i}"
+            tag_idx_list = arcidx_to_tagidx_list[i]
+            tag_list = [f"tag-{t}" for t in tag_idx_list]
+            tags = ','.join(tag_list)
+            checksum = compute_upload_checksum(_response.save_path)
+            tasks.append(asyncio.create_task(
+                upload_archive(lrr_client, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            ))
+        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        for response, error in gathered:
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+            responses.append(response)
+        return responses
+
+def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Generator) -> List[WriteArchiveResponse]:
+    requests = []
+    responses = []
+    for archive_id in range(num_archives):
+        create_page_requests = []
+        archive_name = f"archive-{str(archive_id+1).zfill(len(str(num_archives)))}"
+        filename = f"{archive_name}.zip"
+        save_path = work_dir / filename
+        num_pages = np_generator.integers(10, 20)
+        for page_id in range(num_pages):
+            page_text = f"{archive_name}-pg-{str(page_id+1).zfill(len(str(num_pages)))}"
+            page_filename = f"{page_text}.png"
+            # create_page_request = CreatePageRequest(1080, 1920, page_filename, image_format='PNG', text=page_text)
+            create_page_request = CreatePageRequest(
+                width=1080, height=1920, filename=page_filename, image_format='PNG', text=page_text
+            )
+            create_page_requests.append(create_page_request)        
+        requests.append(WriteArchiveRequest(create_page_requests=create_page_requests, save_path=save_path, archival_strategy=ArchivalStrategyEnum.ZIP))
+    responses = write_archives_to_disk(requests)
+    return responses
