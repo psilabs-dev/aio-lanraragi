@@ -111,6 +111,7 @@ class UploadArchiveRequest(LanraragiRequest):
 
 class UploadArchiveResponse(LanraragiResponse):
     arcid: str = Field(..., min_length=40, max_length=40)
+    filename: Optional[str] = Field(None)
 
 class UpdateArchiveThumbnailRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
