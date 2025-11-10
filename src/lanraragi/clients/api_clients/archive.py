@@ -201,7 +201,14 @@ class _ArchiveApiClient(_ApiClient):
             arcid = response_j.get("id")
             filename = response_j.get("filename")
             return (UploadArchiveResponse(arcid=arcid, filename=filename), None)
-        return (None, _build_err_response(content, status))
+
+        response_j = json.loads(content)
+        arcid = response_j.get("id")
+        filename = response_j.get("filename")
+        return (
+            UploadArchiveResponse(arcid=arcid, filename=filename),
+            _build_err_response(content, status)
+        )
     
     async def update_thumbnail(self, request: UpdateArchiveThumbnailRequest) -> _LRRClientResponse[UpdateArchiveThumbnailResponse]:
         """
