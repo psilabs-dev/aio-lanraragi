@@ -14,9 +14,11 @@ The LRR/Redis deployment will have port offset 2, with resource prefix "benchmar
 """
 
 import asyncio
+from http import HTTPMethod
 import json
 import logging
 from pathlib import Path
+import time
 import aiofiles
 import docker
 import numpy as np
@@ -34,6 +36,7 @@ from aio_lanraragi_tests.exceptions import DeploymentException
 from aio_lanraragi_tests.helpers import upload_archive
 
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.minion import GetMinionJobStatusRequest
 
 LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -259,7 +262,46 @@ async def upload(staging_dir: str):
             )))
         await asyncio.gather(*tasks)
         print("All archives uploaded; checking archive count...")
-    
+
+        status, content = await lrr_client.handle_request(
+            HTTPMethod.POST,
+            lrr_client.build_url("/api/minion/build_stat_hashes/queue"),
+            lrr_client.headers,
+            data={
+                "args": "[]",
+                "priority": "3"
+            }
+        )
+        if status != 200:
+            print(f"Failed to queue build_stat_hashes: {content}")
+            sys.exit(1)
+        build_stat_hashes_data = json.loads(content)
+        job_id = int(build_stat_hashes_data["job"])
+
+        print("Waiting for stat hashes to build...")
+        start_time = time.time()
+        while True:
+            if time.time() - start_time > 60:
+                print("Failed to finish build_stat_hashes after 60s.")
+                sys.exit()
+            response, error = await lrr_client.minion_api.get_minion_job_status(GetMinionJobStatusRequest(
+                job_id=job_id
+            ))
+            if error:
+                print(f"Failed to get job status: {error.error}")
+                sys.exit(1)
+            state = (response.state).lower()
+            if state == "finished":
+                break
+            elif state == "failed":
+                print("build_stat_hashes job failed.")
+                sys.exit(1)
+            elif state == "active" or state == "inactive":
+                await asyncio.sleep(1)
+            else:
+                print(f"Unknown build_stat_hashes state: {state}")
+                sys.exit(1)
+
         if not await require_upload(lrr_client, archives):
             print("Failed upload validation.")
             sys.exit(1)
