@@ -25,11 +25,13 @@ LOGGER = logging.getLogger(__name__)
 async def upload_archive(
     client: LRRClient, save_path: Path, filename: str, semaphore: asyncio.Semaphore,
     checksum: str=None, title: str=None, tags: str=None,
-    max_retries: int=4, allow_duplicates: bool=False
+    max_retries: int=4, allow_duplicates: bool=False, retry_on_ise: bool=False,
 ) -> Tuple[UploadArchiveResponse, LanraragiErrorResponse]:
     """
     Upload archive (while considering all the permutations of errors that can happen).
     One can argue that this should be in the client library...
+
+    Note: retry_on_ise SHOULDN'T be enabled otherwise it defeats the purpose of our tests.
     """
 
     async with semaphore:
@@ -45,11 +47,20 @@ async def upload_archive(
                     if error.status == 409 and allow_duplicates:
                         LOGGER.info(f"[upload_archive] Duplicate upload {filename} to arcid {response.arcid}; skipping.")
                         return response, None
-                    if error.status == 423: # locked resource
+                    elif error.status == 423: # locked resource
                         if retry_count >= max_retries:
                             return None, error
                         tts = 2 ** retry_count
                         LOGGER.warning(f"[upload_archive] Locked resource when uploading {filename}. Retrying in {tts}s ({retry_count+1}/{max_retries})...")
+                        await asyncio.sleep(tts)
+                        retry_count += 1
+                        continue
+                    # retrying on internal server errors
+                    elif error.status == 500 and retry_on_ise:
+                        if retry_count >= max_retries:
+                            return None, error
+                        tts = 10
+                        LOGGER.warning(f"[upload_archive] Encountered server error when uploading {filename} (message: {error.error}). Retrying in {tts}s ({retry_count+1}/{max_retries})...")
                         await asyncio.sleep(tts)
                         retry_count += 1
                         continue

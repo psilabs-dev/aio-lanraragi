@@ -252,8 +252,10 @@ async def upload(staging_dir: str):
             title = archive["title"]
             tag_list = archive["tag_list"]
             tags = ",".join(tag_list)
+
+            # if duplicates exist or internal server errors happen: skip them
             tasks.append(asyncio.create_task(upload_archive(
-                lrr_client, save_path, filename, sem, title=title, tags=tags, allow_duplicates=True
+                lrr_client, save_path, filename, sem, title=title, tags=tags, allow_duplicates=True, retry_on_ise=True,
             )))
         await asyncio.gather(*tasks)
         print("All archives uploaded; checking archive count...")
