@@ -25,7 +25,7 @@ LOGGER = logging.getLogger(__name__)
 async def upload_archive(
     client: LRRClient, save_path: Path, filename: str, semaphore: asyncio.Semaphore,
     checksum: str=None, title: str=None, tags: str=None,
-    max_retries: int=4
+    max_retries: int=4, allow_duplicates: bool=False
 ) -> Tuple[UploadArchiveResponse, LanraragiErrorResponse]:
     """
     Upload archive (while considering all the permutations of errors that can happen).
@@ -42,6 +42,9 @@ async def upload_archive(
             try:
                 response, error = await client.archive_api.upload_archive(request)
                 if error:
+                    if error.status == 409 and allow_duplicates:
+                        LOGGER.info(f"[upload_archive] Duplicate upload {filename} to arcid {response.arcid}; skipping.")
+                        return response, None
                     if error.status == 423: # locked resource
                         if retry_count >= max_retries:
                             return None, error
