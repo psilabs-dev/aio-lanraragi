@@ -248,9 +248,12 @@ def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Gen
         for page_id in range(num_pages):
             page_text = f"{archive_name}-pg-{str(page_id+1).zfill(len(str(num_pages)))}"
             page_filename = f"{page_text}.png"
-            create_page_request = CreatePageRequest(1080, 1920, page_filename, image_format='PNG', text=page_text)
+            # create_page_request = CreatePageRequest(1080, 1920, page_filename, image_format='PNG', text=page_text)
+            create_page_request = CreatePageRequest(
+                width=1080, height=1920, filename=page_filename, image_format='PNG', text=page_text
+            )
             create_page_requests.append(create_page_request)        
-        requests.append(WriteArchiveRequest(create_page_requests, save_path, ArchivalStrategyEnum.ZIP))
+        requests.append(WriteArchiveRequest(create_page_requests=create_page_requests, save_path=save_path, archival_strategy=ArchivalStrategyEnum.ZIP))
     responses = write_archives_to_disk(requests)
     return responses
 
