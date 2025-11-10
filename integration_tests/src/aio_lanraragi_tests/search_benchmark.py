@@ -36,6 +36,7 @@ DEFAULT_RESOURCE_PREFIX = "benchmark_search_"
 DEFAULT_PORT_OFFSET = 2
 DEFAULT_NUM_ARCHIVES = 10000
 DEFAULT_NUM_TAGS = 1000
+DEFAULT_ARTISTS = 100
 
 def __get_synthetic_data_dir(staging_dir: str):
     ".staging/benchmark_search_synthetic_data/"
@@ -148,14 +149,19 @@ def generate(staging_dir: str=None):
 
     # generate zipf tag distribution.
     archive_idx_to_tag_idx_list = get_archive_idx_to_tag_idxs_map(DEFAULT_NUM_ARCHIVES, DEFAULT_NUM_TAGS, 20, np_generator)
+    archive_idx_to_artist_idx_list = get_archive_idx_to_tag_idxs_map(DEFAULT_NUM_ARCHIVES, DEFAULT_ARTISTS, 1, np_generator)
+
     tag_idx_to_tag_id: Dict[int, str] = {idx: f"tag-{idx}" for idx in range(DEFAULT_NUM_TAGS)}
+    artist_idx_to_artist_id: Dict[int, str] = {artistidx: f"artist:artist-{artistidx}" for artistidx in range(DEFAULT_ARTISTS)}
+
     data = {
         'archives': [{
             'path': str(response.save_path),
-            'tag_list': [tag_idx_to_tag_id[idx] for idx in archive_idx_to_tag_idx_list[arcidx]],
+            'tag_list': [tag_idx_to_tag_id[idx] for idx in archive_idx_to_tag_idx_list[arcidx]] + [artist_idx_to_artist_id[idx] for idx in archive_idx_to_artist_idx_list[arcidx]],
             'title': f"title-{arcidx}"
         } for arcidx, response in enumerate(responses)]
     }
+
     with open(generate_result_path, 'w') as f:
         json.dump(
             data, f,
