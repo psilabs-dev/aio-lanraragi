@@ -75,8 +75,9 @@ def up(
     image: str=None, git_url: str=None, git_branch: str=None, build: str=None, docker_api: docker.APIClient=None, staging_dir: str=None,
     with_nofunmode: bool=False
 ):
+    # increase number of retries since LRR is going to be busy with archive discovery.
     d = get_deployment(build_path=build, image=image, git_url=git_url, git_branch=git_branch, docker_api=docker_api, staging_dir=staging_dir)
-    d.setup(with_api_key=True, with_nofunmode=with_nofunmode)
+    d.setup(with_api_key=True, with_nofunmode=with_nofunmode, test_connection_max_retries=8)
     print("LRR benchmarking environment setup complete.")
 
     if require_up(staging_dir):
@@ -411,7 +412,7 @@ if __name__ == "__main__":
             case 'clean':
                 clean(staging_dir=args.staging)
             case 'generate':
-                generate(staging_dir=args.staging, num_archives=args.archives, num_tags=args.tags)
+                generate(staging_dir=args.staging, num_archives=args.archives, num_tags=args.tags, num_artists=args.artists)
             case 'upload':
                 asyncio.run(upload(staging_dir=args.staging))
             case 'bench':
