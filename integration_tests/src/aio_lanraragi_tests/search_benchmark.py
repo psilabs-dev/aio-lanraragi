@@ -37,7 +37,7 @@ from aio_lanraragi_tests.exceptions import DeploymentException
 from aio_lanraragi_tests.helpers import upload_archive
 
 from lanraragi.clients.client import LRRClient
-from lanraragi.models.archive import UploadArchiveResponse
+from lanraragi.models.archive import GetArchiveMetadataRequest, UpdateArchiveMetadataRequest, UploadArchiveResponse
 from lanraragi.models.base import LanraragiErrorResponse
 from lanraragi.models.minion import GetMinionJobStatusRequest
 
@@ -267,6 +267,8 @@ async def upload(staging_dir: str):
         for batch_idx, i in enumerate(range(0, len(archives), batch_size), start=1):
             batch_start_time = time.time()
             batch = archives[i:i + batch_size]
+            
+            batch_arcid_to_archives = {archive["arcid"]: archive for archive in archives}
 
             tasks = []
             for archive in batch:
@@ -291,18 +293,30 @@ async def upload(staging_dir: str):
                 ))
 
             # we might have received some duplicates but duplicates might be a result of buggy logging,
-            # so we're going to remove those duplicates and try again in another run (bc we can't recover rn).
+            # so we're going to remove those duplicates and try again in another run.
             results: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
             for result in results:
                 response, error = result
                 if error and error.status == 409:
-                    _, error = await lrr_client.archive_api.delete_archive(response.arcid)
+                    arcid = response.arcid
+                    response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
                     if error:
-                        print(f"Failed to delete archive: {error.error}")
+                        print(f"Failed to get archive metadata: {error.error}")
+
+                    # try to recover missing tags.
+                    tags = response.tags
+                    tags = ','.join(list(set(tags.split(",") + batch_arcid_to_archives[arcid]["tag_list"])))
+                    title = batch_arcid_to_archives[arcid]["title"]
+                    response, error = await lrr_client.archive_api.update_archive_metadata(UpdateArchiveMetadataRequest(
+                        arcid=arcid, title=title, tags=tags
+                    ))
+                    if error:
+                        print(f"Failed to update metadata for {arcid}: {error.error}")
                         sys.exit(1)
-                    LOGGER.info(f"Encountered and removed duplicate {response.arcid}.")
+                    LOGGER.info(f"Updated metadata for duplicate archive {arcid}")
                 elif error:
                     print(f"Unhandled upload error from LRR: {error.error}")
+                    sys.exit(1)
 
             batch_time = time.time() - batch_start_time
             avg_batch_times.append(batch_time)
