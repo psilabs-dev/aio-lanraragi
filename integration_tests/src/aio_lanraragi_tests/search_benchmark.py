@@ -44,9 +44,9 @@ logging.basicConfig(level=logging.INFO)
 DEFAULT_STAGING_DIR = str(Path.cwd() / ".staging")
 DEFAULT_RESOURCE_PREFIX = "benchmark_search_"
 DEFAULT_PORT_OFFSET = 2
-DEFAULT_NUM_ARCHIVES = 10000
-DEFAULT_NUM_TAGS = 1000
-DEFAULT_ARTISTS = 100
+DEFAULT_NUM_ARCHIVES = 500_000
+DEFAULT_NUM_TAGS = 100_000
+DEFAULT_ARTISTS = 1000
 
 def __get_synthetic_data_dir(staging_dir: str):
     ".staging/benchmark_search_synthetic_data/"
@@ -116,7 +116,7 @@ def require_generate(staging_dir: str=None) -> bool:
     
     return True
 
-def generate(staging_dir: str=None):
+def generate(staging_dir: str=None, num_archives: int=None, num_tags: int=None, num_artists: int=None):
     print("Generating synthetic data for search benchmark...")
     np_generator = np.random.default_rng(42)
 
@@ -130,17 +130,20 @@ def generate(staging_dir: str=None):
         else:
             print("Validation failed! Run `clean` and try again.")
             sys.exit(1)
+    elif archives_dir.exists(): # no generated JSON path, but archives? incomplete.
+        print("Found archives directory but no generated JSON! Check the data.")
+        sys.exit(1)
 
     archives_dir.mkdir(parents=True, exist_ok=True)
     requests: List[WriteArchiveRequest] = []
     responses: List[WriteArchiveResponse] = []
 
     # ensure sharded subdirectories with up to 1,000 archives each
-    num_subdirs = (DEFAULT_NUM_ARCHIVES - 1) // 1000 + 1
+    num_subdirs = (num_archives - 1) // 1000 + 1
     subdir_digits = len(str(max(0, num_subdirs - 1)))
-    for archive_id in range(DEFAULT_NUM_ARCHIVES):
+    for archive_id in range(num_archives):
         create_page_requests = []
-        archive_name = f"archive-{str(archive_id+1).zfill(len(str(DEFAULT_NUM_ARCHIVES)))}"
+        archive_name = f"archive-{str(archive_id+1).zfill(len(str(num_archives)))}"
         filename = f"{archive_name}.zip"
         subdir_name = str(archive_id // 1000).zfill(subdir_digits or 1)
         subdir_path = archives_dir / subdir_name
@@ -158,8 +161,8 @@ def generate(staging_dir: str=None):
     responses = write_archives_to_disk(requests)
 
     # generate zipf tag distribution.
-    archive_idx_to_tag_idx_list = get_archive_idx_to_tag_idxs_map(DEFAULT_NUM_ARCHIVES, DEFAULT_NUM_TAGS, 20, np_generator)
-    archive_idx_to_artist_idx_list = get_archive_idx_to_tag_idxs_map(DEFAULT_NUM_ARCHIVES, DEFAULT_ARTISTS, 1, np_generator)
+    archive_idx_to_tag_idx_list = get_archive_idx_to_tag_idxs_map(num_archives, num_tags, 20, np_generator)
+    archive_idx_to_artist_idx_list = get_archive_idx_to_tag_idxs_map(num_archives, num_artists, 1, np_generator)
 
     arcidx_to_arcid: Dict[int, str] = {}
     for arcidx, response in enumerate(responses):
@@ -167,8 +170,8 @@ def generate(staging_dir: str=None):
         arcid = compute_archive_id(save_path)
         arcidx_to_arcid[arcidx] = arcid
 
-    tag_idx_to_tag_id: Dict[int, str] = {idx: f"tag-{idx}" for idx in range(DEFAULT_NUM_TAGS)}
-    artist_idx_to_artist_id: Dict[int, str] = {artistidx: f"artist:artist-{artistidx}" for artistidx in range(DEFAULT_ARTISTS)}
+    tag_idx_to_tag_id: Dict[int, str] = {idx: f"tag-{idx}" for idx in range(num_tags)}
+    artist_idx_to_artist_id: Dict[int, str] = {artistidx: f"artist:artist-{artistidx}" for artistidx in range(num_artists)}
 
     data = {
         'archives': [{
@@ -346,6 +349,9 @@ if __name__ == "__main__":
 
     generate_sp = subparsers.add_parser('generate', help='Generate the archives and metadata.')
     generate_sp.add_argument('--staging', default=DEFAULT_STAGING_DIR, help='Path to staging directory.')
+    generate_sp.add_argument('--archives', type=int, default=DEFAULT_NUM_ARCHIVES, help=f'Number of total archives to generate (default {DEFAULT_NUM_ARCHIVES})')
+    generate_sp.add_argument('--tags', type=int, default=DEFAULT_NUM_TAGS, help=f'Number of total tags to generate (default {DEFAULT_NUM_TAGS})')
+    generate_sp.add_argument('--artists', type=int, default=DEFAULT_ARTISTS, help=f'Number of total artists to generate (default {DEFAULT_ARTISTS})')
     
     upload_sp = subparsers.add_parser('upload', help='Upload archives to benchmarked instance.')
     upload_sp.add_argument('--staging', default=DEFAULT_STAGING_DIR, help='Path to staging directory.')
@@ -370,7 +376,7 @@ if __name__ == "__main__":
             case 'clean':
                 clean(staging_dir=args.staging)
             case 'generate':
-                generate(staging_dir=args.staging)
+                generate(staging_dir=args.staging, num_archives=args.archives, num_tags=args.tags)
             case 'upload':
                 asyncio.run(upload(staging_dir=args.staging))
             case 'bench':
