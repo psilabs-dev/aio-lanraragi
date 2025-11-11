@@ -289,7 +289,7 @@ async def upload(staging_dir: str):
             await asyncio.gather(*tasks)
             batch_time = time.time() - batch_start_time
             avg_batch_times.append(batch_time)
-            avg_batch_time = sum(avg_batch_times) / len(avg_batch_times)
+            avg_batch_time = sum(avg_batch_times[-10:]) / len(avg_batch_times[-10:]) # ignore skipped archives.
 
             remaining_batches = total_batches - batch_idx
             eta_seconds = remaining_batches * avg_batch_time
