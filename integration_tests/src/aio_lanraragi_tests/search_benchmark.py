@@ -25,7 +25,7 @@ import docker
 import numpy as np
 import shutil
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
@@ -37,6 +37,8 @@ from aio_lanraragi_tests.exceptions import DeploymentException
 from aio_lanraragi_tests.helpers import upload_archive
 
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.archive import UploadArchiveResponse
+from lanraragi.models.base import LanraragiErrorResponse
 from lanraragi.models.minion import GetMinionJobStatusRequest
 
 LOGGER = logging.getLogger(__name__)
@@ -283,11 +285,25 @@ async def upload(staging_dir: str):
                         sem,
                         title=title,
                         tags=tags,
-                        allow_duplicates=True,
+                        # allow_duplicates=True,
                         retry_on_ise=True,
                     )
                 ))
-            await asyncio.gather(*tasks)
+
+            # we might have received some duplicates but duplicates might be a result of buggy logging,
+            # so we're going to remove those duplicates and try again in another run (bc we can't recover rn).
+            results: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+            for result in results:
+                response, error = result
+                if error and error.status == 409:
+                    _, error = await lrr_client.archive_api.delete_archive(response.arcid)
+                    if error:
+                        print(f"Failed to delete archive: {error.error}")
+                        sys.exit(1)
+                    LOGGER.info(f"Encountered and removed duplicate {response.arcid}.")
+                elif error:
+                    print(f"Unhandled upload error from LRR: {error.error}")
+
             batch_time = time.time() - batch_start_time
             avg_batch_times.append(batch_time)
             avg_batch_time = sum(avg_batch_times[-10:]) / len(avg_batch_times[-10:]) # ignore skipped archives.
