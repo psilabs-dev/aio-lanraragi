@@ -44,9 +44,13 @@ async def upload_archive(
             try:
                 response, error = await client.archive_api.upload_archive(request)
                 if error:
-                    if error.status == 409 and allow_duplicates:
-                        LOGGER.info(f"[upload_archive] Duplicate upload {filename} to arcid {response.arcid}; skipping.")
-                        return response, None
+                    if error.status == 409:
+                        if allow_duplicates:
+                            LOGGER.info(f"[upload_archive] Duplicate upload {filename} to arcid {response.arcid}..")
+                            return response, None
+                        else:
+                            LOGGER.error(f"[upload_archive] Duplicate upload {filename} to arcid {response.arcid}.")
+                            return response, error
                     elif error.status == 423: # locked resource
                         if retry_count >= max_retries:
                             return None, error
