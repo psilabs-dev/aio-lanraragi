@@ -575,7 +575,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         
         If something goes wrong during setup, the environment will be reset and the data should be removed.
         """
-        if remove_data and self.lrr_container:
+        if remove_data and self.lrr_container and self.lrr_container.status == 'running':
             self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/content/*'], user='koyomi')
             self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/thumb/*'], user='koyomi')
             self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/log/*'], user='koyomi')
@@ -586,7 +586,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.lrr_container.remove(v=True, force=True)
             self.logger.debug(f"Removed container: {self.lrr_container_name}")
 
-        if remove_data and self.redis_container:
+        if remove_data and self.redis_container and self.redis_container == 'running':
             self.redis_container.exec_run(["bash", "-c", "rm -rf /data/*"], user='redis')
         if self.redis_container:
             self.redis_container.stop(timeout=1)
