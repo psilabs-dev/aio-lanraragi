@@ -178,10 +178,27 @@ async def upload_archives(
             tasks.append(asyncio.create_task(
                 upload_archive(lrr_client, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
             ))
-        gathered: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
-        for response, error in gathered:
-            assert not error, f"Upload failed (status {error.status}): {error.error}"
-            responses.append(response)
+        # Collect results without cancelling in-flight tasks on first exception.
+        gathered = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # post-gather handling.
+        # if any unexpected error or exception occurs: throw them.
+        # if a client connection error occurred: throw it to trigger a flake rerun.
+        first_connector_error: Optional[aiohttp.client_exceptions.ClientConnectorError] = None
+        for item in gathered:
+            if isinstance(item, tuple):
+                response, error = item
+                assert not error, f"Upload failed (status {error.status}): {error.error}"
+                responses.append(response)
+            elif isinstance(item, aiohttp.client_exceptions.ClientConnectorError):
+                if first_connector_error is None:
+                    first_connector_error = item
+            elif isinstance(item, BaseException):
+                raise item
+            else:
+                raise RuntimeError(f"Unexpected gather result type: {type(item)}")
+        if first_connector_error is not None:
+            raise first_connector_error
         return responses
 
 def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Generator) -> List[WriteArchiveResponse]:
