@@ -17,6 +17,7 @@ import asyncio
 from http import HTTPMethod
 import json
 import logging
+import math
 from pathlib import Path
 import time
 import aiofiles
@@ -246,25 +247,59 @@ async def upload(staging_dir: str):
     generate_result_path = __get_synthetic_data_dir(staging_dir) / "generated_data.json"
     async with aiofiles.open(generate_result_path, 'r') as f:
         data = json.loads(await f.read())
+
+    archives = data["archives"]
+    batch_size = 1000
+
+    # batch processing with time estimation
+    # get some coffee... and maybe lunch.
     try:
         print("Uploading archives...")
+        upload_start_time = time.time()
+
         sem = asyncio.BoundedSemaphore(value=4)
+        avg_batch_times: List[float] = []
+        total_batches = math.ceil(len(archives) / batch_size)
 
-        tasks = []
-        archives = data["archives"]
-        for archive in archives:
-            save_path = Path(archive["path"])
-            filename = save_path.name
-            title = archive["title"]
-            tag_list = archive["tag_list"]
-            tags = ",".join(tag_list)
+        for batch_idx, i in enumerate(range(0, len(archives), batch_size), start=1):
+            batch_start_time = time.time()
+            batch = archives[i:i + batch_size]
 
-            # if duplicates exist or internal server errors happen: skip them
-            tasks.append(asyncio.create_task(upload_archive(
-                lrr_client, save_path, filename, sem, title=title, tags=tags, allow_duplicates=True, retry_on_ise=True,
-            )))
-        await asyncio.gather(*tasks)
-        print("All archives uploaded; checking archive count...")
+            tasks = []
+            for archive in batch:
+                save_path = Path(archive["path"])
+                filename = save_path.name
+                title = archive["title"]
+                tag_list = archive["tag_list"]
+                tags = ",".join(tag_list)
+
+                # if duplicates exist or internal server errors happen: skip them
+                tasks.append(asyncio.create_task(
+                    upload_archive(
+                        lrr_client,
+                        save_path,
+                        filename,
+                        sem,
+                        title=title,
+                        tags=tags,
+                        allow_duplicates=True,
+                        retry_on_ise=True,
+                    )
+                ))
+            await asyncio.gather(*tasks)
+            batch_time = time.time() - batch_start_time
+            avg_batch_times.append(batch_time)
+            avg_batch_time = sum(avg_batch_times) / len(avg_batch_times)
+
+            remaining_batches = total_batches - batch_idx
+            eta_seconds = remaining_batches * avg_batch_time
+            print(
+                f"Finished batch {batch_idx}/{total_batches} in {batch_time:.2f}s; "
+                f"estimated time remaining: {eta_seconds:.1f}s (~{eta_seconds/60:.1f}m)"
+            )
+
+        upload_time = time.time() - upload_start_time
+        print(f"All archives uploaded after {upload_time:.2f}s; checking archive count...")
 
         status, content = await lrr_client.handle_request(
             HTTPMethod.POST,
