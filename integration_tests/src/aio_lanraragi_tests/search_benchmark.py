@@ -350,7 +350,7 @@ async def upload(staging_dir: str):
         print("Waiting for stat hashes to build...")
         start_time = time.time()
         while True:
-            if time.time() - start_time > 60:
+            if time.time() - start_time > 600: # give 10 minutes.
                 print("Failed to finish build_stat_hashes after 60s.")
                 sys.exit()
             response, error = await lrr_client.minion_api.get_minion_job_status(GetMinionJobStatusRequest(
@@ -370,6 +370,7 @@ async def upload(staging_dir: str):
             else:
                 print(f"Unknown build_stat_hashes state: {state}")
                 sys.exit(1)
+            print(f"build_stat_hashes finished after {time.time() - start_time}s.")
 
         if not await require_upload(lrr_client, archives):
             print("Failed upload validation.")
