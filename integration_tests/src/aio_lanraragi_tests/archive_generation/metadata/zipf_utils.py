@@ -12,6 +12,7 @@ from typing import Counter, Dict, List, Literal, Set
 def get_archive_idx_to_tag_idxs_map(
     num_archives: int,
     num_tags: int,
+    min_tags_per_archive: int,
     max_tags_per_archive: int,
     generator: np.random.Generator = None,
     poisson_lam: float = 7.0,
@@ -26,7 +27,9 @@ def get_archive_idx_to_tag_idxs_map(
         case 'zipf-fast':
             for arcidx in range(num_archives):
                 k = generator.poisson(lam=poisson_lam)
-                k = max(1, min(k, max_tags_per_archive, num_tags))
+                upper = min(max_tags_per_archive, num_tags)
+                lower = min(min_tags_per_archive, upper)
+                k = min(max(k, lower), upper)
 
                 chosen: Set[int] = set()
                 while len(chosen) < k:
@@ -46,7 +49,9 @@ def get_archive_idx_to_tag_idxs_map(
 
             for arcidx in range(num_archives):
                 k = generator.poisson(lam=poisson_lam)
-                k = max(1, min(k, max_tags_per_archive, num_tags))
+                upper = min(max_tags_per_archive, num_tags)
+                lower = min(min_tags_per_archive, upper)
+                k = min(max(k, lower), upper)
 
                 chosen_idxs = generator.choice(
                     num_tags, size=k, replace=False, p=probs
@@ -66,13 +71,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--num-archives", type=int, default=1_000_000)
     parser.add_argument("--num-tags", type=int, default=100_000)
-    parser.add_argument("--tags-per-archive", type=int, default=40)
+    parser.add_argument("--min-tags-per-archive", type=int, default=1)
+    parser.add_argument("--max-tags-per-archive", type=int, default=40)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     num_archives: int = args.num_archives
     num_tags: int = args.num_tags
-    max_tags_per_archive: int = args.tags_per_archive
+
+    min_tags_per_archive: int = args.min_tags_per_archive
+    max_tags_per_archive: int = args.max_tags_per_archive
+
     npseed: int = args.seed
 
     npgenerator = np.random.default_rng(seed=npseed)
@@ -80,7 +89,7 @@ if __name__ == "__main__":
     try:
         print(f"Generating synthetic data (num archives={num_archives}, num tags={num_tags}, seed={npseed})")
         archive_idx_to_tag_idxs = get_archive_idx_to_tag_idxs_map(
-            num_archives, num_tags, max_tags_per_archive, generator=npgenerator,
+            num_archives, num_tags, min_tags_per_archive, max_tags_per_archive, generator=npgenerator,
             generation_method='zipf-fast'
         )
 
