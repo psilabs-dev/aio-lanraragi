@@ -123,6 +123,7 @@ def require_generate(staging_dir: str=None) -> bool:
 def generate(staging_dir: str=None, num_archives: int=None, num_tags: int=None, num_artists: int=None):
     print("Generating synthetic data for search benchmark...")
     np_generator = np.random.default_rng(42)
+    start_time = time.time()
 
     archives_dir = __get_synthetic_data_dir(staging_dir) / "archives"
     generate_result_path = __get_synthetic_data_dir(staging_dir) / "generated_data.json"
@@ -191,6 +192,7 @@ def generate(staging_dir: str=None, num_archives: int=None, num_tags: int=None, 
             data, f,
             # indent=4
         )
+    print(f"Finished archive and metadata generation in {time.time() - start_time}s. Validating...")
 
     if require_generate(staging_dir=staging_dir):
         print("Data generation validation passed.")
