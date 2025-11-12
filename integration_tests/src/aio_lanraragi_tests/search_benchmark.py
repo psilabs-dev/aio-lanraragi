@@ -48,9 +48,9 @@ DEFAULT_STAGING_DIR = str(Path.cwd() / ".staging")
 DEFAULT_RESOURCE_PREFIX = "benchmark_search_"
 DEFAULT_PORT_OFFSET = 2
 DEFAULT_NUM_ARCHIVES = 500_000
-DEFAULT_NUM_TAGS = 100_000
-DEFAULT_NUM_SERIES = 1_000
-DEFAULT_ARTISTS = 1000
+DEFAULT_NUM_TAGS = 200_000
+DEFAULT_NUM_SERIES = 50_000
+DEFAULT_ARTISTS = 50_000
 
 def __get_synthetic_data_dir(staging_dir: str):
     ".staging/benchmark_search_synthetic_data/"
