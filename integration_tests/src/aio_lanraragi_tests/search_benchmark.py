@@ -49,11 +49,18 @@ DEFAULT_RESOURCE_PREFIX = "benchmark_search_"
 DEFAULT_PORT_OFFSET = 2
 DEFAULT_NUM_ARCHIVES = 500_000
 DEFAULT_NUM_TAGS = 100_000
+DEFAULT_NUM_SERIES = 1_000
 DEFAULT_ARTISTS = 1000
 
 def __get_synthetic_data_dir(staging_dir: str):
     ".staging/benchmark_search_synthetic_data/"
     return Path(staging_dir) / f"{DEFAULT_RESOURCE_PREFIX}synthetic_data"
+
+def _mock_source_tag(arcidx: int) -> str:
+    """
+    Mock archive source.
+    """
+    return f"source:www.example-lrr.org/id/{arcidx}/files"
 
 def get_deployment(
     build_path: str=None, image: str=None, git_url: str=None, git_branch: str=None, docker_api: docker.APIClient=None, staging_dir: str=None
@@ -112,11 +119,23 @@ def require_generate(staging_dir: str=None) -> bool:
     with open(generate_result_path, 'r') as f:
         data = json.load(f)
 
+    has_archive_with_no_series = False
     for archive in data["archives"]:
         path = Path(archive['path'])
         if not path.exists():
             LOGGER.warning(f"Archive does not exist: {path}")
             return False
+        tag_list: List[str] = archive["tag_list"]
+        has_series_info = False
+        for tag in tag_list:
+            if tag.startswith('series_id:'):
+                has_series_info = True
+        if not has_series_info:
+            has_archive_with_no_series = True
+    
+    if not has_archive_with_no_series:
+        LOGGER.error("Generation scheme yielded no archives with no series.")
+        return False
     
     return True
 
@@ -166,8 +185,8 @@ def generate(staging_dir: str=None, num_archives: int=None, num_tags: int=None, 
     responses = write_archives_to_disk(requests)
 
     # generate zipf tag distribution.
-    archive_idx_to_tag_idx_list = get_archive_idx_to_tag_idxs_map(num_archives, num_tags, 20, np_generator)
-    archive_idx_to_artist_idx_list = get_archive_idx_to_tag_idxs_map(num_archives, num_artists, 1, np_generator)
+    archive_idx_to_tag_idx_list = get_archive_idx_to_tag_idxs_map(num_archives, num_tags, 0, 20, np_generator)
+    archive_idx_to_artist_idx_list = get_archive_idx_to_tag_idxs_map(num_archives, num_artists, 1, 1, np_generator)
 
     arcidx_to_arcid: Dict[int, str] = {}
     for arcidx, response in enumerate(responses):
@@ -178,10 +197,49 @@ def generate(staging_dir: str=None, num_archives: int=None, num_tags: int=None, 
     tag_idx_to_tag_id: Dict[int, str] = {idx: f"tag-{idx}" for idx in range(num_tags)}
     artist_idx_to_artist_id: Dict[int, str] = {artistidx: f"artist:artist-{artistidx}" for artistidx in range(num_artists)}
 
+    # generate mock date created tags
+    archive_idx_to_dates_list: Dict[int, str] = {}
+    for arcidx in range(num_archives):
+        epoch_time = int(np_generator.integers(1700000000, 1762000000))
+        archive_idx_to_dates_list[arcidx] = f"date_created:{epoch_time}"
+
+    # generate selective pixiv-like series/title/order tags
+    # an archive may have one series, but a series may have multiple archives.
+    # an archive may also not have a series.
+    # multiple-archive series are then distinguished by order.
+    # assume roughly 20% of archives belong to a series.
+    arcidx_to_optional_series_idx_list = get_archive_idx_to_tag_idxs_map(
+        num_archives, DEFAULT_NUM_SERIES, 0, 1, np_generator, poisson_lam=0.2
+    )
+    arcidx_to_series_tags: Dict[int, List[str]] = {}
+    series_idx_counter: Dict[int, int] = {}
+    for arcidx, series_idx_list in arcidx_to_optional_series_idx_list.items():
+        if arcidx not in arcidx_to_series_tags:
+            arcidx_to_series_tags[arcidx] = []
+        if not series_idx_list:
+            continue
+        if len(series_idx_list) != 1:
+            raise ValueError("An archive may only have at most one series!")
+        series_idx = series_idx_list[0]
+        if series_idx not in series_idx_counter:
+            series_idx_counter[series_idx] = 0
+        series_idx_counter[series_idx] += 1
+        arcidx_to_series_tags[arcidx] = [
+            f"series_id:{series_idx}", f"series_title:series-{series_idx}", f"series_order:{series_idx_counter[series_idx]}"
+        ]
+
     data = {
         'archives': [{
             'path': str(response.save_path),
-            'tag_list': [tag_idx_to_tag_id[idx] for idx in archive_idx_to_tag_idx_list[arcidx]] + [artist_idx_to_artist_id[idx] for idx in archive_idx_to_artist_idx_list[arcidx]],
+            'tag_list': [ # add normal tags
+                tag_idx_to_tag_id[idx] for idx in archive_idx_to_tag_idx_list[arcidx]
+            ] + [ # add "artist:xxx"
+                artist_idx_to_artist_id[idx] for idx in archive_idx_to_artist_idx_list[arcidx]
+            ] + [ # add "source:xxx"
+                _mock_source_tag(arcidx)
+            ] + [
+                archive_idx_to_dates_list[arcidx]
+            ] + arcidx_to_series_tags[arcidx],
             'title': f"title-{arcidx}",
             'arcid': arcidx_to_arcid[arcidx],
         } for arcidx, response in enumerate(responses)]

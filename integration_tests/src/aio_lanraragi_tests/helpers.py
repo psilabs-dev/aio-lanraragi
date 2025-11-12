@@ -158,7 +158,7 @@ async def upload_archives(
 
     num_archives = len(write_responses)
     num_tags = 100
-    arcidx_to_tagidx_list = get_archive_idx_to_tag_idxs_map(num_archives, num_tags, 20, generator=npgenerator)
+    arcidx_to_tagidx_list = get_archive_idx_to_tag_idxs_map(num_archives, num_tags, 1, 20, generator=npgenerator)
 
     if force_sync:
         for i, _response in enumerate(write_responses):
