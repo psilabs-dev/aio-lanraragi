@@ -26,6 +26,7 @@ async def upload_archive(
     client: LRRClient, save_path: Path, filename: str, semaphore: asyncio.Semaphore,
     checksum: str=None, title: str=None, tags: str=None,
     max_retries: int=4, allow_duplicates: bool=False, retry_on_ise: bool=False,
+    stop_event: Optional[asyncio.Event]=None,
 ) -> Tuple[UploadArchiveResponse, LanraragiErrorResponse]:
     """
     Upload archive (while considering all the permutations of errors that can happen).
@@ -33,6 +34,9 @@ async def upload_archive(
 
     Note: retry_on_ise SHOULDN'T be enabled otherwise it defeats the purpose of our tests.
     """
+
+    if stop_event is not None and stop_event.is_set():
+        raise asyncio.CancelledError()
 
     async with semaphore:
         async with aiofiles.open(save_path, 'rb') as f:
@@ -114,6 +118,9 @@ async def upload_archive(
                     raise client_connector_error
 
                 if retry_count >= max_retries:
+                    if stop_event is not None:
+                        stop_event.set()
+                        LOGGER.error("[upload_archive] Signalling STOP archive upload due to persistent connection errors.")
                     error = LanraragiErrorResponse(error=str(client_connector_error), status=408)
                     # return None, error
                     raise client_connector_error
@@ -159,15 +166,21 @@ async def upload_archives(
     num_archives = len(write_responses)
     num_tags = 100
     arcidx_to_tagidx_list = get_archive_idx_to_tag_idxs_map(num_archives, num_tags, 1, 20, generator=npgenerator)
+    stop_event = asyncio.Event()
 
     if force_sync:
         for i, _response in enumerate(write_responses):
+            if stop_event.is_set():
+                break
             title = f"Archive {i}"
             tag_idx_list = arcidx_to_tagidx_list[i]
             tag_list = [f"tag-{t}" for t in tag_idx_list]
             tags = ','.join(tag_list)
             checksum = compute_upload_checksum(_response.save_path)
-            response, error = await upload_archive(lrr_client, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+            response, error = await upload_archive(
+                lrr_client, _response.save_path, _response.save_path.name, semaphore,
+                title=title, tags=tags, checksum=checksum, stop_event=stop_event
+            )
             assert not error, f"Upload failed (status {error.status}): {error.error}"
             responses.append(response)
         return responses
@@ -180,9 +193,12 @@ async def upload_archives(
             tags = ','.join(tag_list)
             checksum = compute_upload_checksum(_response.save_path)
             tasks.append(asyncio.create_task(
-                upload_archive(lrr_client, _response.save_path, _response.save_path.name, semaphore, title=title, tags=tags, checksum=checksum)
+                upload_archive(
+                    lrr_client, _response.save_path, _response.save_path.name, semaphore,
+                    title=title, tags=tags, checksum=checksum, stop_event=stop_event
+                )
             ))
-        # Collect results without cancelling in-flight tasks on first exception.
+        # Collect results; other tasks may be cancelled if a fatal connector error occurs.
         gathered = await asyncio.gather(*tasks, return_exceptions=True)
 
         # post-gather handling.
@@ -197,6 +213,11 @@ async def upload_archives(
             elif isinstance(item, aiohttp.client_exceptions.ClientConnectorError):
                 if first_connector_error is None:
                     first_connector_error = item
+            elif isinstance(item, asyncio.CancelledError):
+                if stop_event.is_set():
+                    continue
+                else:
+                    raise item
             elif isinstance(item, BaseException):
                 raise item
             else:
