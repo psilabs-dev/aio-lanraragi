@@ -348,9 +348,8 @@ async def test_archive_upload(lrr_client: LRRClient, semaphore: asyncio.Semaphor
     assert len(list(environment.archives_dir.iterdir())) == num_archives-50, "Incorrect number of archives on disk!"
     # <<<<< DELETE ARCHIVE ASYNC STAGE <<<<<
 
-    # # no error logs
-    # # TODO: there are error logs (tankoubon missing archive ID)
-    # expect_no_error_logs(environment)
+    # no error logs
+    expect_no_error_logs(environment)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
