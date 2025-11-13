@@ -453,9 +453,11 @@ def bench(staging_dir: str):
         sys.exit(1)
 
 def down(staging_dir: str=None):
+    start_time = time.time()
     d = get_deployment(staging_dir=staging_dir)
     d.teardown(remove_data=True)
-    print("LRR benchmarking environment teardown complete.")
+    teardown_time = time.time() - start_time
+    print(f"LRR benchmarking environment teardown complete after {teardown_time}s.")
     sys.exit(0)
 
 if __name__ == "__main__":
