@@ -430,8 +430,8 @@ async def upload(staging_dir: str):
             else:
                 print(f"Unknown build_stat_hashes state: {state}")
                 sys.exit(1)
-            print(f"build_stat_hashes finished after {time.time() - start_time}s.")
 
+        print(f"build_stat_hashes finished after {time.time() - start_time}s.")
         if not await require_upload(lrr_client, archives):
             print("Failed upload validation.")
             sys.exit(1)
