@@ -409,9 +409,10 @@ async def upload(staging_dir: str):
 
         print("Waiting for stat hashes to build...")
         start_time = time.time()
+        last_state: str = "unknown"
         while True:
             if time.time() - start_time > 600: # give 10 minutes.
-                print("Failed to finish build_stat_hashes after 60s.")
+                print(f"Failed to finish build_stat_hashes after 60m (last state: {last_state})")
                 sys.exit()
             response, error = await lrr_client.minion_api.get_minion_job_status(GetMinionJobStatusRequest(
                 job_id=job_id
@@ -420,6 +421,7 @@ async def upload(staging_dir: str):
                 print(f"Failed to get job status: {error.error}")
                 sys.exit(1)
             state = (response.state).lower()
+            last_state = state
             if state == "finished":
                 break
             elif state == "failed":
