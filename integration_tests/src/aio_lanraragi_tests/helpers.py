@@ -35,6 +35,11 @@ async def upload_archive(
     Note: retry_on_ise SHOULDN'T be enabled otherwise it defeats the purpose of our tests.
     """
 
+    # Considerations for github action integration testing
+    # As uploads are performed in a timed environment on github actions, it's unnecessary to continue
+    # uploading archives if the first archive uploads failed due to persistent connection refusal errors.
+    # In this case, we should cancel on persistent error, then fail early, allowing the test to be
+    # rerun, or the rest of the test to resume.
     if stop_event is not None and stop_event.is_set():
         raise asyncio.CancelledError()
 
