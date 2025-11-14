@@ -4,8 +4,8 @@ on:
   pull_request:
     branches: 
       - main
-      - 'dev-*/main'    # Run tests on main dev branches
-      - 'devt-*/main'   # Run tests on main test branches
+      - 'dev-**/main'    # Run tests on main dev branches
+      - 'devt-**/main'   # Run tests on main test branches
   push:
     branches: 
       - main
