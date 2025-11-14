@@ -267,6 +267,7 @@ async def test_xfail_catch_flakes(lrr_client: LRRClient, semaphore: asyncio.Sema
     # no error logs
     expect_no_error_logs(environment)
 
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
 async def test_logrotation(lrr_client: LRRClient, semaphore: asyncio.Semaphore):
     """
