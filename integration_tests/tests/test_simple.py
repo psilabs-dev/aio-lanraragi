@@ -13,6 +13,7 @@ import logging
 from pathlib import Path
 import sys
 import tempfile
+import time
 from typing import Dict, Generator, List, Tuple
 import numpy as np
 import pytest
@@ -269,11 +270,12 @@ async def test_xfail_catch_flakes(lrr_client: LRRClient, semaphore: asyncio.Sema
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_logrotation(lrr_client: LRRClient, semaphore: asyncio.Semaphore):
+async def test_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Pressure test LRR log rotation with custom endpoint.
     """
     batch_size = 1000
+    start_time = time.time()
     for batch_idx in range(50):
 
         tasks = []
@@ -287,6 +289,12 @@ async def test_logrotation(lrr_client: LRRClient, semaphore: asyncio.Semaphore):
         for result in results:
             status, content = result
             assert status == 200, f"Logging API returned not OK: {content}"
+
+    total_time = time.time() - start_time
+    LOGGER.info(f"Completed test_logrotation with time {total_time}s.")
+
+    # no error logs
+    expect_no_error_logs(environment)
 
 # @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 # @pytest.mark.asyncio
