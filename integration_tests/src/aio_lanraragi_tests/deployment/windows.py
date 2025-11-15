@@ -13,6 +13,8 @@ import subprocess
 import time
 import stat
 from typing import Optional, override
+import threading
+from collections import deque
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.common import is_port_available
@@ -275,6 +277,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         if logger is None:
             logger = LOGGER
         self.logger = logger
+        self._lrr_process = None
+        self._lrr_output = deque(maxlen=10000)
+        self._lrr_reader_thread = None
 
     @override
     def setup(
@@ -429,6 +434,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.stop()
         self.start()
 
+    def _start_lrr_output_reader(self, pipe):
+        def _reader():
+            for line in iter(pipe.readline, b''):
+                self._lrr_output.append(line.replace(b'\r\n', b'\n'))
+        t = threading.Thread(target=_reader, daemon=True)
+        t.start()
+        self._lrr_reader_thread = t
+
     @override
     def teardown(self, remove_data: bool=False):
         """
@@ -521,16 +534,19 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.info(f"(lrr_network={lrr_network}, lrr_data_directory={lrr_data_directory}, lrr_log_directory={lrr_log_directory}, lrr_temp_directory={lrr_temp_directory}, lrr_thumb_directory={lrr_thumb_directory}) running script {subprocess.list2cmdline(script)}")
 
             # Ensure we have a console so the child inherits it (or gets its own), and create a new
-            # process group so we can signal with CTRL_BREAK later. Also create a new console so LRR
-            # does not share the test runner console.
+            # process group so we can signal with CTRL_BREAK later.
             CREATE_NEW_PROCESS_GROUP: int = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-            CREATE_NEW_CONSOLE: int = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
             with _WindowsConsole():
                 lrr_process = subprocess.Popen(
                     script,
                     env=lrr_env,
-                    creationflags=CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    creationflags=CREATE_NEW_PROCESS_GROUP,
                 )
+            self._lrr_process = lrr_process
+            if lrr_process.stdout:
+                self._start_lrr_output_reader(lrr_process.stdout)
             self.logger.debug(f"Started LRR process with PID: {lrr_process.pid}.")
         finally:
             os.chdir(cwd)
@@ -673,6 +689,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 # Normalize Windows CRLF line endings to LF to avoid extra spacing
                 normalized_lines = [line.replace(b'\r\n', b'\n') for line in lines]
                 return b''.join(normalized_lines[-tail:])
+        # Fallback to captured console output if logfile is unavailable
+        if hasattr(self, "_lrr_output") and self._lrr_output:
+            lines = list(self._lrr_output)
+            return b''.join(lines[-tail:])
         return b"No LRR logs available."
 
     # TODO: I hope we don't have to use this.
