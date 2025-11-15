@@ -93,7 +93,7 @@ def port_offset() -> Generator[int, None, None]:
 def environment(request: pytest.FixtureRequest, port_offset: int, resource_prefix: str):
     is_lrr_debug_mode: bool = request.config.getoption("--lrr-debug")
     environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
-    environment.setup(with_api_key=True, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode, test_connection_max_retries=8)
+    environment.setup(with_api_key=True, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode, test_connection_max_retries=6)
 
     # configure environments to session
     environments: Dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
