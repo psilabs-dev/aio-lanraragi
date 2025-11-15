@@ -686,13 +686,16 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.lrr_log_path.exists():
             with open(self.lrr_log_path, 'rb') as rb:
                 lines = rb.readlines()
-                # Normalize Windows CRLF line endings to LF to avoid extra spacing
-                normalized_lines = [line.replace(b'\r\n', b'\n') for line in lines]
-                return b''.join(normalized_lines[-tail:])
-        # Fallback to captured console output if logfile is unavailable
+                if lines:
+                    normalized_lines = [line.replace(b'\r\n', b'\n') for line in lines]
+                    return b''.join(normalized_lines[-tail:])
+                self.logger.error(f"No lines found in {self.lrr_log_path}")
         if hasattr(self, "_lrr_output") and self._lrr_output:
+            self.logger.error("LRR logs not found; falling back to console.")
             lines = list(self._lrr_output)
             return b''.join(lines[-tail:])
+        
+        self.logger.error("No LRR logs are available!")
         return b"No LRR logs available."
 
     # TODO: I hope we don't have to use this.
