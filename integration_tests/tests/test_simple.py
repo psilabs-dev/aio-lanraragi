@@ -235,7 +235,7 @@ async def test_xfail_catch_flakes(lrr_client: LRRClient, semaphore: asyncio.Sema
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+async def test_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext, semaphore: asyncio.BoundedSemaphore):
     """
     Pressure test LRR log rotation with custom endpoint.
     """
@@ -247,14 +247,20 @@ async def test_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploy
     uuid_batches: List[List[str]] = [[str(uuid.uuid4()) for _ in range(batch_size)] for _ in range(num_batches)]
     all_uuids: List[str] = [u for batch in uuid_batches for u in batch]
 
+    async def post_one(msg: str) -> Tuple[int, str]:
+        async with semaphore:
+            return await lrr_client.handle_request(
+                http.HTTPMethod.POST,
+                lrr_client.build_url('/api/logs/test'),
+                lrr_client.headers,
+                json_data=[msg]
+            )
+
     for batch_idx, messages in enumerate(uuid_batches):
-        status, content = await lrr_client.handle_request(
-            http.HTTPMethod.POST,
-            lrr_client.build_url('/api/logs/test'),
-            lrr_client.headers,
-            json_data=messages
-        )
-        assert status == 200, f"Logging API returned not OK: {content}"
+        tasks: List[asyncio.Task] = [asyncio.create_task(post_one(m)) for m in messages]
+        results: List[Tuple[int, str]] = await asyncio.gather(*tasks)
+        for status, content in results:
+            assert status == 200, f"Logging API returned not OK: {content}"
         LOGGER.info(f"Completed batch: {batch_idx}")
 
     total_time = time.time() - start_time
