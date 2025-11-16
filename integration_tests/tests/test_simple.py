@@ -278,6 +278,9 @@ async def test_concurrent_logrotation(lrr_client: LRRClient, environment: Abstra
         else:
             found.append(u)
 
+    # assert that logfile exists.
+    assert environment.lanraragi_logs_path.exists(), "LRR logfile DNE."
+
     # assert that no more than 0.1% of logs are not captured.
     # 50_000 * 0.001 = 50
     num_not_found = len(not_found)
@@ -322,6 +325,9 @@ async def test_append_logrotation(lrr_client: LRRClient, environment: AbstractLR
             not_found.append(u)
         else:
             found.append(u)
+
+    # assert that logfile exists.
+    assert environment.lanraragi_logs_path.exists(), "LRR logfile DNE."
 
     # assert that no more than 0.1% of logs are not captured.
     # 50_000 * 0.001 = 50
