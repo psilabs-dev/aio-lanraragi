@@ -332,18 +332,15 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.info(f"Building LRR image {image_id} from build path {self.build_path}.")
             self._build_docker_image(self.build_path, force=self.is_force_build)
         elif self.git_url:
+            # When building by git URL, we always clone the repository and rebuild.
             self.logger.info(f"Building LRR image {image_id} from git URL {self.git_url}.")
-            try:
-                self.docker_client.images.get(image_id)
-                self.logger.debug(f"Image {image_id} already exists, skipping build.")
-            except docker.errors.ImageNotFound:
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    self.logger.debug(f"Cloning {self.git_url} to {tmpdir}...")
-                    repo_dir = Path(tmpdir) / "LANraragi"
-                    repo = Repo.clone_from(self.git_url, repo_dir)
-                    if self.git_branch: # throws git.exc.GitCommandError if branch does not exist.
-                        repo.git.checkout(self.git_branch)
-                    self._build_docker_image(repo.working_dir, force=True)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                self.logger.debug(f"Cloning {self.git_url} to {tmpdir}...")
+                repo_dir = Path(tmpdir) / "LANraragi"
+                repo = Repo.clone_from(self.git_url, repo_dir)
+                if self.git_branch: # throws git.exc.GitCommandError if branch does not exist.
+                    repo.git.checkout(self.git_branch)
+                self._build_docker_image(repo.working_dir, force=True)
         else:
             image = DEFAULT_LANRARAGI_DOCKER_TAG
             if self.image:
