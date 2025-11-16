@@ -1,5 +1,7 @@
 import logging
 from pathlib import Path
+import platform
+import psutil
 import time
 from typing import Any, Dict, List
 import pytest
@@ -110,7 +112,20 @@ def pytest_sessionstart(session: pytest.Session):
     config.global_run_id = int(time.time() * 1000)
     global_run_id = config.global_run_id
     npseed: int = config.getoption("--npseed")
-    logger.info(f"pytest run parameters: global_run_id={global_run_id}, npseed={npseed}")
+    logger.info(
+        f"pytest run parameters: global_run_id={global_run_id}, npseed={npseed}"
+    )
+
+    cpu_count = psutil.cpu_count(logical=True)
+    mem = psutil.virtual_memory()
+    system = platform.system()
+    version = platform.version()
+    machine = platform.machine()
+    logger.info(
+        f"system_profile: system={system} version={version} machine={machine} "
+        f"cpu_count={cpu_count} total_mem_gb={mem.total / (1024 ** 3):.2f} "
+        f"avail_mem_gb={mem.available / (1024 ** 3):.2f}"
+    )
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):

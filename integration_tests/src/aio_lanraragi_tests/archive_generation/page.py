@@ -7,15 +7,17 @@ from PIL import Image, ImageDraw, ImageFont
 from aio_lanraragi_tests.archive_generation.models import LIGHT_GRAY, CreatePageRequest, CreatePageResponse, CreatePageResponseStatus, Page
 from aio_lanraragi_tests.archive_generation.utils import get_roberta_regular_font
 
-logger = logging.getLogger("manycbz")
+logger = logging.getLogger(__name__)
+
+def close_page(page: Page):
+    if isinstance(page.image, Image.Image):
+        page.image.close()
+    page.image = None
 
 def create_page(request: CreatePageRequest) -> CreatePageResponse:
     """
     Create a page based on a request, returns a page and an image object.
     """
-    response = CreatePageResponse()
-    page = Page()
-
     try:
         width = request.width
         height = request.height
@@ -29,35 +31,30 @@ def create_page(request: CreatePageRequest) -> CreatePageResponse:
             background_color = LIGHT_GRAY
 
         margin = int(min(width, height) * 0.05)
-        page.width = width
-        page.height = height
-        page.left_boundary = margin
-        page.right_boundary = width - margin
-        page.upper_boundary = margin
-        page.lower_boundary = height - margin
-        page.margin = margin
-        page.font_size = int(margin * 0.7)
-        page.first_n_bytes = first_n_bytes
-        page.image_format = image_format
-        page.text = text
-        page.filename = filename
-
-        page.image = Image.new("RGBA", (page.width, page.height), background_color)
+        page = Page(
+            width=request.width,
+            height=request.height,
+            left_boundary=margin,
+            right_boundary=width-margin,
+            upper_boundary=margin,
+            lower_boundary=height-margin,
+            margin=margin,
+            font_size=int(margin*0.7),
+            first_n_bytes=first_n_bytes,
+            image_format=image_format,
+            text=text,
+            filename=filename,
+            image=Image.new("RGBA", (request.width, request.height), background_color)
+        )
 
         # make it kind of look like a comic page.
         __add_white_panel_to_page(page)
         __add_panel_boundary_to_page(page)
         __write_text_to_page(page)
-
-        response.status = CreatePageResponseStatus.SUCCESS
-        response.page = page
-        return response
+        return CreatePageResponse(page=page, status=CreatePageResponseStatus.SUCCESS)
     except Exception as e:
-        logger.error(f"Failed to create page from request: {str(request.__dict__)}", e)
-        response.page = None
-        response.status = CreatePageResponseStatus.FAILURE
-        response.error = str(e)
-        return response
+        logger.exception(f"Failed to create page from request: {str(request.__dict__)}")
+        return CreatePageResponse(page=None, status=CreatePageResponseStatus.FAILURE, error=str(e))
 
 @overload
 def save_page_to_dir(page: Page, save_dir: Path, close: bool=True):
@@ -76,9 +73,7 @@ def save_page_to_dir(page: Union[Page, CreatePageRequest], save_dir: Path, close
     """
     if isinstance(page, CreatePageRequest):
         page = create_page(page).page
-        return save_page_to_dir(page, save_dir)    
-    if not isinstance(page, Page):
-        raise TypeError(f"Invalid page type! {type(page)}")
+        return save_page_to_dir(page, save_dir)
     if not save_dir.is_dir():
         raise NotADirectoryError(f"Cannot save page to a non-directory! {save_dir}")
 
@@ -102,7 +97,7 @@ def save_page_to_dir(page: Union[Page, CreatePageRequest], save_dir: Path, close
         writer.write(data)
     
     if close: 
-        page.close()
+        close_page(page)
     return
 
 def __add_panel_boundary_to_page(page: Page):

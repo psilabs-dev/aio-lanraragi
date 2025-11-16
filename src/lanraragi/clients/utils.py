@@ -2,8 +2,17 @@ import html
 import json
 import base64
 import re
+from typing import Optional
 
 from lanraragi.models.base import LanraragiErrorResponse
+
+def _parse_500_error_message(content: str) -> Optional[str]:
+    if content.startswith("<!DOCTYPE html>") and (match := re.search(r'<p>(.*?)</p>', content, re.DOTALL)):
+        encoded = match.group(1).strip()
+        decoded = html.unescape(encoded)
+        ise_message = decoded
+        return ise_message
+    return None
 
 def _build_err_response(content: str, status: int) -> LanraragiErrorResponse:
     try:
@@ -21,10 +30,7 @@ def _build_err_response(content: str, status: int) -> LanraragiErrorResponse:
         # one common case is when a 500 server error occurs.
         # in this case, we need to parse the HTML first, then extract the inner error.
         content = content.strip()
-        if content.startswith("<!DOCTYPE html>") and (match := re.search(r'<p>(.*?)</p>', content, re.DOTALL)):
-            encoded = match.group(1).strip()
-            decoded = html.unescape(encoded)
-            ise_message = decoded
+        if ise_message := _parse_500_error_message(content):
             err_message = f"Internal server error: {ise_message}"
         else:
             err_message = f"Error while decoding JSON from response: {content}"
