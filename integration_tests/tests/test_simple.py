@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 from typing import Dict, Generator, List, Tuple
+import uuid
 import numpy as np
 import pytest
 import playwright.async_api
@@ -276,22 +277,33 @@ async def test_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploy
     """
     batch_size = 1000
     start_time = time.time()
-    for batch_idx in range(50):
+    num_batches = 50
 
-        tasks = []
-        for _ in range(batch_size):
-            tasks.append(lrr_client.handle_request(
-                http.HTTPMethod.GET, lrr_client.build_url('/api/logs/test'), lrr_client.headers
-            ))
-        results: List[Tuple[int, str]] = await asyncio.gather(*tasks)
+    # Pre-create UUID batches to send and later verify in logs
+    uuid_batches: List[List[str]] = [[str(uuid.uuid4()) for _ in range(batch_size)] for _ in range(num_batches)]
+    all_uuids: List[str] = [u for batch in uuid_batches for u in batch]
+
+    for batch_idx, messages in enumerate(uuid_batches):
+        status, content = await lrr_client.handle_request(
+            http.HTTPMethod.POST,
+            lrr_client.build_url('/api/logs/test'),
+            lrr_client.headers,
+            json_data=messages
+        )
+        assert status == 200, f"Logging API returned not OK: {content}"
         LOGGER.info(f"Completed batch: {batch_idx}")
-
-        for result in results:
-            status, content = result
-            assert status == 200, f"Logging API returned not OK: {content}"
 
     total_time = time.time() - start_time
     LOGGER.info(f"Completed test_logrotation with time {total_time}s.")
+
+    # Verify all UUIDs were logged (including rotated logs)
+    logs_text: str = environment.read_lrr_logs()
+    not_found: List[str] = []
+    for u in all_uuids:
+        if u not in logs_text:
+            not_found.append(u)
+
+    assert not_found == [], f"UUID not found in logs: {not_found}"
 
     # no error logs
     expect_no_error_logs(environment)
