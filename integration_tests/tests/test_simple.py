@@ -270,19 +270,24 @@ async def test_xfail_catch_flakes(lrr_client: LRRClient, semaphore: asyncio.Sema
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+async def test_logrotation(lrr_client: LRRClient, semaphore: asyncio.Semaphore, environment: AbstractLRRDeploymentContext):
     """
     Pressure test LRR log rotation with custom endpoint.
     """
     batch_size = 1000
     start_time = time.time()
+
+    async def _handle_request():
+        async with semaphore:
+            return await lrr_client.handle_request(
+                http.HTTPMethod.GET, lrr_client.build_url('/api/logs/test'), lrr_client.headers
+            )
+
     for batch_idx in range(50):
 
         tasks = []
         for _ in range(batch_size):
-            tasks.append(lrr_client.handle_request(
-                http.HTTPMethod.GET, lrr_client.build_url('/api/logs/test'), lrr_client.headers
-            ))
+            tasks.append(_handle_request())
         results: List[Tuple[int, str]] = await asyncio.gather(*tasks)
         LOGGER.info(f"Completed batch: {batch_idx}")
 
