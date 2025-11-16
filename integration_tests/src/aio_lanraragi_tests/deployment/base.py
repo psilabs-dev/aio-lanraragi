@@ -7,6 +7,7 @@ from typing import Optional
 import aiohttp
 import redis
 import requests
+import gzip
 
 from lanraragi.clients.client import LRRClient
 
@@ -184,6 +185,11 @@ class AbstractLRRDeploymentContext(abc.ABC):
     ):
         """
         Main entrypoint to setting up a LRR environment.
+        
+        Performs all setup logic for a requirement, including creating directories and files, volumes, networks,
+        and other resources required for a working LRR environment.
+        
+        Does not, and will not perform any cleanup function. Use teardown or another API for that logic.
 
         Args:
             `with_api_key`: whether to add an API key (default API key: "lanraragi") to the LRR environment
@@ -415,6 +421,33 @@ class AbstractLRRDeploymentContext(abc.ABC):
             for line in log_text.split('\n'):
                 if line.strip():
                     self.logger.log(log_level, f"LRR: {line}")
+
+    def read_lrr_logs(self) -> str:
+        """
+        Read all lanraragi.log logs, including rotated ones, as a single string, in the order:
+
+        - lanraragi.log
+        - lanraragi.log.1.gz
+        - lanraragi.log.2.gz
+        - ...
+        """
+        parts: list[str] = []
+        if self.lanraragi_logs_path.exists():
+            with open(self.lanraragi_logs_path, 'r') as f:
+                parts.append(f.read())
+
+        rotated_logs = list(self.logs_dir.glob("lanraragi.log.*.gz"))
+        def parse_index(path: Path) -> int:
+            name = path.name
+            # expected format: lanraragi.log.<idx>.gz
+            idx_str = name.split(".")[-2]
+            return int(idx_str)
+
+        for gz_path in sorted(rotated_logs, key=parse_index):
+            with gzip.open(gz_path, mode="rt", encoding="utf-8", errors="replace") as f:
+                parts.append(f.read())
+
+        return "".join(parts)
 
     def read_log(self, log_file: str) -> str:
         """

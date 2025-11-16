@@ -153,7 +153,7 @@ def expect_no_error_logs(environment: AbstractLRRDeploymentContext):
     """
     Assert no logs with error level severity in LRR and Shinobu.
     """
-    for event in parse_lrr_logs(environment.read_log(environment.lanraragi_logs_path)):
+    for event in parse_lrr_logs(environment.read_lrr_logs()):
         assert event.severity_level != 'error', "LANraragi process emitted error logs."
     
     if environment.shinobu_logs_path.exists():
