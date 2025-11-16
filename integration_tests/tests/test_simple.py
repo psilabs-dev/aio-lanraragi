@@ -279,3 +279,26 @@ async def test_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploy
 
     # no error logs
     expect_no_error_logs(environment)
+
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
+@pytest.mark.asyncio
+async def test_append_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext, semaphore: asyncio.BoundedSemaphore):
+    """
+    Pressure test LRR log rotation with custom endpoint.
+    Assert that the number of rotation files exceeds 2.
+    """
+    status, content = await lrr_client.handle_request(
+        http.HTTPMethod.POST,
+        lrr_client.build_url('/api/logs/test_append'),
+        lrr_client.headers
+    )
+    assert status == 200, f"Append logging API returned not OK: {content}"
+
+    # Give the logger a brief moment to finalize rotations
+    await asyncio.sleep(1)
+
+    rotated_logs = list(environment.logs_dir.glob("lanraragi.log.*.gz"))
+    breakpoint()
+    assert len(rotated_logs) > 2, f"Expected more than 2 rotated log files, found {len(rotated_logs)}"
+
+    expect_no_error_logs(environment)
