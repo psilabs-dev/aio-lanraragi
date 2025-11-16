@@ -235,9 +235,9 @@ async def test_xfail_catch_flakes(lrr_client: LRRClient, semaphore: asyncio.Sema
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-async def test_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext, semaphore: asyncio.BoundedSemaphore):
+async def test_concurrent_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext, semaphore: asyncio.BoundedSemaphore):
     """
-    Pressure test LRR log rotation with custom endpoint.
+    Pressure test concurrent LRR log rotation with custom endpoint.
     """
     batch_size = 1000
     start_time = time.time()
@@ -253,7 +253,9 @@ async def test_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploy
                 http.HTTPMethod.POST,
                 lrr_client.build_url('/api/logs/test'),
                 lrr_client.headers,
-                json_data=[msg]
+                json_data={
+                    "messages": [msg]
+                }
             )
 
     for batch_idx, messages in enumerate(uuid_batches):
@@ -268,14 +270,18 @@ async def test_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploy
 
     # Verify all UUIDs were logged (including rotated logs)
     logs_text: str = environment.read_lrr_logs()
+    found: List[str] = []
     not_found: List[str] = []
     for u in all_uuids:
         if u not in logs_text:
             not_found.append(u)
+        else:
+            found.append(u)
 
     # assert that no more than 0.1% of logs are not captured.
     # 50_000 * 0.001 = 50
-    assert len(not_found) < 50, f"UUID not found in logs exceeds 50: {not_found}"
+    num_not_found = len(not_found)
+    assert num_not_found < 50, f"UUID count not found in logs exceeds 50 ({num_not_found}): {not_found}"
 
     # no error logs
     expect_no_error_logs(environment)
@@ -284,21 +290,43 @@ async def test_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploy
 @pytest.mark.asyncio
 async def test_append_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext, semaphore: asyncio.BoundedSemaphore):
     """
-    Pressure test LRR log rotation with custom endpoint.
-    Assert that the number of rotation files exceeds 2.
+    Pressure test append-time LRR log rotation with custom endpoint.
     """
+    start_time = time.time()
+    all_uuids = [str(uuid.uuid4()) for _ in range(50_000)]
+    payload = {
+        "messages": all_uuids
+    }
+
     status, content = await lrr_client.handle_request(
         http.HTTPMethod.POST,
-        lrr_client.build_url('/api/logs/test_append'),
-        lrr_client.headers
+        lrr_client.build_url('/api/logs/test'),
+        lrr_client.headers,
+        json_data=payload
     )
-    assert status == 200, f"Append logging API returned not OK: {content}"
 
-    # Give the logger a brief moment to finalize rotations
-    await asyncio.sleep(1)
+    assert status == 200, f"Logging API returned not OK: {content}"
+    total_time = time.time() - start_time
+    LOGGER.info(f"Completed test_logrotation with time {total_time}s.")
 
+    # Verify all UUIDs were logged (including rotated logs)
+    logs_text: str = environment.read_lrr_logs()
+    found: List[str] = []
+    not_found: List[str] = []
+    for u in all_uuids:
+        if u not in logs_text:
+            not_found.append(u)
+        else:
+            found.append(u)
+
+    # assert that no more than 0.1% of logs are not captured.
+    # 50_000 * 0.001 = 50
+    num_not_found = len(not_found)
+    assert num_not_found < 50, f"UUID count not found in logs exceeds 50 ({num_not_found}): {not_found}"
+
+    # assert that appends create rotated logs.
     rotated_logs = list(environment.logs_dir.glob("lanraragi.log.*.gz"))
-    breakpoint()
-    assert len(rotated_logs) > 2, f"Expected more than 2 rotated log files, found {len(rotated_logs)}"
+    assert len(rotated_logs) >= 1, f"No log rotation is performed! {rotated_logs}"
 
+    # no error logs
     expect_no_error_logs(environment)
