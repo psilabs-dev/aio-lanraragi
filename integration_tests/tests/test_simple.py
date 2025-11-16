@@ -22,7 +22,7 @@ import pytest_asyncio
 from urllib.parse import urlparse, parse_qs
 
 from lanraragi.clients.client import LRRClient
-from lanraragi.clients.utils import _build_err_response
+from lanraragi.clients.utils import _build_err_response, _parse_500_error_message
 from lanraragi.models.archive import (
     DeleteArchiveRequest,
     DeleteArchiveResponse,
@@ -262,7 +262,7 @@ async def test_concurrent_logrotation(lrr_client: LRRClient, environment: Abstra
         tasks: List[asyncio.Task] = [asyncio.create_task(post_one(m)) for m in messages]
         results: List[Tuple[int, str]] = await asyncio.gather(*tasks)
         for status, content in results:
-            assert status == 200, f"Logging API returned not OK: {content}"
+            assert status == 200, f"Logging API returned not OK: {_parse_500_error_message(content)}"
         LOGGER.info(f"Completed batch: {batch_idx}")
 
     total_time = time.time() - start_time
@@ -312,7 +312,7 @@ async def test_append_logrotation(lrr_client: LRRClient, environment: AbstractLR
         json_data=payload
     )
 
-    assert status == 200, f"Logging API returned not OK: {content}"
+    assert status == 200, f"Logging API returned not OK: {_parse_500_error_message(content)}"
     total_time = time.time() - start_time
     LOGGER.info(f"Completed test_logrotation with time {total_time}s.")
 
