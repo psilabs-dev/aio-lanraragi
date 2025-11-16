@@ -283,6 +283,10 @@ async def test_concurrent_logrotation(lrr_client: LRRClient, environment: Abstra
     num_not_found = len(not_found)
     assert num_not_found < 50, f"UUID count not found in logs exceeds 50 ({num_not_found}): {not_found}"
 
+    # assert that log rotation happened.
+    rotated_logs = list(environment.logs_dir.glob("lanraragi.log.*.gz"))
+    assert len(rotated_logs) >= 1, f"No log rotation is performed! {rotated_logs}"
+
     # no error logs
     expect_no_error_logs(environment)
 
@@ -324,7 +328,7 @@ async def test_append_logrotation(lrr_client: LRRClient, environment: AbstractLR
     num_not_found = len(not_found)
     assert num_not_found < 50, f"UUID count not found in logs exceeds 50 ({num_not_found}): {not_found}"
 
-    # assert that appends create rotated logs.
+    # assert that log rotation happened.
     rotated_logs = list(environment.logs_dir.glob("lanraragi.log.*.gz"))
     assert len(rotated_logs) >= 1, f"No log rotation is performed! {rotated_logs}"
 
