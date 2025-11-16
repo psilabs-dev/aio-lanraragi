@@ -572,10 +572,18 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         
         If something goes wrong during setup, the environment will be reset and the data should be removed.
         """
-        if remove_data and self.lrr_container and self.lrr_container.status == 'running':
-            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/content/*'], user='koyomi')
-            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/thumb/*'], user='koyomi')
-            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/log/*'], user='koyomi')
+        if remove_data and self.lrr_container:
+            self.lrr_container.reload()
+            status = self.lrr_container.status
+            if status == 'running':
+                self.lrr_container.exec_run(["sh", "-c", "s6-svc -d /run/service/lanraragi"])
+                self.lrr_container.exec_run(["sh", "-c", "s6-svc -d /run/service/redis"])
+                time.sleep(1)
+                self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/content/*'], user='root')
+                self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/thumb/*'], user='root')
+                self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/log/*'], user='root')
+            else:
+                self.logger.info(f"Container not running with status {status} (no teardown commands run): {self.lrr_container_name}")
         if self.lrr_container:
             self.lrr_container.stop(timeout=1)
             self.logger.debug(f"Stopped container: {self.lrr_container_name}")
