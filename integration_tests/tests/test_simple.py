@@ -340,3 +340,67 @@ async def test_append_logrotation(lrr_client: LRRClient, environment: AbstractLR
 
     # no error logs
     expect_no_error_logs(environment)
+
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
+@pytest.mark.asyncio
+async def test_concurrent_longlived_logrotation(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext, semaphore: asyncio.BoundedSemaphore):
+    """
+    Pressure test concurrent long-lived log rotation.
+    A logger is "long-lived" if its appends will do log rotation.
+    """
+    msgs_per_batch = 5_000
+    batch_size = 10
+    start_time = time.time()
+    num_batches = 10
+
+    async def post_one(payload: Dict[str, List[str]]) -> Tuple[int, str]:
+        async with semaphore:
+            return await lrr_client.handle_request(
+                http.HTTPMethod.POST,
+                lrr_client.build_url('/api/logs/test'),
+                lrr_client.headers,
+                json_data=payload
+            )
+
+    all_uuids: List[str] = []
+
+    for batch_idx in range(num_batches):
+        payloads: List[Dict[str, List[str]]] = []
+        for _ in range(batch_size):
+            messages = [str(uuid.uuid4()) for _ in range(msgs_per_batch)]
+            all_uuids.extend(messages)
+            payloads.append({"messages": messages})
+
+        tasks: List[asyncio.Task] = [asyncio.create_task(post_one(p)) for p in payloads]
+        results: List[Tuple[int, str]] = await asyncio.gather(*tasks)
+        for status, content in results:
+            assert status == 200, f"Logging API returned not OK: {_parse_500_error_message(content)}"
+        LOGGER.info(f"Completed batch: {batch_idx}")
+
+    total_time = time.time() - start_time
+    LOGGER.info(f"Completed test_concurrent_longlived_logrotation with time {total_time}s.")
+
+    logs_text: str = environment.read_lrr_logs()
+    found: List[str] = []
+    not_found: List[str] = []
+    for u in all_uuids:
+        if u not in logs_text:
+            LOGGER.debug(f"{u} not in logs.")
+            not_found.append(u)
+        else:
+            found.append(u)
+
+    # assert that logfile exists.
+    assert environment.lanraragi_logs_path.exists(), "LRR logfile DNE."
+
+    # assert that no more than 0.1% of logs are not captured.
+    # 500_000 * 0.001 = 500
+    num_not_found = len(not_found)
+    assert num_not_found < 500, f"UUID count not found in logs exceeds 500 ({num_not_found})"
+
+    # assert that log rotation happened.
+    rotated_logs = list(environment.logs_dir.glob("lanraragi.log.*.gz"))
+    assert len(rotated_logs) >= 1, f"No log rotation is performed! {rotated_logs}"
+
+    # no error logs
+    expect_no_error_logs(environment)

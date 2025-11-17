@@ -433,11 +433,13 @@ class AbstractLRRDeploymentContext(abc.ABC):
         - lanraragi.log.2.gz
         - ...
         """
+        self.logger.info("Reading LRR logs...")
         parts: list[str] = []
         if self.lanraragi_logs_path.exists():
             with open(self.lanraragi_logs_path, 'r') as f:
                 parts.append(f.read())
 
+        self.logger.info("Getting rotated log paths.")
         rotated_logs = list(self.logs_dir.glob("lanraragi.log.*.gz"))
         def parse_index(path: Path) -> int:
             name = path.name
@@ -445,7 +447,9 @@ class AbstractLRRDeploymentContext(abc.ABC):
             idx_str = name.split(".")[-2]
             return int(idx_str)
 
+        self.logger.info("Unzipping gz files.")
         for gz_path in sorted(rotated_logs, key=parse_index):
+            print(f"Unzipping and adding: {gz_path}")
             with gzip.open(gz_path, mode="rt", encoding="utf-8", errors="replace") as f:
                 parts.append(f.read())
 
