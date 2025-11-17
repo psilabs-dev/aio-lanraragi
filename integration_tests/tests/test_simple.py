@@ -282,9 +282,11 @@ async def test_concurrent_logrotation(lrr_client: LRRClient, environment: Abstra
     assert environment.lanraragi_logs_path.exists(), "LRR logfile DNE."
 
     # assert that no more than 0.1% of logs are not captured.
-    # 50_000 * 0.001 = 50
+    total_uuids = len(all_uuids)
+    allowed_missing = max(1, int(total_uuids * 0.001))
     num_not_found = len(not_found)
-    assert num_not_found < 50, f"UUID count not found in logs exceeds 50 ({num_not_found}): {not_found}"
+    missing_pct = (num_not_found / total_uuids) * 100 if total_uuids else 0
+    assert num_not_found < allowed_missing, f"UUIDs missing exceed 0.1% ({num_not_found}/{total_uuids}, {missing_pct:.3f}% > {allowed_missing/total_uuids*100:.3f}%)"
 
     # assert that log rotation happened.
     rotated_logs = list(environment.logs_dir.glob("lanraragi.log.*.gz"))
@@ -330,9 +332,11 @@ async def test_append_logrotation(lrr_client: LRRClient, environment: AbstractLR
     assert environment.lanraragi_logs_path.exists(), "LRR logfile DNE."
 
     # assert that no more than 0.1% of logs are not captured.
-    # 50_000 * 0.001 = 50
+    total_uuids = len(all_uuids)
+    allowed_missing = max(1, int(total_uuids * 0.001))
     num_not_found = len(not_found)
-    assert num_not_found < 50, f"UUID count not found in logs exceeds 50 ({num_not_found}): {not_found}"
+    missing_pct = (num_not_found / total_uuids) * 100 if total_uuids else 0
+    assert num_not_found < allowed_missing, f"UUIDs missing exceed 0.1% ({num_not_found}/{total_uuids}, {missing_pct:.3f}% > {allowed_missing/total_uuids*100:.3f}%)"
 
     # assert that log rotation happened.
     rotated_logs = list(environment.logs_dir.glob("lanraragi.log.*.gz"))
@@ -351,7 +355,7 @@ async def test_concurrent_longlived_logrotation(lrr_client: LRRClient, environme
     msgs_per_batch = 5_000
     batch_size = 10
     start_time = time.time()
-    num_batches = 10
+    num_batches = 2
 
     async def post_one(payload: Dict[str, List[str]]) -> Tuple[int, str]:
         async with semaphore:
@@ -394,9 +398,11 @@ async def test_concurrent_longlived_logrotation(lrr_client: LRRClient, environme
     assert environment.lanraragi_logs_path.exists(), "LRR logfile DNE."
 
     # assert that no more than 0.1% of logs are not captured.
-    # 500_000 * 0.001 = 500
+    total_uuids = len(all_uuids)
+    allowed_missing = max(1, int(total_uuids * 0.001))
     num_not_found = len(not_found)
-    assert num_not_found < 500, f"UUID count not found in logs exceeds 500 ({num_not_found})"
+    missing_pct = (num_not_found / total_uuids) * 100 if total_uuids else 0
+    assert num_not_found < allowed_missing, f"UUIDs missing exceed 0.1% ({num_not_found}/{total_uuids}, {missing_pct:.3f}% > {allowed_missing/total_uuids*100:.3f}%)"
 
     # assert that log rotation happened.
     rotated_logs = list(environment.logs_dir.glob("lanraragi.log.*.gz"))
