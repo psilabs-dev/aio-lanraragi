@@ -60,7 +60,7 @@ jobs:
           export DOCKER_BUILDKIT=1
           pytest tests --log-cli-level=INFO \
             --git-url=https://github.com/psilabs-dev/LANraragi.git \
-            --git-branch=bugfix/lograce-win32-2 \
+            --git-branch=bugfix/lograce-win32-1 \
             --staging "$GITHUB_WORKSPACE/staging" \
             --playwright \
             --docker-api \
@@ -109,7 +109,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          $sha = gh api repos/psilabs-dev/LANraragi/branches/bugfix/lograce-win32-2 --jq '.commit.sha'
+          $sha = gh api repos/psilabs-dev/LANraragi/branches/bugfix/lograce-win32-1 --jq '.commit.sha'
           "WINDIST_KEY=windist-${{ runner.os }}-$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Restore windist cache
@@ -133,7 +133,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: psilabs-dev/LANraragi
-          ref: bugfix/lograce-win32-2
+          ref: bugfix/lograce-win32-1
           submodules: true
           path: LANraragi
 
