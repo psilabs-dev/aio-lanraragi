@@ -287,6 +287,7 @@ async def test_concurrent_logrotation(lrr_client: LRRClient, environment: Abstra
     num_not_found = len(not_found)
     missing_pct = (num_not_found / total_uuids) * 100 if total_uuids else 0
     assert num_not_found < allowed_missing, f"UUIDs missing exceed 0.1% ({num_not_found}/{total_uuids}, {missing_pct:.3f}% > {allowed_missing/total_uuids*100:.3f}%)"
+    LOGGER.info(f"Missing UUIDs: {num_not_found}/{total_uuids} ({missing_pct:.3f}%)")
 
     # assert that log rotation happened.
     rotated_logs = list(environment.logs_dir.glob("lanraragi.log.*.gz"))
@@ -337,6 +338,7 @@ async def test_append_logrotation(lrr_client: LRRClient, environment: AbstractLR
     num_not_found = len(not_found)
     missing_pct = (num_not_found / total_uuids) * 100 if total_uuids else 0
     assert num_not_found < allowed_missing, f"UUIDs missing exceed 0.1% ({num_not_found}/{total_uuids}, {missing_pct:.3f}% > {allowed_missing/total_uuids*100:.3f}%)"
+    LOGGER.info(f"Missing UUIDs: {num_not_found}/{total_uuids} ({missing_pct:.3f}%)")
 
     # assert that log rotation happened.
     rotated_logs = list(environment.logs_dir.glob("lanraragi.log.*.gz"))
@@ -403,6 +405,7 @@ async def test_concurrent_longlived_logrotation(lrr_client: LRRClient, environme
     num_not_found = len(not_found)
     missing_pct = (num_not_found / total_uuids) * 100 if total_uuids else 0
     assert num_not_found < allowed_missing, f"UUIDs missing exceed 0.1% ({num_not_found}/{total_uuids}, {missing_pct:.3f}% > {allowed_missing/total_uuids*100:.3f}%)"
+    LOGGER.info(f"Missing UUIDs: {num_not_found}/{total_uuids} ({missing_pct:.3f}%)")
 
     # assert that log rotation happened.
     rotated_logs = list(environment.logs_dir.glob("lanraragi.log.*.gz"))
