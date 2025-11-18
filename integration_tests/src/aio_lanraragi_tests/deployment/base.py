@@ -449,7 +449,6 @@ class AbstractLRRDeploymentContext(abc.ABC):
 
         self.logger.info("Unzipping gz files.")
         for gz_path in sorted(rotated_logs, key=parse_index):
-            print(f"Unzipping and adding: {gz_path}")
             with gzip.open(gz_path, mode="rt", encoding="utf-8", errors="replace") as f:
                 parts.append(f.read())
 
