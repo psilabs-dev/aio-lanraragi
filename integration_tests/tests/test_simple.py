@@ -283,10 +283,11 @@ async def test_concurrent_logrotation(lrr_client: LRRClient, environment: Abstra
 
     # assert that no more than 0.1% of logs are not captured.
     total_uuids = len(all_uuids)
-    allowed_missing = max(1, int(total_uuids * 0.001))
+    # allowed_missing = max(1, int(total_uuids * 0.001))
+    allowed_missing = 0
     num_not_found = len(not_found)
     missing_pct = (num_not_found / total_uuids) * 100 if total_uuids else 0
-    assert num_not_found < allowed_missing, f"UUIDs missing exceed 0.1% ({num_not_found}/{total_uuids}, {missing_pct:.3f}% > {allowed_missing/total_uuids*100:.3f}%)"
+    assert num_not_found <= allowed_missing, f"UUIDs missing exceed 0.1% ({num_not_found}/{total_uuids}, {missing_pct:.3f}% > {allowed_missing/total_uuids*100:.3f}%)"
     LOGGER.info(f"Missing UUIDs: {num_not_found}/{total_uuids} ({missing_pct:.3f}%)")
 
     # assert that log rotation happened.
@@ -334,10 +335,11 @@ async def test_append_logrotation(lrr_client: LRRClient, environment: AbstractLR
 
     # assert that no more than 0.1% of logs are not captured.
     total_uuids = len(all_uuids)
-    allowed_missing = max(1, int(total_uuids * 0.001))
+    # allowed_missing = max(1, int(total_uuids * 0.001))
+    allowed_missing = 0
     num_not_found = len(not_found)
     missing_pct = (num_not_found / total_uuids) * 100 if total_uuids else 0
-    assert num_not_found < allowed_missing, f"UUIDs missing exceed 0.1% ({num_not_found}/{total_uuids}, {missing_pct:.3f}% > {allowed_missing/total_uuids*100:.3f}%)"
+    assert num_not_found <= allowed_missing, f"UUIDs missing exceed 0.1% ({num_not_found}/{total_uuids}, {missing_pct:.3f}% > {allowed_missing/total_uuids*100:.3f}%)"
     LOGGER.info(f"Missing UUIDs: {num_not_found}/{total_uuids} ({missing_pct:.3f}%)")
 
     # assert that log rotation happened.
@@ -401,10 +403,11 @@ async def test_concurrent_longlived_logrotation(lrr_client: LRRClient, environme
 
     # assert that no more than 0.1% of logs are not captured.
     total_uuids = len(all_uuids)
-    allowed_missing = max(1, int(total_uuids * 0.001))
+    # allowed_missing = max(1, int(total_uuids * 0.001))
+    allowed_missing = 0
     num_not_found = len(not_found)
     missing_pct = (num_not_found / total_uuids) * 100 if total_uuids else 0
-    assert num_not_found < allowed_missing, f"UUIDs missing exceed 0.1% ({num_not_found}/{total_uuids}, {missing_pct:.3f}% > {allowed_missing/total_uuids*100:.3f}%)"
+    assert num_not_found <= allowed_missing, f"UUIDs missing exceed 0.1% ({num_not_found}/{total_uuids}, {missing_pct:.3f}% > {allowed_missing/total_uuids*100:.3f}%)"
     LOGGER.info(f"Missing UUIDs: {num_not_found}/{total_uuids} ({missing_pct:.3f}%)")
 
     # assert that log rotation happened.
