@@ -241,7 +241,7 @@ async def test_concurrent_logrotation(lrr_client: LRRClient, environment: Abstra
     """
     batch_size = 1000
     start_time = time.time()
-    num_batches = 50
+    num_batches = 100
 
     # Pre-create UUID batches to send and later verify in logs
     uuid_batches: List[List[str]] = [[str(uuid.uuid4()) for _ in range(batch_size)] for _ in range(num_batches)]
@@ -304,7 +304,7 @@ async def test_append_logrotation(lrr_client: LRRClient, environment: AbstractLR
     Pressure test append-time LRR log rotation with custom endpoint.
     """
     start_time = time.time()
-    all_uuids = [str(uuid.uuid4()) for _ in range(50_000)]
+    all_uuids = [str(uuid.uuid4()) for _ in range(100_000)]
     payload = {
         "messages": all_uuids
     }
