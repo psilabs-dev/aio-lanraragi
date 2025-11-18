@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 import shutil
 import time
-from typing import Optional
+from typing import Dict, Optional
 import aiohttp
 import redis
 import requests
@@ -181,6 +181,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
     @abc.abstractmethod
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
+        environment: Dict[str, str]={},
         test_connection_max_retries: int=4
     ):
         """
@@ -196,6 +197,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
             `with_nofunmode`: whether to enable nofunmode in the LRR environment
             `enable_cors`: whether to enable CORS headers for the Client API
             `lrr_debug_mode`: whether to enable debug mode for the LRR application
+            `environment`: additional environment variables map to pass through to LRR during startup time
             `test_connection_max_retries`: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
     

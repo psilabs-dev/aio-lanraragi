@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import time
 import stat
-from typing import Optional, override
+from typing import Optional, override, Dict
 import threading
 from collections import deque
 
@@ -284,6 +284,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
+        environment: Dict[str, str]={},
         test_connection_max_retries: int=4
     ):
         """
@@ -296,7 +297,17 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         This setup logic is adapted from the LRR runfile, except we will start redis
         and LRR individually, and inject configuration data between redis/LRR startups
         to avoid having to restart LRR.
+
+        Args:
+            with_api_key: whether to add a default API key to LRR
+            with_nofunmode: whether to start LRR with nofunmode on
+            enable_cors: whether to enable/disable CORS during startup
+            lrr_debug_mode: whether to start LRR with debug mode on
+            environment: additional environment variables map to pass through to the LRR process
+            test_connection_max_retries: connection retries for server readiness
         """
+        # Store environment overrides for use during process launch
+        self._setup_environment = dict(environment or {})
         lrr_port = self.lrr_port
         redis_port = self.redis_port
         original_windist_dir = self.original_windist_dir
@@ -526,6 +537,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             lrr_env["LRR_THUMB_DIRECTORY"] = str(lrr_thumb_directory)
             lrr_env["LRR_REDIS_ADDRESS"] = f"127.0.0.1:{self.redis_port}"
             lrr_env["Path"] = runtime_bin + os.pathsep + runtime_redis + os.pathsep + path_var if path_var else runtime_bin + os.pathsep + runtime_redis
+            # Apply setup-provided environment variables, overriding defaults where specified
+            if hasattr(self, "_setup_environment") and self._setup_environment:
+                lrr_env.update(self._setup_environment)
 
             script = [
                 str(self.perl_exe_path), str(self.lrr_launcherpl_path),
