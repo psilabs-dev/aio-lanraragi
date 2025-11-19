@@ -537,9 +537,11 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             lrr_env["LRR_THUMB_DIRECTORY"] = str(lrr_thumb_directory)
             lrr_env["LRR_REDIS_ADDRESS"] = f"127.0.0.1:{self.redis_port}"
             lrr_env["Path"] = runtime_bin + os.pathsep + runtime_redis + os.pathsep + path_var if path_var else runtime_bin + os.pathsep + runtime_redis
-            # Apply setup-provided environment variables, overriding defaults where specified
+
             if hasattr(self, "_setup_environment") and self._setup_environment:
-                lrr_env.update(self._setup_environment)
+                sanitized_overrides = {str(k): str(v) for k, v in self._setup_environment.items()}
+                lrr_env.update(sanitized_overrides)
+            lrr_env = {str(k): str(v) for k, v in lrr_env.items()}
 
             script = [
                 str(self.perl_exe_path), str(self.lrr_launcherpl_path),
