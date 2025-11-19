@@ -85,7 +85,6 @@ def create_comic(output: Union[str, Path], comic_id: str, width: int, height: in
         page_name = f"pg-{str(page_id+1).zfill(len(str(num_pages)))}"
         filename = f"{page_name}.png"
         text = f"{comic_id}-{page_name}"
-        # create_request = CreatePageRequest(width, height, filename, text=text)
         create_request = CreatePageRequest(
             width=width,
             height=height,
@@ -94,7 +93,6 @@ def create_comic(output: Union[str, Path], comic_id: str, width: int, height: in
         )
         create_page_requests.append(create_request)
 
-    # request = WriteArchiveRequest(create_page_requests, output, archival_strategy)
     request = WriteArchiveRequest(
         create_page_requests=create_page_requests, save_path=output, archival_strategy=archival_strategy
     )
