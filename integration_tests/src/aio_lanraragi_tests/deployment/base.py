@@ -357,6 +357,20 @@ class AbstractLRRDeploymentContext(abc.ABC):
         self.redis_client.select(2)
         self.redis_client.hset("LRR_CONFIG", "enablecors", "0")
 
+    def enable_auth_progress(self):
+        """
+        Enable server-side progress tracking only for authenticated requests.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "authprogress", "1")
+
+    def disable_auth_progress(self):
+        """
+        Disable authenticated-only requirement for server-side progress tracking.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "authprogress", "0")
+
     def test_lrr_connection(self, port: int, test_connection_max_retries: int=4):
         """
         Test the LRR connection with retry and exponential backoff.
