@@ -12,7 +12,9 @@ import shutil
 import subprocess
 import time
 import stat
-from typing import Optional, override
+from typing import Optional, override, Dict
+import threading
+from collections import deque
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.common import is_port_available
@@ -275,10 +277,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         if logger is None:
             logger = LOGGER
         self.logger = logger
+        self._lrr_process = None
+        self._lrr_output = deque(maxlen=10000)
+        self._lrr_reader_thread = None
 
     @override
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
+        environment: Dict[str, str]={},
         test_connection_max_retries: int=4
     ):
         """
@@ -291,7 +297,17 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         This setup logic is adapted from the LRR runfile, except we will start redis
         and LRR individually, and inject configuration data between redis/LRR startups
         to avoid having to restart LRR.
+
+        Args:
+            with_api_key: whether to add a default API key to LRR
+            with_nofunmode: whether to start LRR with nofunmode on
+            enable_cors: whether to enable/disable CORS during startup
+            lrr_debug_mode: whether to start LRR with debug mode on
+            environment: additional environment variables map to pass through to the LRR process
+            test_connection_max_retries: connection retries for server readiness
         """
+        # Store environment overrides for use during process launch
+        self._setup_environment = dict(environment or {})
         lrr_port = self.lrr_port
         redis_port = self.redis_port
         original_windist_dir = self.original_windist_dir
@@ -429,6 +445,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.stop()
         self.start()
 
+    def _start_lrr_output_reader(self, pipe):
+        def _reader():
+            for line in iter(pipe.readline, b''):
+                self._lrr_output.append(line.replace(b'\r\n', b'\n'))
+        t = threading.Thread(target=_reader, daemon=True)
+        t.start()
+        self._lrr_reader_thread = t
+
     @override
     def teardown(self, remove_data: bool=False):
         """
@@ -513,6 +537,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             lrr_env["LRR_THUMB_DIRECTORY"] = str(lrr_thumb_directory)
             lrr_env["LRR_REDIS_ADDRESS"] = f"127.0.0.1:{self.redis_port}"
             lrr_env["Path"] = runtime_bin + os.pathsep + runtime_redis + os.pathsep + path_var if path_var else runtime_bin + os.pathsep + runtime_redis
+            # Apply setup-provided environment variables, overriding defaults where specified
+            if hasattr(self, "_setup_environment") and self._setup_environment:
+                lrr_env.update(self._setup_environment)
 
             script = [
                 str(self.perl_exe_path), str(self.lrr_launcherpl_path),
@@ -521,16 +548,19 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.info(f"(lrr_network={lrr_network}, lrr_data_directory={lrr_data_directory}, lrr_log_directory={lrr_log_directory}, lrr_temp_directory={lrr_temp_directory}, lrr_thumb_directory={lrr_thumb_directory}) running script {subprocess.list2cmdline(script)}")
 
             # Ensure we have a console so the child inherits it (or gets its own), and create a new
-            # process group so we can signal with CTRL_BREAK later. Also create a new console so LRR
-            # does not share the test runner console.
+            # process group so we can signal with CTRL_BREAK later.
             CREATE_NEW_PROCESS_GROUP: int = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-            CREATE_NEW_CONSOLE: int = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
             with _WindowsConsole():
                 lrr_process = subprocess.Popen(
                     script,
                     env=lrr_env,
-                    creationflags=CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    creationflags=CREATE_NEW_PROCESS_GROUP,
                 )
+            self._lrr_process = lrr_process
+            if lrr_process.stdout:
+                self._start_lrr_output_reader(lrr_process.stdout)
             self.logger.debug(f"Started LRR process with PID: {lrr_process.pid}.")
         finally:
             os.chdir(cwd)
@@ -670,9 +700,16 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.lrr_log_path.exists():
             with open(self.lrr_log_path, 'rb') as rb:
                 lines = rb.readlines()
-                # Normalize Windows CRLF line endings to LF to avoid extra spacing
-                normalized_lines = [line.replace(b'\r\n', b'\n') for line in lines]
-                return b''.join(normalized_lines[-tail:])
+                if lines:
+                    normalized_lines = [line.replace(b'\r\n', b'\n') for line in lines]
+                    return b''.join(normalized_lines[-tail:])
+                self.logger.error(f"No lines found in {self.lrr_log_path}")
+        if hasattr(self, "_lrr_output") and self._lrr_output:
+            self.logger.error("LRR logs not found; falling back to console.")
+            lines = list(self._lrr_output)
+            return b''.join(lines[-tail:])
+        
+        self.logger.error("No LRR logs are available!")
         return b"No LRR logs available."
 
     # TODO: I hope we don't have to use this.

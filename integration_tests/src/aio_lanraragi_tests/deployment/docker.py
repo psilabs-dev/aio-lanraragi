@@ -9,7 +9,7 @@ from pathlib import Path
 import tempfile
 import shutil
 import time
-from typing import Optional, override
+from typing import List, Optional, override, Dict
 import docker
 import docker.errors
 import docker.models
@@ -271,6 +271,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
+        environment: Dict[str, str]={},
         test_connection_max_retries: int=4
     ):
         """
@@ -283,6 +284,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             with_nofunmode: whether to start LRR with nofunmode on
             enable_cors: whether to enable/disable CORS during startup
             lrr_debug_mode: whether to start LRR with debug mode on
+            environment: additional environment variables map to pass through to LRR during container creation
             test_connection_max_retries: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
         # ensure staging, contents, thumb, and Redis directories exist
@@ -332,18 +334,15 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.info(f"Building LRR image {image_id} from build path {self.build_path}.")
             self._build_docker_image(self.build_path, force=self.is_force_build)
         elif self.git_url:
+            # When building by git URL, we always clone the repository and rebuild.
             self.logger.info(f"Building LRR image {image_id} from git URL {self.git_url}.")
-            try:
-                self.docker_client.images.get(image_id)
-                self.logger.debug(f"Image {image_id} already exists, skipping build.")
-            except docker.errors.ImageNotFound:
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    self.logger.debug(f"Cloning {self.git_url} to {tmpdir}...")
-                    repo_dir = Path(tmpdir) / "LANraragi"
-                    repo = Repo.clone_from(self.git_url, repo_dir)
-                    if self.git_branch: # throws git.exc.GitCommandError if branch does not exist.
-                        repo.git.checkout(self.git_branch)
-                    self._build_docker_image(repo.working_dir, force=True)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                self.logger.debug(f"Cloning {self.git_url} to {tmpdir}...")
+                repo_dir = Path(tmpdir) / "LANraragi"
+                repo = Repo.clone_from(self.git_url, repo_dir)
+                if self.git_branch: # throws git.exc.GitCommandError if branch does not exist.
+                    repo.git.checkout(self.git_branch)
+                self._build_docker_image(repo.working_dir, force=True)
         else:
             image = DEFAULT_LANRARAGI_DOCKER_TAG
             if self.image:
@@ -406,12 +405,28 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             f"LRR_UID={self.lrr_uid}",  # unix UID
             f"LRR_GID={self.lrr_gid}"   # unix GID
         ]
+        # Apply user-provided environment, overriding defaults when keys overlap
+        desired_env_map = {
+            "LRR_REDIS_ADDRESS": f"{redis_container_name}:{DEFAULT_REDIS_PORT}",
+            "LRR_UID": str(self.lrr_uid),
+            "LRR_GID": str(self.lrr_gid),
+        }
+        if environment:
+            desired_env_map.update(environment)
+        desired_env_list = [f"{k}={v}" for k, v in desired_env_map.items()]
+        lrr_environment = desired_env_list
         create_lrr_container = False
         if self.lrr_container:
             self.logger.debug(f"LRR container exists: {self.lrr_container_name}.")
             # in this situation, whether we restart the LRR container depends on whether or not the images used for both containers
             # match.
             needs_recreate_lrr = self.lrr_container.image.id != self.docker_client.images.get(image_id).id
+            # If environment differs from desired, recreate to apply env
+            self.lrr_container.reload()
+            current_env_list: List[str] = self.lrr_container.attrs["Config"]["Env"]
+            if not needs_recreate_lrr and set(current_env_list) != set(lrr_environment):
+                self.logger.debug("LRR environment differs from desired; removing existing container for recreation.")
+                needs_recreate_lrr = True
             if needs_recreate_lrr:
                 self.logger.debug("LRR Image hash has been updated: removing existing container.")
                 self.lrr_container.stop(timeout=1)
@@ -576,9 +591,17 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         If something goes wrong during setup, the environment will be reset and the data should be removed.
         """
         if remove_data and self.lrr_container:
-            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/content/*'], user='koyomi')
-            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/thumb/*'], user='koyomi')
-            self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/log/*'], user='koyomi')
+            self.lrr_container.reload()
+            status = self.lrr_container.status
+            if status == 'running':
+                self.lrr_container.exec_run(["sh", "-c", "s6-svc -d /run/service/lanraragi"])
+                self.lrr_container.exec_run(["sh", "-c", "s6-svc -d /run/service/redis"])
+                time.sleep(1)
+                self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/content/*'], user='root')
+                self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/thumb/*'], user='root')
+                self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/log/*'], user='root')
+            else:
+                self.logger.info(f"Container not running with status {status} (no teardown commands run): {self.lrr_container_name}")
         if self.lrr_container:
             self.lrr_container.stop(timeout=1)
             self.logger.debug(f"Stopped container: {self.lrr_container_name}")
@@ -586,7 +609,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.lrr_container.remove(v=True, force=True)
             self.logger.debug(f"Removed container: {self.lrr_container_name}")
 
-        if remove_data and self.redis_container:
+        if remove_data and self.redis_container and self.redis_container == 'running':
             self.redis_container.exec_run(["bash", "-c", "rm -rf /data/*"], user='redis')
         if self.redis_container:
             self.redis_container.stop(timeout=1)

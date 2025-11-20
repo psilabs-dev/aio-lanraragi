@@ -196,13 +196,24 @@ class _ArchiveApiClient(_ApiClient):
         if request.file_checksum:
             form_data.add_field('file_checksum', request.file_checksum)
         status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers, data=form_data)
+
         if status == 200:
             response_j = json.loads(content)
             arcid = response_j.get("id")
             filename = response_j.get("filename")
             return (UploadArchiveResponse(arcid=arcid, filename=filename), None)
-        return (None, _build_err_response(content, status))
-    
+
+        if status == 409:
+            response_j = json.loads(content)
+            arcid = response_j.get("id")
+            filename = response_j.get("filename")
+            if arcid:
+                return (
+                    UploadArchiveResponse(arcid=arcid, filename=filename),
+                    _build_err_response(content, status)
+                )
+
+        return None, _build_err_response(content, status)
     async def update_thumbnail(self, request: UpdateArchiveThumbnailRequest) -> _LRRClientResponse[UpdateArchiveThumbnailResponse]:
         """
         PUT /api/archives/:id/thumbnail

@@ -10,36 +10,23 @@ from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest, WriteArchiveResponse, WriteArchiveResponseStatus
 from aio_lanraragi_tests.archive_generation.page import save_page_to_dir
 
-logger = logging.getLogger("manycbz")
+logger = logging.getLogger(__name__)
 
 def write_archive_to_disk(request: WriteArchiveRequest) -> WriteArchiveResponse:
     """
     Writes an archive to disk from a request.
     """
-    response = WriteArchiveResponse()
     create_page_requests = request.create_page_requests
     save_path = request.save_path
     strategy = request.archival_strategy
-
-    if not create_page_requests:
-        raise ValueError("Invalid archive! No pages found.")
-    if not save_path:
-        raise ValueError("No save path!")
-    if not strategy:
-        raise ValueError("No archival strategy!")
-
     if strategy == ArchivalStrategyEnum.NO_ARCHIVE:
         try:
             save_path.mkdir(parents=True, exist_ok=True)
             for create_page_request in create_page_requests:
                 save_page_to_dir(create_page_request, save_path)
-            response.status = WriteArchiveResponseStatus.SUCCESS
-            response.save_path = save_path
-            return response
+            return WriteArchiveResponse(status=WriteArchiveResponseStatus.SUCCESS, save_path=save_path)
         except Exception as e:
-            response.status = WriteArchiveResponseStatus.FAILURE
-            response.error = str(e)
-            return response
+            return WriteArchiveResponse(status=WriteArchiveResponseStatus.FAILURE, error=str(e), save_path=save_path)
 
     # All other strategies involve creating a temp directory, creating images in that tempdir,
     # then moving these images into the appropriate compressed file.
@@ -98,9 +85,16 @@ def create_comic(output: Union[str, Path], comic_id: str, width: int, height: in
         page_name = f"pg-{str(page_id+1).zfill(len(str(num_pages)))}"
         filename = f"{page_name}.png"
         text = f"{comic_id}-{page_name}"
-        create_request = CreatePageRequest(width, height, filename, text=text)
+        create_request = CreatePageRequest(
+            width=width,
+            height=height,
+            filename=filename,
+            text=text
+        )
         create_page_requests.append(create_request)
 
-    request = WriteArchiveRequest(create_page_requests, output, archival_strategy)
+    request = WriteArchiveRequest(
+        create_page_requests=create_page_requests, save_path=output, archival_strategy=archival_strategy
+    )
     response = write_archive_to_disk(request)
     return response

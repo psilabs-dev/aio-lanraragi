@@ -1,11 +1,13 @@
 import abc
 import logging
 from pathlib import Path
+import shutil
 import time
-from typing import Optional
+from typing import Dict, Optional
 import aiohttp
 import redis
 import requests
+import gzip
 
 from lanraragi.clients.client import LRRClient
 
@@ -179,16 +181,23 @@ class AbstractLRRDeploymentContext(abc.ABC):
     @abc.abstractmethod
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
+        environment: Dict[str, str]={},
         test_connection_max_retries: int=4
     ):
         """
         Main entrypoint to setting up a LRR environment.
+        
+        Performs all setup logic for a requirement, including creating directories and files, volumes, networks,
+        and other resources required for a working LRR environment.
+        
+        Does not, and will not perform any cleanup function. Use teardown or another API for that logic.
 
         Args:
             `with_api_key`: whether to add an API key (default API key: "lanraragi") to the LRR environment
             `with_nofunmode`: whether to enable nofunmode in the LRR environment
             `enable_cors`: whether to enable CORS headers for the Client API
             `lrr_debug_mode`: whether to enable debug mode for the LRR application
+            `environment`: additional environment variables map to pass through to LRR during startup time
             `test_connection_max_retries`: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
     
@@ -259,6 +268,42 @@ class AbstractLRRDeploymentContext(abc.ABC):
             `tail`: max number of lines to keep from last line.
         """
 
+    def get_redis_backup_dir(self, backup_id: str) -> Path:
+        backup_dirname = self.resource_prefix + f"redis_backup_{backup_id}"
+        backup_dir = self.staging_dir / backup_dirname
+        return backup_dir
+
+    def backup_redis_data(self, backup_id: str) -> Path:
+        """
+        Make a copy of the current redis database (for benchmarking purposes).
+        Returns the path to the backup directory.
+
+        Redis DB should probably be down.
+        """
+        backup_dir = self.get_redis_backup_dir(backup_id)
+        if backup_dir.exists():
+            self.logger.info(f"Removing existing backup: {backup_dir}")
+            shutil.rmtree(backup_dir)
+        shutil.copy2(self.redis_dir, backup_dir)
+        self.logger.debug(f"Backup {backup_id} OK")
+        return backup_dir
+
+    def restore_redis_backup(self, backup_id: str):
+        """
+        Restore from redis backup (for benchmarking purposes). Ensure that redis is shutdown.
+        """
+        try:
+            self.redis_client.ping()
+            raise DeploymentException(f"Cannot restore from backup {backup_id} while database is live!")
+        except redis.exceptions.ConnectionError:
+            pass
+        backup_dir = self.get_redis_backup_dir(backup_id)
+        if self.redis_dir.exists():
+            self.logger.info(f"Removing existing database info: {self.redis_dir}")
+            shutil.rmtree(self.redis_dir)
+        shutil.copy2(backup_dir, self.redis_dir)
+        self.logger.debug(f"Restore from backup {backup_id} OK")
+
     def update_api_key(self, api_key: Optional[str]):
         """
         Insert/update LRR API key (or remove if None is passed).
@@ -311,6 +356,20 @@ class AbstractLRRDeploymentContext(abc.ABC):
         """
         self.redis_client.select(2)
         self.redis_client.hset("LRR_CONFIG", "enablecors", "0")
+
+    def enable_auth_progress(self):
+        """
+        Enable server-side progress tracking only for authenticated requests.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "authprogress", "1")
+
+    def disable_auth_progress(self):
+        """
+        Disable authenticated-only requirement for server-side progress tracking.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "authprogress", "0")
 
     def test_lrr_connection(self, port: int, test_connection_max_retries: int=4):
         """
@@ -378,6 +437,33 @@ class AbstractLRRDeploymentContext(abc.ABC):
             for line in log_text.split('\n'):
                 if line.strip():
                     self.logger.log(log_level, f"LRR: {line}")
+
+    def read_lrr_logs(self) -> str:
+        """
+        Read all lanraragi.log logs, including rotated ones, as a single string, in the order:
+
+        - lanraragi.log
+        - lanraragi.log.1.gz
+        - lanraragi.log.2.gz
+        - ...
+        """
+        parts: list[str] = []
+        if self.lanraragi_logs_path.exists():
+            with open(self.lanraragi_logs_path, 'r') as f:
+                parts.append(f.read())
+
+        rotated_logs = list(self.logs_dir.glob("lanraragi.log.*.gz"))
+        def parse_index(path: Path) -> int:
+            name = path.name
+            # expected format: lanraragi.log.<idx>.gz
+            idx_str = name.split(".")[-2]
+            return int(idx_str)
+
+        for gz_path in sorted(rotated_logs, key=parse_index):
+            with gzip.open(gz_path, mode="rt", encoding="utf-8", errors="replace") as f:
+                parts.append(f.read())
+
+        return "".join(parts)
 
     def read_log(self, log_file: str) -> str:
         """

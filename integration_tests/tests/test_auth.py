@@ -1,5 +1,7 @@
 import asyncio
 import logging
+from pathlib import Path
+import tempfile
 import aiohttp
 import numpy as np
 from typing import Dict, Generator, List
@@ -9,13 +11,15 @@ import pytest
 import pytest_asyncio
 
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.archive import UpdateReadingProgressionRequest
 
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE, LRR_LOGIN_TITLE
-from aio_lanraragi_tests.helpers import expect_no_error_logs
+from aio_lanraragi_tests.helpers import expect_no_error_logs, save_archives, upload_archives
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 
 LOGGER = logging.getLogger(__name__)
+ENABLE_SYNC_FALLBACK = False # for debugging.
 
 class ApiAuthMatrixParams(BaseModel):
     # used by test_api_auth_matrix.
@@ -23,6 +27,7 @@ class ApiAuthMatrixParams(BaseModel):
     is_api_key_configured_server: bool
     is_api_key_configured_client: bool
     is_matching_api_key: bool = Field(..., description="Set to False if not is_api_key_configured_server or not is_api_key_configured_client")
+    is_auth_progress: bool
 
 @pytest.fixture
 def resource_prefix() -> Generator[str, None, None]:
@@ -56,7 +61,7 @@ def npgenerator(request: pytest.FixtureRequest) -> Generator[np.random.Generator
 
 @pytest.fixture
 def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
-    yield asyncio.BoundedSemaphore(value=8)
+    yield asyncio.BoundedSemaphore(value=2) # reduced val (we're not testing concurrency/upload).
 
 @pytest_asyncio.fixture
 async def lrr_client(environment: AbstractLRRDeploymentContext) -> Generator[LRRClient, None, None]:
@@ -73,7 +78,8 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) -> Generator[LRR
 
 async def sample_test_api_auth_matrix(
     is_nofunmode: bool, is_api_key_configured_server: bool, is_api_key_configured_client: bool,
-    is_matching_api_key: bool, environment: AbstractLRRDeploymentContext, lrr_client: LRRClient
+    is_matching_api_key: bool, is_auth_progress: bool, environment: AbstractLRRDeploymentContext, lrr_client: LRRClient,
+    arcid: str
 ):
     # sanity check.
     if is_matching_api_key and ((not is_api_key_configured_client) or (not is_api_key_configured_server)):
@@ -95,6 +101,10 @@ async def sample_test_api_auth_matrix(
             lrr_client.update_api_key(DEFAULT_API_KEY+"wrong")
     else:
         lrr_client.update_api_key(None)
+    if is_auth_progress:
+        environment.enable_auth_progress()
+    else:
+        environment.disable_auth_progress()
 
     def endpoint_permission_granted(endpoint_is_public: bool) -> bool:
         """
@@ -157,6 +167,18 @@ async def sample_test_api_auth_matrix(
         await page.wait_for_load_state("networkidle")
         assert await page.title() == expected_title
         await browser.close()
+
+    # test progress endpoint.
+    progress_is_public = not is_auth_progress
+    allowed = endpoint_permission_granted(progress_is_public)
+    response, error = await lrr_client.archive_api.update_reading_progression(
+        UpdateReadingProgressionRequest(arcid=arcid, page=1)
+    )
+    if allowed:
+        assert not error, f"Progress update failed (status {error.status}): {error.error}"
+    else:
+        assert not response, "Expected no response payload on auth error."
+        assert error.status == 401, f"Expected status 401, got: {error.status}."
 
     # check logs for errors
     expect_no_error_logs(environment)
@@ -291,7 +313,8 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
 @pytest.mark.asyncio
 @pytest.mark.playwright
 async def test_api_auth_matrix(
-    environment: AbstractLRRDeploymentContext, lrr_client: LRRClient, npgenerator: np.random.Generator, is_lrr_debug_mode: bool
+    environment: AbstractLRRDeploymentContext, lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+    npgenerator: np.random.Generator, is_lrr_debug_mode: bool
 ):
     """
     Test the following situation combinations:
@@ -311,28 +334,65 @@ async def test_api_auth_matrix(
     - GET /api/shinobu
     - GET /api/database/backup
     """
-    # initialize the server.
-    environment.setup(with_api_key=False, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
+    # initialize the server with API key.
+    environment.setup(with_api_key=True, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
+    temp_lrr_client = environment.lrr_client()
+    num_archives = 10
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await temp_lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+
+    LOGGER.debug("Established connection with test LRR server.")
+    # verify we are working with a new server.
+    response, error = await temp_lrr_client.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+    assert len(response.data) == 0, "Server contains archives!"
+    del response, error
+    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        LOGGER.debug(f"Creating {num_archives} archives to upload.")
+        write_responses = save_archives(num_archives, tmpdir, npgenerator) # archives all have min 10 pages.
+        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+
+        # archive metadata
+        LOGGER.debug("Uploading archives to server.")
+        await upload_archives(write_responses, npgenerator, semaphore, temp_lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # Get first archive, close client and disable API key.
+    response, error = await temp_lrr_client.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives: {error.error}"
+    first_arcid = response.data[0].arcid
+    await temp_lrr_client.close()
+    environment.update_api_key(None)
 
     # generate the parameters list, then randomize it to remove ordering effect.
     test_params: List[ApiAuthMatrixParams] = []
     for is_nofunmode in [True, False]:
         for is_api_key_configured_server in [True, False]:
             for is_api_key_configured_client in [True, False]:
-                if is_api_key_configured_client and is_api_key_configured_server:
-                    for is_matching_api_key in [True, False]:
+                for is_auth_progress in [True, False]:
+                    if is_api_key_configured_client and is_api_key_configured_server:
+                        for is_matching_api_key in [True, False]:
+                            test_params.append(ApiAuthMatrixParams(
+                                is_nofunmode=is_nofunmode, is_api_key_configured_server=is_api_key_configured_server,
+                                is_api_key_configured_client=is_api_key_configured_client,
+                                is_matching_api_key=is_matching_api_key,
+                                is_auth_progress=is_auth_progress
+                            ))
+                    else:
+                        is_matching_api_key = False
                         test_params.append(ApiAuthMatrixParams(
                             is_nofunmode=is_nofunmode, is_api_key_configured_server=is_api_key_configured_server,
                             is_api_key_configured_client=is_api_key_configured_client,
-                            is_matching_api_key=is_matching_api_key
+                            is_matching_api_key=is_matching_api_key,
+                            is_auth_progress=is_auth_progress
                         ))
-                else:
-                    is_matching_api_key = False
-                    test_params.append(ApiAuthMatrixParams(
-                        is_nofunmode=is_nofunmode, is_api_key_configured_server=is_api_key_configured_server,
-                        is_api_key_configured_client=is_api_key_configured_client,
-                        is_matching_api_key=is_matching_api_key
-                    ))
 
     npgenerator.shuffle(test_params)
     num_tests = len(test_params)
@@ -342,7 +402,7 @@ async def test_api_auth_matrix(
         LOGGER.info(f"Test configuration ({i+1}/{num_tests}): is_nofunmode={test_param.is_nofunmode}, is_apikey_configured_server={test_param.is_api_key_configured_server}, is_apikey_configured_client={test_param.is_api_key_configured_client}, is_matching_api_key={test_param.is_matching_api_key}")
         await sample_test_api_auth_matrix(
             test_param.is_nofunmode, test_param.is_api_key_configured_server, test_param.is_api_key_configured_client,
-            test_param.is_matching_api_key, environment, lrr_client
+            test_param.is_matching_api_key, test_param.is_auth_progress, environment, lrr_client, first_arcid
         )
 
 @pytest.mark.asyncio
