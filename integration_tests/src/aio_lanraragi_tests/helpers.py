@@ -1,8 +1,4 @@
-from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
-from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
-from aio_lanraragi_tests.archive_generation.metadata.zipf_utils import get_archive_idx_to_tag_idxs_map
-from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest, WriteArchiveResponse
-from aio_lanraragi_tests.common import compute_upload_checksum
+import sys
 import aiofiles
 import asyncio
 import errno
@@ -17,10 +13,25 @@ from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import UploadArchiveRequest, UploadArchiveResponse
 from lanraragi.models.base import LanraragiErrorResponse
 
+from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
+from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
+from aio_lanraragi_tests.archive_generation.metadata.zipf_utils import get_archive_idx_to_tag_idxs_map
+from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest, WriteArchiveResponse
+from aio_lanraragi_tests.common import compute_upload_checksum
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.log_parse import parse_lrr_logs
 
 LOGGER = logging.getLogger(__name__)
+
+def get_bounded_sem(on_unix: int=8, on_windows: int=2) -> asyncio.Semaphore:
+    """
+    Return a semaphore based on appropriate environment.
+    """
+    match sys.platform:
+        case "win32":
+            return asyncio.BoundedSemaphore(value=on_windows)
+        case _:
+            return asyncio.BoundedSemaphore(value=on_unix)
 
 async def upload_archive(
     client: LRRClient, save_path: Path, filename: str, semaphore: asyncio.Semaphore,
@@ -44,6 +55,11 @@ async def upload_archive(
         raise asyncio.CancelledError()
 
     async with semaphore:
+
+        # Check again bc most tasks will be queueing for semaphore use.
+        if stop_event is not None and stop_event.is_set():
+            raise asyncio.CancelledError()
+
         async with aiofiles.open(save_path, 'rb') as f:
             file = await f.read()
             request = UploadArchiveRequest(file=file, filename=filename, title=title, tags=tags, file_checksum=checksum)

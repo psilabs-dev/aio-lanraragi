@@ -73,7 +73,7 @@ from lanraragi.models.tankoubon import (
     UpdateTankoubonRequest,
 )
 
-from aio_lanraragi_tests.helpers import expect_no_error_logs, save_archives, upload_archive, upload_archives
+from aio_lanraragi_tests.helpers import expect_no_error_logs, get_bounded_sem, save_archives, upload_archive, upload_archives
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.common import LRR_INDEX_TITLE
@@ -110,7 +110,7 @@ def npgenerator(request: pytest.FixtureRequest) -> Generator[np.random.Generator
 
 @pytest.fixture
 def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
-    yield asyncio.BoundedSemaphore(value=8)
+    yield get_bounded_sem()
 
 @pytest_asyncio.fixture
 async def lrr_client(environment: AbstractLRRDeploymentContext) ->  Generator[LRRClient, None, None]:

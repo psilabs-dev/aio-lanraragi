@@ -14,13 +14,13 @@ from typing import Dict, Generator, List, Tuple
 import pytest
 import pytest_asyncio
 
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.deployment.factory import generate_deployment
-from aio_lanraragi_tests.helpers import expect_no_error_logs, save_archives, upload_archives
-
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import DeleteArchiveRequest, DeleteArchiveResponse
 from lanraragi.models.base import LanraragiErrorResponse
+
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.factory import generate_deployment
+from aio_lanraragi_tests.helpers import expect_no_error_logs, get_bounded_sem, save_archives, upload_archives
 
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False
@@ -78,7 +78,7 @@ def npgenerator(request: pytest.FixtureRequest) -> Generator[np.random.Generator
 
 @pytest.fixture
 def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
-    yield asyncio.BoundedSemaphore(value=8)
+    yield get_bounded_sem()
 
 @pytest_asyncio.fixture
 async def client_session() -> Generator[aiohttp.ClientSession, None, None]:
