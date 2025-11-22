@@ -55,6 +55,11 @@ async def upload_archive(
         raise asyncio.CancelledError()
 
     async with semaphore:
+
+        # Check again bc most tasks will be queueing for semaphore use.
+        if stop_event is not None and stop_event.is_set():
+            raise asyncio.CancelledError()
+
         async with aiofiles.open(save_path, 'rb') as f:
             file = await f.read()
             request = UploadArchiveRequest(file=file, filename=filename, title=title, tags=tags, file_checksum=checksum)
