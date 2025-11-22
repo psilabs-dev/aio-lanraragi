@@ -14,7 +14,7 @@ from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import UpdateReadingProgressionRequest
 
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE, LRR_LOGIN_TITLE
-from aio_lanraragi_tests.helpers import expect_no_error_logs, save_archives, upload_archives
+from aio_lanraragi_tests.helpers import expect_no_error_logs, get_bounded_sem, save_archives, upload_archives
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 
@@ -61,7 +61,7 @@ def npgenerator(request: pytest.FixtureRequest) -> Generator[np.random.Generator
 
 @pytest.fixture
 def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
-    yield asyncio.BoundedSemaphore(value=2) # reduced val (we're not testing concurrency/upload).
+    yield get_bounded_sem(on_unix=2, on_windows=1) # reduced val (we're not testing concurrency/upload).
 
 @pytest_asyncio.fixture
 async def lrr_client(environment: AbstractLRRDeploymentContext) -> Generator[LRRClient, None, None]:
