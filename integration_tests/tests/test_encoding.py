@@ -23,19 +23,19 @@ from aio_lanraragi_tests.helpers import expect_no_error_logs, get_bounded_sem, s
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False # for debugging.
 
-def assert_filenames_equal(expected: str, actual: str):
-    if expected == actual:
+def assert_string_equal_with_debug(upload_page_filename: str, upload_api_filename: str):
+    if upload_page_filename == upload_api_filename:
         return
-    diff_index = next((i for i, (x, y) in enumerate(zip(expected, actual)) if x != y), min(len(expected), len(actual)))
-    expected_cps = " ".join(f"U+{ord(c):04X}" for c in expected)
-    actual_cps = " ".join(f"U+{ord(c):04X}" for c in actual)
+    diff_index = next((i for i, (x, y) in enumerate(zip(upload_page_filename, upload_api_filename)) if x != y), min(len(upload_page_filename), len(upload_api_filename)))
+    expected_cps = " ".join(f"U+{ord(c):04X}" for c in upload_page_filename)
+    actual_cps = " ".join(f"U+{ord(c):04X}" for c in upload_api_filename)
     pytest.fail(
-        "Uploaded archive filename is not original file basename!\n"
-        f"expected: {expected!r}\n"
-        f"actual:   {actual!r}\n"
-        f"first_diff_index: {diff_index}\n"
-        f"expected_codepoints: {expected_cps}\n"
-        f"actual_codepoints:   {actual_cps}"
+        "The two strings passed do not match.\n"
+        f"Filename (upload page):   {upload_page_filename!r}\n"
+        f"Filename (upload API):    {upload_api_filename!r}\n"
+        f"first_diff_index:         {diff_index}\n"
+        f"expected_codepoints:      {expected_cps}\n"
+        f"actual_codepoints:        {actual_cps}"
     )
 
 def basenames() -> List[str]:
@@ -99,7 +99,10 @@ async def test_upload_page_filename_consistency(
     npgenerator: np.random.Generator, semaphore: asyncio.BoundedSemaphore,
 ):
     """
-    Check that filenames are equal to the original uploaded filename.
+    Check that the following are equal:
+
+    - the filename of an archive uploaded via the upload page,
+    - the filename of an archive uploaded via the upload API.
     """
 
     num_archives = 1
@@ -190,6 +193,6 @@ async def test_upload_page_filename_consistency(
         upload_api_filename = response.filename + '.' + response.extension
 
         # Check the upload page filename equals upload api filename.
-        assert_filenames_equal(upload_page_filename, upload_api_filename)
+        assert_string_equal_with_debug(upload_page_filename, upload_api_filename)
 
     expect_no_error_logs(environment)
