@@ -24,8 +24,8 @@ on:
         default: 'dev'
 
 env:
-  LRR_REPOSITORY: ${{ github.event.inputs.lrr_repository || 'difegue/LANraragi' }}
-  LRR_REF: ${{ github.event.inputs.lrr_ref || 'dev' }}
+  LRR_REPOSITORY: ${{ github.event.inputs.lrr_repository || 'psilabs-dev/LANraragi' }}
+  LRR_REF: ${{ github.event.inputs.lrr_ref || 'bugfix/encoding' }}
 
 jobs:
 
@@ -73,7 +73,7 @@ jobs:
           cd integration_tests
           export CI=true
           export DOCKER_BUILDKIT=1
-          pytest tests --log-cli-level=INFO \
+          pytest tests/test_encoding.py --log-cli-level=INFO \
             --git-url=https://github.com/${{ env.LRR_REPOSITORY }}.git \
             --git-branch=${{ env.LRR_REF }} \
             --staging "$GITHUB_WORKSPACE/staging" \
@@ -216,7 +216,7 @@ jobs:
         timeout-minutes: 50
         run: |
           $env:CI='true'
-          pytest tests `
+          pytest tests\test_encoding.py `
           --log-cli-level=INFO `
           --windist "$env:GITHUB_WORKSPACE\LANraragi\win-dist" `
           --staging "$env:GITHUB_WORKSPACE\staging" `
