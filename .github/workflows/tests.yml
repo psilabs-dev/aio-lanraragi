@@ -12,6 +12,20 @@ on:
   schedule:
     - cron: '0 0 * * 4' # Run tests on main branch every Thursday at 00:00
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      lrr_repository:
+        description: 'LANraragi repository path'
+        required: true
+        default: 'difegue/LANraragi'
+      lrr_ref:
+        description: 'LANraragi ref (branch, tag, or commit SHA)'
+        required: true
+        default: 'dev'
+
+env:
+  LRR_REPOSITORY: ${{ github.event.inputs.lrr_repository || 'difegue/LANraragi' }}
+  LRR_REF: ${{ github.event.inputs.lrr_ref || 'dev' }}
 
 jobs:
 
@@ -60,8 +74,8 @@ jobs:
           export CI=true
           export DOCKER_BUILDKIT=1
           pytest tests --log-cli-level=INFO \
-            --git-url=https://github.com/difegue/LANraragi.git \
-            --git-branch=dev \
+            --git-url=https://github.com/${{ env.LRR_REPOSITORY }}.git \
+            --git-branch=${{ env.LRR_REF }} \
             --staging "$GITHUB_WORKSPACE/staging" \
             --playwright \
             --docker-api \
@@ -110,7 +124,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          $sha = gh api repos/difegue/LANraragi/branches/dev --jq '.commit.sha'
+          $repo = $env:LRR_REPOSITORY
+          $ref = $env:LRR_REF
+          $sha = gh api "repos/$repo/branches/$ref" --jq '.commit.sha'
           "WINDIST_KEY=windist-${{ runner.os }}-$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Restore windist cache
@@ -133,8 +149,8 @@ jobs:
         if: steps.cache-windist.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
-          repository: difegue/LANraragi
-          ref: dev
+          repository: ${{ env.LRR_REPOSITORY }}
+          ref: ${{ env.LRR_REF }}
           submodules: true
           path: LANraragi
 
