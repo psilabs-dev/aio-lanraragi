@@ -73,7 +73,7 @@ jobs:
           cd integration_tests
           export CI=true
           export DOCKER_BUILDKIT=1
-          pytest tests/test_encoding.py --log-cli-level=INFO \
+          pytest tests --log-cli-level=INFO \
             --git-url=https://github.com/${{ env.LRR_REPOSITORY }}.git \
             --git-branch=${{ env.LRR_REF }} \
             --staging "$GITHUB_WORKSPACE/staging" \
@@ -216,7 +216,7 @@ jobs:
         timeout-minutes: 50
         run: |
           $env:CI='true'
-          pytest tests\test_encoding.py `
+          pytest tests `
           --log-cli-level=INFO `
           --windist "$env:GITHUB_WORKSPACE\LANraragi\win-dist" `
           --staging "$env:GITHUB_WORKSPACE\staging" `
