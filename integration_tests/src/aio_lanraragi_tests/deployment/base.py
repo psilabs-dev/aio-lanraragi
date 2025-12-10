@@ -5,13 +5,14 @@ import shutil
 import time
 from typing import Dict, Optional
 import aiohttp
+import psycopg
 import redis
 import requests
 import gzip
 
 from lanraragi.clients.client import LRRClient
 
-from aio_lanraragi_tests.common import DEFAULT_LRR_PORT, DEFAULT_REDIS_PORT
+from aio_lanraragi_tests.common import DEFAULT_LRR_PORT, DEFAULT_REDIS_PORT, DEFAULT_POSTGRES_PORT
 from aio_lanraragi_tests.exceptions import DeploymentException
 
 class AbstractLRRDeploymentContext(abc.ABC):
@@ -65,6 +66,13 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Port exposed for the given Redis database.
         """
         return DEFAULT_REDIS_PORT + self.port_offset
+    
+    @property
+    def postgres_port(self) -> int:
+        """
+        Port exposed for the given Postgres database.
+        """
+        return DEFAULT_POSTGRES_PORT + self.port_offset
     
     @property
     def lrr_base_url(self) -> str:
@@ -168,6 +176,14 @@ class AbstractLRRDeploymentContext(abc.ABC):
         """
         redis_dirname = self.resource_prefix + "redis"
         return self.staging_dir / redis_dirname
+    
+    @property
+    def postgres_dir(self) -> Path:
+        """
+        Path to Postgres database directory.
+        """
+        postgres_dirname = self.resource_prefix + "postgres"
+        return self.staging_dir / postgres_dirname
 
     @property
     def redis_client(self) -> redis.Redis:
@@ -177,6 +193,26 @@ class AbstractLRRDeploymentContext(abc.ABC):
         if not hasattr(self, "_redis_client") or not self._redis_client:
             self._redis_client = redis.Redis(host="127.0.0.1", port=self.redis_port, decode_responses=True)
         return self._redis_client
+
+    @property
+    def postgres_client(self) -> psycopg.Connection:
+        """
+        Postgres client for this LRR deployment
+        """
+        if (
+            not hasattr(self, "_postgres_client")
+            or self._postgres_client is None
+            or getattr(self._postgres_client, "closed", True)
+        ):
+            self._postgres_client = psycopg.connect(
+                dbname="postgres",
+                host="127.0.0.1",
+                port=self.postgres_port,
+                user="postgres",
+                password="postgres",
+            )
+            self._postgres_client.autocommit = True
+        return self._postgres_client
 
     @abc.abstractmethod
     def setup(
@@ -419,6 +455,21 @@ class AbstractLRRDeploymentContext(abc.ABC):
                     raise
                 time_to_sleep = 2 ** (retry_count + 1)
                 self.logger.warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
+                retry_count += 1
+                time.sleep(time_to_sleep)
+
+    def test_postgres_connection(self, max_retries: int=4):
+        self.logger.debug("Connecting to Postgres...")
+        retry_count = 0
+        while True:
+            try:
+                self.postgres_client.execute("SELECT 1")
+                break
+            except psycopg.Error:
+                if retry_count >= max_retries:
+                    raise
+                time_to_sleep = 2 ** (retry_count + 1)
+                self.logger.warning(f"Failed to connect to Postgres. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
                 retry_count += 1
                 time.sleep(time_to_sleep)
 

@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 
 logger = logging.getLogger(__name__)
 
@@ -152,12 +153,22 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
                     for line in lines:
                         logger.error(line)
                     logger.error(f"<<<<< LRR LOGS (prefix: \"{prefix}\") <<<<<")
-                    logger.error(f">>>>> SHINOBU LOGS (prefix: \"{prefix}\") >>>>>")
-                    shinobu_logs = environment.read_log(environment.shinobu_logs_path)
-                    lines = shinobu_logs.split('\n')[-100:]
-                    for line in lines:
-                        logger.error(line)
-                    logger.error(f"<<<<< SHINOBU LOGS (prefix: \"{prefix}\") <<<<<")
+                    if environment.shinobu_logs_path.exists():
+                        logger.error(f">>>>> SHINOBU LOGS (prefix: \"{prefix}\") >>>>>")
+                        shinobu_logs = environment.read_log(environment.shinobu_logs_path)
+                        lines = shinobu_logs.split('\n')[-100:]
+                        for line in lines:
+                            logger.error(line)
+                        logger.error(f"<<<<< SHINOBU LOGS (prefix: \"{prefix}\") <<<<<")
+                    if isinstance(environment, DockerLRRDeploymentContext):
+                        logger.error(f">>>>> POSTGRES LOGS (prefix: \"{prefix}\") >>>>>")
+                        postgres_logs = environment.get_postgres_logs(tail=100)
+                        if postgres_logs:
+                            log_text = postgres_logs.decode('utf-8', errors='replace')
+                            for line in log_text.split('\n'):
+                                if line.strip():
+                                    logger.error(f"POSTGRES: {line}")
+                        logger.error(f"<<<<< POSTGRES LOGS (prefix: \"{prefix}\") <<<<<")
             else:
                 logger.info("No environment available.")
         except Exception as e:
