@@ -25,7 +25,6 @@ class SearchArchiveIndexResponseRecord(BaseModel):
 
 class SearchArchiveIndexResponse(LanraragiResponse):
     data: List[SearchArchiveIndexResponseRecord] = Field(...)
-    draw: int = Field(...)
     records_filtered: int = Field(...)
     records_total: int = Field(...)
 
