@@ -20,10 +20,11 @@ from git import Repo
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
-from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_REDIS_PORT
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_REDIS_PORT, DEFAULT_POSTGRES_PORT
 
 DEFAULT_REDIS_DOCKER_TAG = "redis:7.2.4"
 DEFAULT_LANRARAGI_DOCKER_TAG = "difegue/lanraragi"
+DEFAULT_POSTGRES_DOCKER_TAG = "postgres:18"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -60,6 +61,52 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     @redis_container.setter
     def redis_container(self, container: docker.models.containers.Container):
         self._redis_container = container
+    
+    @property
+    def postgres_container_name(self) -> str:
+        return self.resource_prefix + "postgres_service"
+
+    @property
+    def postgres_container(self) -> Optional[docker.models.containers.Container]:
+        """
+        Returns the Postgres container from attribute if it exists.
+        Otherwise, falls back to finding the Postgres container with the
+        same name, based on initialization settings.
+        """
+        container = None
+        with contextlib.suppress(AttributeError):
+            container = self._postgres_container
+        if container is None:
+            container = self._get_container_by_name(self.postgres_container_name)
+        self._postgres_container = container
+        return container
+    
+    @postgres_container.setter
+    def postgres_container(self, container: docker.models.containers.Container):
+        self._postgres_container = container
+
+    @property
+    def postgres_volume_name(self) -> str:
+        return self.resource_prefix + "postgres_volume"
+
+    @property
+    def postgres_volume(self) -> Optional[docker.models.volumes.Volume]:
+        """
+        Returns the Postgres data volume from attribute if it exists.
+        Otherwise, falls back to finding the Postgres volume with the
+        same name, based on initialization settings.
+        """
+        volume = None
+        with contextlib.suppress(AttributeError):
+            volume = self._postgres_volume
+        if volume is None:
+            volume = self._get_volume_by_name(self.postgres_volume_name)
+        self._postgres_volume = volume
+        return volume
+    
+    @postgres_volume.setter
+    def postgres_volume(self, volume: docker.models.volumes.Volume):
+        self._postgres_volume = volume
 
     @property
     def lrr_container_name(self) -> str:
@@ -144,6 +191,14 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Bind mount for Redis container:/data.
         """
         dirname = self.resource_prefix + "redis"
+        return self.staging_dir / dirname
+    
+    @property
+    def postgres_dir(self) -> Path:
+        """
+        Bind mount for Postgres container:/var/lib/postgresql.
+        """
+        dirname = self.resource_prefix + "postgres"
         return self.staging_dir / dirname
 
     @property
@@ -232,6 +287,12 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def start_redis(self):
         resp = self.redis_container.start()
         return resp
+    
+    def start_postgres(self):
+        """
+        Start the Postgres server container.
+        """
+        return self.postgres_container.start()
 
     @override
     def stop_lrr(self, timeout: int=10):
@@ -246,6 +307,13 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Stop the redis container (timeout in s)
         """
         self.redis_container.stop(timeout=timeout)
+    
+    def stop_postgres(self, timeout: int=10):
+        """
+        Stop the Postgres container (timeout in s)
+        """
+        if self.postgres_container:
+            self.postgres_container.stop(timeout=timeout)
 
     @override
     def get_lrr_logs(self, tail: int=100) -> bytes:
@@ -268,6 +336,16 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.warning("Redis container not available for log extraction")
             return b"No Redis container available"
 
+    def get_postgres_logs(self, tail: int=100) -> bytes:
+        """
+        Get the Postgres container logs.
+        """
+        if self.postgres_container:
+            return self.postgres_container.logs(tail=tail)
+        else:
+            self.logger.warning("Postgres container not available for log extraction")
+            return b"No Postgres container available"
+
     @override
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
@@ -287,13 +365,13 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             environment: additional environment variables map to pass through to LRR during container creation
             test_connection_max_retries: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
-        # ensure staging, contents, thumb, and Redis directories exist
+        # ensure staging, contents, thumb, Redis and Postgres directories exist
         staging_dir = self.staging_dir
         if not staging_dir:
             raise FileNotFoundError("Staging directory not provided. Use --staging to specify a host directory for bind mounts.")
         if not staging_dir.exists():
             raise FileNotFoundError(f"Staging directory {staging_dir} not found.")
-
+        
         contents_dir = self.archives_dir
         thumb_dir = self.thumb_dir
         logs_dir = self.logs_dir
@@ -323,8 +401,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         # the docker image is not included, haven't decided how to classify it yet.
         self.logger.info(
             f"Deploying Docker LRR with the following resources: "
-            f"LRR container {self.lrr_container_name}, Redis container {self.redis_container_name}, "
-            f"contents path {contents_dir}, thumb path {thumb_dir}, logs path {logs_dir}, redis path {redis_dir}, "
+            f"LRR container {self.lrr_container_name}, Redis container {self.redis_container_name}, Postgres container {self.postgres_container_name}, "
+            f"contents path {contents_dir}, thumb path {thumb_dir}, logs path {logs_dir}, redis path {redis_dir}, postgres volume {self.postgres_volume_name}, "
             f"network {self.network_name}"
         )
 
@@ -353,6 +431,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         # pull redis
         self._pull_docker_image_if_not_exists(DEFAULT_REDIS_DOCKER_TAG, force=False)
+        # pull postgres
+        self._pull_docker_image_if_not_exists(DEFAULT_POSTGRES_DOCKER_TAG, force=False)
         # <<<<< IMAGE PREPARATION <<<<<
 
         # prepare the network
@@ -363,7 +443,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         else:
             self.logger.debug(f"Network exists: {network_name}.")
 
-        # prepare the redis container first.
+        # prepare the redis container.
         redis_port = self.redis_port
         redis_container_name = self.redis_container_name
         redis_healthcheck = {
@@ -394,6 +474,47 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 }
             )
 
+        # prepare the postgres container.
+        postgres_port = self.postgres_port
+        postgres_container_name = self.postgres_container_name
+        postgres_healthcheck = {
+            "test": [ "CMD-SHELL", "pg_isready -U postgres" ],
+            "start_period": 1000000 * 2000 # 2s
+        }
+        postgres_ports = {
+            "5432/tcp": postgres_port
+        }
+        postgres_env = {
+            "POSTGRES_PASSWORD": "postgres",
+            "POSTGRES_USER": "postgres",
+            "POSTGRES_DB": "postgres"
+        }
+        postgres_volume_name = self.postgres_volume_name
+        if self.postgres_volume:
+            self.logger.debug(f"Postgres volume exists: {postgres_volume_name}.")
+        else:
+            self.logger.debug(f"Creating Postgres volume: {postgres_volume_name}")
+            self.postgres_volume = self.docker_client.volumes.create(name=postgres_volume_name)
+        if self.postgres_container:
+            self.logger.debug(f"Postgres container exists: {self.postgres_container_name}.")
+        else:
+            self.logger.debug(f"Creating postgres container: {self.postgres_container_name}")
+            self.postgres_container = self.docker_client.containers.create(
+                DEFAULT_POSTGRES_DOCKER_TAG,
+                name=postgres_container_name,
+                hostname=postgres_container_name,
+                detach=True,
+                network=network_name,
+                ports=postgres_ports,
+                healthcheck=postgres_healthcheck,
+                environment=postgres_env,
+                # Postgres 18+: use /var/lib/postgresql (pg_ctlcluster layout)
+                # See: https://github.com/docker-library/postgres/pull/1259
+                volumes={
+                    postgres_volume_name: {"bind": "/var/lib/postgresql", "mode": "rw"}
+                }
+            )
+
         # then prepare the LRR container.
         lrr_port = self.lrr_port
         lrr_container_name = self.lrr_container_name
@@ -411,6 +532,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             "LRR_UID": str(self.lrr_uid),
             "LRR_GID": str(self.lrr_gid),
         }
+        # Postgres environment (enable LRR to discover Postgres within docker network)
+        desired_env_map["LRR_POSTGRES_HOST"] = self.postgres_container_name
+        desired_env_map["LRR_POSTGRES_PORT"] = str(DEFAULT_POSTGRES_PORT)
         if environment:
             desired_env_map.update(environment)
         desired_env_list = [f"{k}={v}" for k, v in desired_env_map.items()]
@@ -448,6 +572,12 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             )
             self.logger.debug("LRR container created.")
 
+        # start postgres
+        self.logger.debug(f"Starting container: {self.postgres_container_name}")
+        self.start_postgres()
+        self.test_postgres_connection()
+        self.logger.debug("Postgres container started.")
+
         # start redis
         self.logger.debug(f"Starting container: {self.redis_container_name}")
         self.start_redis()
@@ -480,10 +610,14 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def start(self, test_connection_max_retries: int=4):
         # this can't really be replaced with setup stage, because during setup we do some work after redis startup 
         # and before LRR startup.
+        self.logger.debug(f"Starting container: {self.postgres_container_name}")
+        self.postgres_container.start()
+        self.logger.debug("Postgres container started.")
+        self.test_postgres_connection(test_connection_max_retries)
         self.logger.debug(f"Starting container: {self.redis_container_name}")
         self.redis_container.start()
         self.logger.debug("Redis container started.")
-
+        self.test_redis_connection(test_connection_max_retries)
         self.start_lrr()
         self.logger.debug("Testing connection to LRR server.")
         self.test_lrr_connection(self.lrr_port, test_connection_max_retries)
@@ -514,6 +648,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.redis_container:
             self.redis_container.stop(timeout=1)
             self.logger.debug(f"Stopped container: {self.redis_container_name}")
+        if self.postgres_container:
+            self.postgres_container.stop(timeout=1)
+            self.logger.debug(f"Stopped container: {self.postgres_container_name}")
 
     @override
     def restart(self):
@@ -526,9 +663,17 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if self.redis_container:
             self.redis_container.stop(timeout=1)
             self.logger.debug(f"Stopped container: {self.redis_container_name}")
+        if self.postgres_container:
+            self.postgres_container.stop(timeout=1)
+            self.logger.debug(f"Stopped container: {self.postgres_container_name}")
+        self.logger.debug(f"Starting container: {self.postgres_container_name}")
+        self.postgres_container.start()
+        self.logger.debug("Postgres container started.")
+        self.test_postgres_connection()
         self.logger.debug(f"Starting container: {self.redis_container_name}")
         self.redis_container.start()
         self.logger.debug("Redis container started.")
+        self.test_redis_connection()
         self.start_lrr()
         self.logger.debug("Testing connection to LRR server.")
         self.test_lrr_connection(self.lrr_port)
@@ -618,10 +763,27 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.redis_container.remove(v=True, force=True)
             self.logger.debug(f"Removed container: {self.redis_container_name}")
 
+        if remove_data and self.postgres_container:
+            self.postgres_container.reload()
+            if self.postgres_container.status == 'running':
+                self.postgres_container.exec_run(["bash", "-c", "rm -rf /var/lib/postgresql/*"], user='postgres')
+        if self.postgres_container:
+            self.postgres_container.stop(timeout=1)
+            self.logger.debug(f"Stopped container: {self.postgres_container_name}")
+        if self.postgres_container:
+            self.postgres_container.remove(v=True, force=True)
+            self.logger.debug(f"Removed container: {self.postgres_container_name}")
+
         if remove_data:
             if self.redis_dir.exists():
                 shutil.rmtree(self.redis_dir)
                 self.logger.debug(f"Removed redis directory: {self.redis_dir}")
+            if self.postgres_volume:
+                self.postgres_volume.remove(force=True)
+                self.logger.debug(f"Removed postgres volume: {self.postgres_volume_name}")
+            if self.postgres_dir.exists():
+                shutil.rmtree(self.postgres_dir)
+                self.logger.debug(f"Removed postgres directory: {self.postgres_dir}")
             if self.archives_dir.exists():
                 shutil.rmtree(self.archives_dir)
                 self.logger.debug(f"Removed contents directory: {self.archives_dir}")
@@ -635,6 +797,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if hasattr(self, 'network') and self.network:
             self.network.remove()
             self.logger.debug(f"Removed network: {self.network_name}")
+        
+        time.sleep(1)
 
     def _build_docker_image(self, build_path: str, force: bool=False):
         """
@@ -675,7 +839,15 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         # force-remove intermediate artifacts with rm/forcerm.
         if self.docker_api:
             logs = []
-            for evt in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag=image_id, decode=True, rm=True, forcerm=True):
+            for evt in self.docker_api.build(
+                path=build_path,
+                dockerfile=str(dockerfile_path),
+                tag=image_id,
+                decode=True,
+                rm=True,
+                forcerm=True,
+                buildargs={"INCLUDE_POSTGRESQL": "1"}
+            ):
                 logs.append(evt)
                 if (msg := evt.get("stream")):
                     self.logger.info(msg.strip())
@@ -683,7 +855,14 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                     error_msg = evt.get("error") or evt.get("errorDetail", {}).get("message")
                     raise DeploymentException(f"Docker image build failed! Error: {error_msg}")
         else:
-            self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag=image_id, rm=True, forcerm=True)
+            self.docker_client.images.build(
+                path=build_path,
+                dockerfile=str(dockerfile_path),
+                tag=image_id,
+                rm=True,
+                forcerm=True,
+                buildargs={"INCLUDE_POSTGRESQL": "1"}
+            )
 
         build_time = time.time() - build_start
         self.logger.info(f"LRR image {image_id} build complete: time {build_time}s")

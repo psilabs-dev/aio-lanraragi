@@ -3,11 +3,12 @@ requires = ["setuptools"]
 
 [project]
 name = "aio-lanraragi-integration-tests"
-version = "0.1.15-post1"
+version = "0.1.16"
 description = "Integration tests for aio-lanraragi"
 requires-python = ">=3.12, <=3.14"
 dependencies = [
     "aiofiles",
+    "aio-lanraragi",
     "docker",
     "git-python",
     "matplotlib",
@@ -15,6 +16,7 @@ dependencies = [
     "pillow",
     "playwright",
     "psutil",
+    "psycopg[binary]",
     "pydantic>=2.0.0",
     "pytest",
     "pytest-asyncio",

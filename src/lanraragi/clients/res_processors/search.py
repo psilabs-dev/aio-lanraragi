@@ -10,7 +10,6 @@ from lanraragi.models.search import (
 def _process_search_archive_index_response(content: str) -> SearchArchiveIndexResponse:
     response_j = json.loads(content)
     data = response_j.get('data')
-    draw = response_j.get('draw')
     records_filtered = response_j.get('recordsFiltered')
     records_total = response_j.get('recordsTotal')
     records = []
@@ -24,11 +23,11 @@ def _process_search_archive_index_response(content: str) -> SearchArchiveIndexRe
         lastreadtime = record.get('lastreadtime')
         title = record.get('title')
         records.append(SearchArchiveIndexResponseRecord(
-            arcid=arcid, isnew=isnew, extension=extension, pagecount=pagecount, 
+            arcid=arcid, isnew=isnew, extension=extension, pagecount=pagecount,
             progress=progress, tags=tags, lastreadtime=lastreadtime, title=title
         ))
     response = SearchArchiveIndexResponse(
-        data=records, draw=draw, records_filtered=records_filtered, records_total=records_total
+        data=records, records_filtered=records_filtered, records_total=records_total
     )
     return response
 
