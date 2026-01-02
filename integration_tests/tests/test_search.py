@@ -489,6 +489,56 @@ async def test_search_functionality(
     assert tankoubon_id in arcids, f"Tankoubon ID {tankoubon_id} not found in grouped results: {arcids}"
     # <<<<< TANKOUBON GROUPING TESTS: GROUPING ON <<<<<
 
+    # >>>>> SEARCH TESTS: WILDCARD UNDERSCORE SEARCH >>>>>
+    # Underscore (_) is a single-character wildcard, same as ?
+    response, error = await lrr_client.search_api.search_archive_index(
+        SearchArchiveIndexRequest(search_filter='"Fate GO MEMO _"', groupby_tanks=False)
+    )
+    assert not error, f"Wildcard underscore search failed (status {error.status}): {error.error}"
+    assert get_result_titles(response) == {"Fate GO MEMO 2"}, f"Wildcard underscore search mismatch: {get_result_titles(response)}"
+    # <<<<< SEARCH TESTS: WILDCARD UNDERSCORE SEARCH <<<<<
+
+    # >>>>> SEARCH TESTS: WILDCARD PERCENT SEARCH >>>>>
+    # Percent (%) is a multi-character wildcard, same as *
+    response, error = await lrr_client.search_api.search_archive_index(
+        SearchArchiveIndexRequest(search_filter='"Saturn%American%"', groupby_tanks=False)
+    )
+    assert not error, f"Wildcard percent search failed (status {error.status}): {error.error}"
+    assert get_result_titles(response) == {"Saturn Backup Cartridge - American Manual"}, f"Wildcard percent search mismatch: {get_result_titles(response)}"
+    # <<<<< SEARCH TESTS: WILDCARD PERCENT SEARCH <<<<<
+
+    # >>>>> SEARCH TESTS: EXACT SEARCH WITH QUOTES AND WILDCARD >>>>>
+    # Quotes with wildcard and $ suffix for exact matching
+    response, error = await lrr_client.search_api.search_archive_index(
+        SearchArchiveIndexRequest(search_filter='"Saturn Backup Cartridge - *"$', groupby_tanks=False)
+    )
+    assert not error, f"Exact search with quotes and wildcard failed (status {error.status}): {error.error}"
+    expected = {"Saturn Backup Cartridge - Japanese Manual", "Saturn Backup Cartridge - American Manual"}
+    assert get_result_titles(response) == expected, f"Exact search with quotes and wildcard mismatch: {get_result_titles(response)}"
+    # <<<<< SEARCH TESTS: EXACT SEARCH WITH QUOTES AND WILDCARD <<<<<
+
+    # >>>>> SEARCH TESTS: MULTIPLE TOKENS WITH NON-MATCHING TERM >>>>>
+    # When searching with multiple comma-separated terms, all terms are ANDed together.
+    # If any term doesn't match, the entire search returns 0 results.
+    # Here, "artist:shirow masamune" matches Ghost in the Shell, but "nonexistent_fake_xyz"
+    # doesn't match any tags or titles, so the intersection is empty.
+    response, error = await lrr_client.search_api.search_archive_index(
+        SearchArchiveIndexRequest(search_filter="artist:shirow masamune, nonexistent_fake_xyz", groupby_tanks=False)
+    )
+    assert not error, f"Multiple tokens with non-matching term search failed (status {error.status}): {error.error}"
+    assert len(response.data) == 0, f"Multiple tokens with non-matching term should return 0 results, got {len(response.data)}: {get_result_titles(response)}"
+    # <<<<< SEARCH TESTS: MULTIPLE TOKENS WITH NON-MATCHING TERM <<<<<
+
+    # >>>>> SEARCH TESTS: INCORRECT TAG EXCLUSION SYNTAX >>>>>
+    # When exclusion operator (-) is inside quotes, it's treated as literal text,
+    # not as an exclusion operator. This searches for a title containing "-character:waver velvet".
+    response, error = await lrr_client.search_api.search_archive_index(
+        SearchArchiveIndexRequest(search_filter='"artist:wada rco" "-character:waver velvet"', groupby_tanks=False)
+    )
+    assert not error, f"Incorrect tag exclusion syntax search failed (status {error.status}): {error.error}"
+    assert len(response.data) == 0, f"Incorrect tag exclusion syntax should return 0 results, got {len(response.data)}: {get_result_titles(response)}"
+    # <<<<< SEARCH TESTS: INCORRECT TAG EXCLUSION SYNTAX <<<<<
+
     # >>>>> DISCARD SEARCH CACHE >>>>>
     response, error = await lrr_client.search_api.discard_search_cache()
     assert not error, f"Failed to discard search cache (status {error.status}): {error.error}"
