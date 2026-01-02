@@ -9,6 +9,9 @@ import psutil
 import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.docker_postgres import (
+    DockerPostgresLRRDeploymentContext,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -111,6 +114,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--cache-backend", action="store", default="redis", choices=["redis", "valkey", "valkey8"], help="Cache backend for Docker deployments. Default: redis.")
     parser.addoption("--port-offset", type=int, action="store", default=0, help="Session-wide base port offset added to per-module offsets. Use to avoid conflicts between parallel sessions.")
     parser.addoption("--resource-prefix", action="store", default="", help="Session-wide prefix prepended to per-module resource prefixes. Use to isolate parallel sessions.")
+    parser.addoption("--postgres", action="store_true", default=False, help="Deploy PostgreSQL alongside Redis for metadata/search (Docker only).")
 
 def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
@@ -267,6 +271,12 @@ def _save_server_logs(
             redis_logs = environment.get_redis_logs(tail=10000).decode('utf-8', errors='replace')
         if redis_logs:
             (out_dir / "redis.log").write_text(redis_logs, encoding='utf-8')
+
+        # Postgres logs (only available for postgres deployments).
+        if isinstance(environment, DockerPostgresLRRDeploymentContext):
+            postgres_logs = environment.get_postgres_logs(tail=10000).decode('utf-8', errors='replace')
+            if postgres_logs:
+                (out_dir / "postgres.log").write_text(postgres_logs, encoding='utf-8')
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
