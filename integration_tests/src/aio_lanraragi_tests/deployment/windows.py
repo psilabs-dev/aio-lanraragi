@@ -457,6 +457,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def teardown(self, remove_data: bool=False):
         """
         Forceful shutdown of LRR and Redis and remove the content path, preparing it for another test.
+        Additionally, close all closable resources/clients.
         """
         contents_dir = self.archives_dir
         log_dir = self.logs_dir
@@ -465,7 +466,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         redis_dir = self.redis_dir
         temp_dir = self.temp_dir
         self.stop()
-
+        if hasattr(self, "_redis_client") and self._redis_client is not None:
+            self._redis_client.close()
         if remove_data:
             if contents_dir.exists():
                 self._remove_ro(contents_dir)
