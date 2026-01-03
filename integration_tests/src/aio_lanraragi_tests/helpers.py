@@ -5,13 +5,28 @@ import errno
 import logging
 import numpy as np
 from pathlib import Path
-from typing import List, Optional, Set, Tuple
+from typing import Awaitable, Callable, List, Optional, Set, Tuple, TypeVar
+from urllib.parse import urlparse, parse_qs
 
 import aiohttp
 
 from lanraragi.clients.client import LRRClient
-from lanraragi.models.archive import UploadArchiveRequest, UploadArchiveResponse
-from lanraragi.models.base import LanraragiErrorResponse
+from lanraragi.clients.utils import _build_err_response
+from lanraragi.models.archive import (
+    DeleteArchiveRequest,
+    DeleteArchiveResponse,
+    ExtractArchiveRequest,
+    UploadArchiveRequest,
+    UploadArchiveResponse,
+)
+from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
+from lanraragi.models.category import (
+    AddArchiveToCategoryRequest,
+    AddArchiveToCategoryResponse,
+    GetCategoryRequest,
+    GetCategoryResponse,
+    RemoveArchiveFromCategoryRequest,
+)
 
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
@@ -22,6 +37,7 @@ from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.log_parse import parse_lrr_logs
 
 LOGGER = logging.getLogger(__name__)
+ResponseT = TypeVar('ResponseT', bound=LanraragiResponse)
 
 def get_bounded_sem(on_unix: int=8, on_windows: int=2) -> asyncio.Semaphore:
     """
@@ -263,7 +279,142 @@ def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Gen
             create_page_request = CreatePageRequest(
                 width=1080, height=1920, filename=page_filename, image_format='PNG', text=page_text
             )
-            create_page_requests.append(create_page_request)        
+            create_page_requests.append(create_page_request)
         requests.append(WriteArchiveRequest(create_page_requests=create_page_requests, save_path=save_path, archival_strategy=ArchivalStrategyEnum.ZIP))
     responses = write_archives_to_disk(requests)
     return responses
+
+
+def create_archive_file(tmpdir: Path, name: str, num_pages: int) -> Path:
+    """Create a single archive with the specified number of pages."""
+    filename = f"{name}.zip"
+    save_path = tmpdir / filename
+
+    create_page_requests = []
+    for page_id in range(num_pages):
+        page_text = f"{name}-pg-{str(page_id + 1).zfill(len(str(num_pages)))}"
+        page_filename = f"{page_text}.png"
+        create_page_requests.append(CreatePageRequest(
+            width=100, height=100, filename=page_filename, image_format='PNG', text=page_text
+        ))
+
+    request = WriteArchiveRequest(
+        create_page_requests=create_page_requests,
+        save_path=save_path,
+        archival_strategy=ArchivalStrategyEnum.ZIP
+    )
+    responses = write_archives_to_disk([request])
+    assert responses[0].save_path == save_path
+    return save_path
+
+async def retry_on_lock(
+    operation_func: Callable[[], Awaitable[Tuple[ResponseT, LanraragiErrorResponse]]],
+    max_retries: int = 10
+) -> Tuple[ResponseT, LanraragiErrorResponse]:
+    """
+    Wrapper function that retries an operation if it encounters a 423 locked resource error.
+    """
+    retry_count = 0
+    while True:
+        response, error = await operation_func()
+        if error and error.status == 423:
+            retry_count += 1
+            if retry_count > max_retries:
+                return response, error
+            await asyncio.sleep(2 ** retry_count)
+            continue
+        return response, error
+
+
+async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[DeleteArchiveResponse, LanraragiErrorResponse]:
+    """Delete an archive with retry logic for locked resources."""
+    retry_count = 0
+    async with semaphore:
+        while True:
+            response, error = await client.archive_api.delete_archive(DeleteArchiveRequest(arcid=arcid))
+            if error and error.status == 423:
+                retry_count += 1
+                if retry_count > 10:
+                    return response, error
+                tts = 2 ** retry_count
+                LOGGER.debug(f"[delete_archive][{arcid}] locked resource error; retrying in {tts}s.")
+                await asyncio.sleep(tts)
+                continue
+            return response, error
+
+
+async def add_archive_to_category(client: LRRClient, category_id: str, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[AddArchiveToCategoryResponse, LanraragiErrorResponse]:
+    """Add an archive to a category with retry logic for locked resources."""
+    retry_count = 0
+    async with semaphore:
+        while True:
+            response, error = await client.category_api.add_archive_to_category(AddArchiveToCategoryRequest(category_id=category_id, arcid=arcid))
+            if error and error.status == 423:
+                retry_count += 1
+                if retry_count > 10:
+                    return response, error
+                tts = 2 ** retry_count
+                LOGGER.debug(f"[add_archive_to_category][{category_id}][{arcid}] locked resource error; retrying in {tts}s.")
+                await asyncio.sleep(tts)
+                continue
+            return response, error
+
+
+async def remove_archive_from_category(client: LRRClient, category_id: str, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
+    """Remove an archive from a category with retry logic for locked resources."""
+    retry_count = 0
+    async with semaphore:
+        while True:
+            response, error = await client.category_api.remove_archive_from_category(RemoveArchiveFromCategoryRequest(category_id=category_id, arcid=arcid))
+            if error and error.status == 423:
+                retry_count += 1
+                if retry_count > 10:
+                    return response, error
+                tts = 2 ** retry_count
+                LOGGER.debug(f"[remove_archive_from_category][{category_id}][{arcid}] locked resource error; retrying in {tts}s.")
+                await asyncio.sleep(tts)
+                continue
+            return response, error
+
+
+async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
+    """Load pages from an archive (extracts and fetches first 3 pages)."""
+    async with semaphore:
+        response, error = await retry_on_lock(lambda: client.archive_api.extract_archive(ExtractArchiveRequest(arcid=arcid, force=False)))
+        if error:
+            return (None, error)
+
+        pages = response.pages
+        tasks = []
+        async def load_page(page_api: str):
+            url = client.build_url(page_api)
+            url_parsed = urlparse(url)
+            params = parse_qs(url_parsed.query)
+            url = url.split("?")[0]
+            try:
+                status, content = await client.download_file(url, client.headers, params=params)
+            except asyncio.TimeoutError:
+                timeout_msg = f"Request timed out after {client.client_session.timeout.total}s"
+                LOGGER.error(f"Failed to get page {page_api} (timeout): {timeout_msg}")
+                return (None, _build_err_response(timeout_msg, 500))
+            if status == 200:
+                return (content, None)
+            return (None, _build_err_response(content, status))
+        for page in pages[:3]:
+            tasks.append(asyncio.create_task(load_page(page)))
+        gathered: List[Tuple[bytes, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        for _, error in gathered:
+            if error:
+                return (None, error)
+        return (LanraragiResponse(), None)
+
+
+async def get_bookmark_category_detail(client: LRRClient, semaphore: asyncio.Semaphore) -> Tuple[GetCategoryResponse, LanraragiErrorResponse]:
+    """Get the bookmark category details."""
+    async with semaphore:
+        response, error = await client.category_api.get_bookmark_link()
+        assert not error, f"Failed to get bookmark link (status {error.status}): {error.error}"
+        category_id = response.category_id
+        response, error = await client.category_api.get_category(GetCategoryRequest(category_id=category_id))
+        assert not error, f"Failed to get category (status {error.status}): {error.error}"
+        return (response, error)

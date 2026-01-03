@@ -12,7 +12,7 @@ import pytest_asyncio
 import sys
 import tempfile
 import time
-from typing import Dict, Generator, Set, Tuple
+from typing import Dict, Generator, Set
 
 from lanraragi.models.minion import GetMinionJobStatusRequest
 from lanraragi.clients.client import LRRClient
@@ -20,7 +20,6 @@ from lanraragi.models.archive import (
     ClearNewArchiveFlagRequest,
     UpdateReadingProgressionRequest,
 )
-from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
 from lanraragi.models.category import (
     AddArchiveToCategoryRequest,
     CreateCategoryRequest,
@@ -31,11 +30,14 @@ from lanraragi.models.tankoubon import (
     CreateTankoubonRequest,
 )
 
-from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
-from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
-from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest
 from aio_lanraragi_tests.common import compute_archive_id
-from aio_lanraragi_tests.helpers import expect_no_error_logs, get_bounded_sem, upload_archive
+from aio_lanraragi_tests.helpers import (
+    create_archive_file,
+    expect_no_error_logs,
+    get_bounded_sem,
+    retry_on_lock,
+    upload_archive,
+)
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 
@@ -74,41 +76,6 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) -> Generator[LRR
         yield client
     finally:
         await client.close()
-
-async def retry_on_lock(operation_func, max_retries: int = 10) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
-    """Retry an operation if it encounters a 423 locked resource error."""
-    retry_count = 0
-    while True:
-        response, error = await operation_func()
-        if error and error.status == 423:
-            retry_count += 1
-            if retry_count > max_retries:
-                return response, error
-            await asyncio.sleep(2 ** retry_count)
-            continue
-        return response, error
-
-def create_archive_file(tmpdir: Path, name: str, num_pages: int) -> Path:
-    """Create a single archive with the specified number of pages."""
-    filename = f"{name}.zip"
-    save_path = tmpdir / filename
-
-    create_page_requests = []
-    for page_id in range(num_pages):
-        page_text = f"{name}-pg-{str(page_id + 1).zfill(len(str(num_pages)))}"
-        page_filename = f"{page_text}.png"
-        create_page_requests.append(CreatePageRequest(
-            width=100, height=100, filename=page_filename, image_format='PNG', text=page_text
-        ))
-
-    request = WriteArchiveRequest(
-        create_page_requests=create_page_requests,
-        save_path=save_path,
-        archival_strategy=ArchivalStrategyEnum.ZIP
-    )
-    responses = write_archives_to_disk([request])
-    assert responses[0].save_path == save_path
-    return save_path
 
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
@@ -248,9 +215,6 @@ async def test_search_functionality(
     LOGGER.debug("Cleared new flags for 9 archives, kept 1 as new.")
     # <<<<< SETUP: CLEAR NEW FLAGS <<<<<
 
-    # Helper function for assertions
-    def get_result_titles(response) -> Set[str]:
-        return {r.title for r in response.data}
 
     # >>>>> SEARCH TESTS: EMPTY SEARCH >>>>>
     response, error = await lrr_client.search_api.search_archive_index(
@@ -265,7 +229,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(search_filter="Ghost in the Shell", groupby_tanks=False)
     )
     assert not error, f"Title search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Ghost in the Shell"}, f"Title search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Ghost in the Shell"}, f"Title search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: BASIC TITLE SEARCH <<<<<
 
     # >>>>> SEARCH TESTS: EXACT NAMESPACE SEARCH >>>>>
@@ -273,7 +237,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(search_filter='"male:very cool"', groupby_tanks=False)
     )
     assert not error, f"Exact namespace search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Fate GO MEMO"}, f"Exact namespace search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Fate GO MEMO"}, f"Exact namespace search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: EXACT NAMESPACE SEARCH <<<<<
 
     # >>>>> SEARCH TESTS: FUZZY NAMESPACE SEARCH >>>>>
@@ -284,7 +248,7 @@ async def test_search_functionality(
     )
     assert not error, f"Fuzzy namespace search failed (status {error.status}): {error.error}"
     expected = {"Fate GO MEMO"}  # Only archive with "male:very cool" tag
-    assert get_result_titles(response) == expected, f"Fuzzy namespace search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Fuzzy namespace search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: FUZZY NAMESPACE SEARCH <<<<<
 
     # >>>>> SEARCH TESTS: VERY FUZZY NAMESPACE SEARCH >>>>>
@@ -295,7 +259,7 @@ async def test_search_functionality(
     )
     assert not error, f"Very fuzzy namespace search failed (status {error.status}): {error.error}"
     expected = {"Fate GO MEMO", "Saturn Backup Cartridge - American Manual"}  # male:very cool + female:very cool
-    assert get_result_titles(response) == expected, f"Very fuzzy namespace search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Very fuzzy namespace search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: VERY FUZZY NAMESPACE SEARCH <<<<<
 
     # >>>>> SEARCH TESTS: WILDCARD ? SEARCH >>>>>
@@ -303,7 +267,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(search_filter='"Fate GO MEMO ?"', groupby_tanks=False)
     )
     assert not error, f"Wildcard ? search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Fate GO MEMO 2"}, f"Wildcard ? search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Fate GO MEMO 2"}, f"Wildcard ? search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: WILDCARD ? SEARCH <<<<<
 
     # >>>>> SEARCH TESTS: WILDCARD * SEARCH >>>>>
@@ -312,7 +276,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(search_filter='"Saturn*Cartridge*Japanese Manual"', groupby_tanks=False)
     )
     assert not error, f"Wildcard * search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Saturn Backup Cartridge - Japanese Manual"}, f"Wildcard * search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Saturn Backup Cartridge - Japanese Manual"}, f"Wildcard * search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: WILDCARD * SEARCH <<<<<
 
     # >>>>> SEARCH TESTS: TAG INCLUSION (AND) >>>>>
@@ -320,7 +284,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(search_filter="artist:wada rco, character:ereshkigal", groupby_tanks=False)
     )
     assert not error, f"Tag inclusion search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Fate GO MEMO"}, f"Tag inclusion search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Fate GO MEMO"}, f"Tag inclusion search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: TAG INCLUSION (AND) <<<<<
 
     # >>>>> SEARCH TESTS: TAG EXCLUSION >>>>>
@@ -328,7 +292,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(search_filter="artist:wada rco, -character:ereshkigal", groupby_tanks=False)
     )
     assert not error, f"Tag exclusion search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Fate GO MEMO 2"}, f"Tag exclusion search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Fate GO MEMO 2"}, f"Tag exclusion search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: TAG EXCLUSION <<<<<
 
     # >>>>> SEARCH TESTS: EXACT SEARCH WITH $ >>>>>
@@ -337,7 +301,7 @@ async def test_search_functionality(
     )
     assert not error, f"Exact search with $ failed (status {error.status}): {error.error}"
     expected = {"Saturn Backup Cartridge - Japanese Manual", "Saturn Backup Cartridge - American Manual"}
-    assert get_result_titles(response) == expected, f"Exact search with $ mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Exact search with $ mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: EXACT SEARCH WITH $ <<<<<
 
     # >>>>> SEARCH TESTS: EXACT SEARCH WITH QUOTES >>>>>
@@ -345,7 +309,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(search_filter='"Fate GO MEMO"', groupby_tanks=False)
     )
     assert not error, f"Exact search with quotes failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Fate GO MEMO"}, f"Exact search with quotes mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Fate GO MEMO"}, f"Exact search with quotes mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: EXACT SEARCH WITH QUOTES <<<<<
 
     # >>>>> SEARCH TESTS: STATIC CATEGORY >>>>>
@@ -354,7 +318,7 @@ async def test_search_functionality(
     )
     assert not error, f"Static category search failed (status {error.status}): {error.error}"
     expected = {"Saturn Backup Cartridge - Japanese Manual", "Saturn Backup Cartridge - American Manual"}
-    assert get_result_titles(response) == expected, f"Static category search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Static category search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: STATIC CATEGORY <<<<<
 
     # >>>>> SEARCH TESTS: DYNAMIC CATEGORY + QUERY >>>>>
@@ -362,7 +326,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(search_filter='"character:segata"', category=dynamic_category_id, groupby_tanks=False)
     )
     assert not error, f"Dynamic category + query search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Saturn Backup Cartridge - American Manual"}, f"Dynamic category + query mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Saturn Backup Cartridge - American Manual"}, f"Dynamic category + query mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: DYNAMIC CATEGORY + QUERY <<<<<
 
     # >>>>> SEARCH TESTS: NEW FILTER >>>>>
@@ -370,7 +334,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(newonly=True, groupby_tanks=False)
     )
     assert not error, f"New filter search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"New Release Archive"}, f"New filter search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"New Release Archive"}, f"New filter search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: NEW FILTER <<<<<
 
     # >>>>> SEARCH TESTS: UNTAGGED FILTER >>>>>
@@ -378,7 +342,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(untaggedonly=True, groupby_tanks=False)
     )
     assert not error, f"Untagged filter search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Untagged Archive"}, f"Untagged filter search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Untagged Archive"}, f"Untagged filter search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: UNTAGGED FILTER <<<<<
 
     # >>>>> SEARCH TESTS: PAGECOUNT SEARCH >>>>>
@@ -387,7 +351,7 @@ async def test_search_functionality(
     )
     assert not error, f"Pagecount search failed (status {error.status}): {error.error}"
     expected = {"Ghost in the Shell", "Saturn Backup Cartridge - Japanese Manual", "Saturn Backup Cartridge - American Manual"}
-    assert get_result_titles(response) == expected, f"Pagecount search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Pagecount search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: PAGECOUNT SEARCH <<<<<
 
     # >>>>> SEARCH TESTS: READ COUNT EXACT >>>>>
@@ -396,7 +360,7 @@ async def test_search_functionality(
     )
     assert not error, f"Read count exact search failed (status {error.status}): {error.error}"
     expected = {"Ghost in the Shell", "Saturn Backup Cartridge - Japanese Manual"}
-    assert get_result_titles(response) == expected, f"Read count exact search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Read count exact search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: READ COUNT EXACT <<<<<
 
     # >>>>> SEARCH TESTS: READ COUNT RANGE >>>>>
@@ -404,7 +368,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(search_filter="read:<10, read:>4", groupby_tanks=False)
     )
     assert not error, f"Read count range search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Saturn Backup Cartridge - American Manual"}, f"Read count range search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Saturn Backup Cartridge - American Manual"}, f"Read count range search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: READ COUNT RANGE <<<<<
 
     # >>>>> SORT TESTS: TITLE ASCENDING >>>>>
@@ -442,7 +406,7 @@ async def test_search_functionality(
     )
     assert not error, f"Tankoubon grouping off search failed (status {error.status}): {error.error}"
     expected = {"Medjed Collection", "Vector Art Book"}
-    assert get_result_titles(response) == expected, f"Tankoubon grouping off mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Tankoubon grouping off mismatch: { {r.title for r in response.data} }"
     assert len(response.data) == 2, f"Expected 2 individual archives, got {len(response.data)}"
     # <<<<< TANKOUBON GROUPING TESTS: GROUPING OFF <<<<<
 
@@ -491,7 +455,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(search_filter='"Fate GO MEMO _"', groupby_tanks=False)
     )
     assert not error, f"Wildcard underscore search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Fate GO MEMO 2"}, f"Wildcard underscore search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Fate GO MEMO 2"}, f"Wildcard underscore search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: WILDCARD UNDERSCORE SEARCH <<<<<
 
     # >>>>> SEARCH TESTS: WILDCARD PERCENT SEARCH >>>>>
@@ -500,7 +464,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(search_filter='"Saturn%American%"', groupby_tanks=False)
     )
     assert not error, f"Wildcard percent search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Saturn Backup Cartridge - American Manual"}, f"Wildcard percent search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Saturn Backup Cartridge - American Manual"}, f"Wildcard percent search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: WILDCARD PERCENT SEARCH <<<<<
 
     # >>>>> SEARCH TESTS: EXACT SEARCH WITH QUOTES AND WILDCARD >>>>>
@@ -510,7 +474,7 @@ async def test_search_functionality(
     )
     assert not error, f"Exact search with quotes and wildcard failed (status {error.status}): {error.error}"
     expected = {"Saturn Backup Cartridge - Japanese Manual", "Saturn Backup Cartridge - American Manual"}
-    assert get_result_titles(response) == expected, f"Exact search with quotes and wildcard mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Exact search with quotes and wildcard mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: EXACT SEARCH WITH QUOTES AND WILDCARD <<<<<
 
     # >>>>> SEARCH TESTS: MULTIPLE TOKENS WITH NON-MATCHING TERM >>>>>
@@ -522,7 +486,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(search_filter="artist:shirow masamune, nonexistent_fake_xyz", groupby_tanks=False)
     )
     assert not error, f"Multiple tokens with non-matching term search failed (status {error.status}): {error.error}"
-    assert len(response.data) == 0, f"Multiple tokens with non-matching term should return 0 results, got {len(response.data)}: {get_result_titles(response)}"
+    assert len(response.data) == 0, f"Multiple tokens with non-matching term should return 0 results, got {len(response.data)}: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: MULTIPLE TOKENS WITH NON-MATCHING TERM <<<<<
 
     # >>>>> SEARCH TESTS: INCORRECT TAG EXCLUSION SYNTAX >>>>>
@@ -532,7 +496,7 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(search_filter='"artist:wada rco" "-character:waver velvet"', groupby_tanks=False)
     )
     assert not error, f"Incorrect tag exclusion syntax search failed (status {error.status}): {error.error}"
-    assert len(response.data) == 0, f"Incorrect tag exclusion syntax should return 0 results, got {len(response.data)}: {get_result_titles(response)}"
+    assert len(response.data) == 0, f"Incorrect tag exclusion syntax should return 0 results, got {len(response.data)}: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: INCORRECT TAG EXCLUSION SYNTAX <<<<<
 
     # >>>>> DISCARD SEARCH CACHE >>>>>
@@ -600,10 +564,6 @@ async def test_search_pagination(
 
     LOGGER.debug(f"Uploaded {len(title_to_arcid)} archives.")
     # <<<<< CREATE & UPLOAD ARCHIVES <<<<<
-
-    # Helper function for assertions
-    def get_result_titles(response) -> Set[str]:
-        return {r.title for r in response.data}
 
     # >>>>> PAGINATION TESTS: START=0 (FIRST PAGE) >>>>>
     response, error = await lrr_client.search_api.search_archive_index(
@@ -1051,17 +1011,14 @@ async def test_pagecount_filter(
     LOGGER.debug(f"Uploaded {len(title_to_arcid)} archives.")
     # <<<<< CREATE & UPLOAD ARCHIVES <<<<<
 
-    # Helper function for assertions
-    def get_result_titles(response) -> Set[str]:
-        return {r.title for r in response.data}
 
     # >>>>> PAGECOUNT TESTS: EXACT MATCH (NO OPERATOR) >>>>>
     response, error = await lrr_client.search_api.search_archive_index(
         SearchArchiveIndexRequest(search_filter="pages:20", groupby_tanks=False)
     )
     assert not error, f"Pagecount exact (no op) failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Archive with 20 pages"}, \
-        f"Pagecount exact mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Archive with 20 pages"}, \
+        f"Pagecount exact mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Pagecount exact match (no operator) test passed.")
     # <<<<< PAGECOUNT TESTS: EXACT MATCH (NO OPERATOR) <<<<<
 
@@ -1072,8 +1029,8 @@ async def test_pagecount_filter(
         SearchArchiveIndexRequest(search_filter="pages:15", groupby_tanks=False)
     )
     assert not error, f"Pagecount exact (15) failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Archive with 15 pages"}, \
-        f"Pagecount exact (15) mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Archive with 15 pages"}, \
+        f"Pagecount exact (15) mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Pagecount exact match (15) test passed.")
     # <<<<< PAGECOUNT TESTS: ANOTHER EXACT MATCH <<<<<
 
@@ -1083,8 +1040,8 @@ async def test_pagecount_filter(
     )
     assert not error, f"Pagecount > failed (status {error.status}): {error.error}"
     expected = {"Archive with 30 pages", "Archive with 50 pages", "Archive with 100 pages"}
-    assert get_result_titles(response) == expected, \
-        f"Pagecount > mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Pagecount > mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Pagecount greater than test passed.")
     # <<<<< PAGECOUNT TESTS: GREATER THAN <<<<<
 
@@ -1094,8 +1051,8 @@ async def test_pagecount_filter(
     )
     assert not error, f"Pagecount >= failed (status {error.status}): {error.error}"
     expected = {"Archive with 25 pages", "Archive with 30 pages", "Archive with 50 pages", "Archive with 100 pages"}
-    assert get_result_titles(response) == expected, \
-        f"Pagecount >= mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Pagecount >= mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Pagecount greater than or equal test passed.")
     # <<<<< PAGECOUNT TESTS: GREATER THAN OR EQUAL <<<<<
 
@@ -1105,8 +1062,8 @@ async def test_pagecount_filter(
     )
     assert not error, f"Pagecount < failed (status {error.status}): {error.error}"
     expected = {"Archive with 5 pages", "Archive with 10 pages"}
-    assert get_result_titles(response) == expected, \
-        f"Pagecount < mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Pagecount < mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Pagecount less than test passed.")
     # <<<<< PAGECOUNT TESTS: LESS THAN <<<<<
 
@@ -1116,8 +1073,8 @@ async def test_pagecount_filter(
     )
     assert not error, f"Pagecount <= failed (status {error.status}): {error.error}"
     expected = {"Archive with 5 pages", "Archive with 10 pages", "Archive with 15 pages"}
-    assert get_result_titles(response) == expected, \
-        f"Pagecount <= mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Pagecount <= mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Pagecount less than or equal test passed.")
     # <<<<< PAGECOUNT TESTS: LESS THAN OR EQUAL <<<<<
 
@@ -1128,8 +1085,8 @@ async def test_pagecount_filter(
     )
     assert not error, f"Pagecount range failed (status {error.status}): {error.error}"
     expected = {"Archive with 15 pages", "Archive with 20 pages", "Archive with 25 pages", "Archive with 30 pages"}
-    assert get_result_titles(response) == expected, \
-        f"Pagecount range mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Pagecount range mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Pagecount combined range test passed.")
     # <<<<< PAGECOUNT TESTS: COMBINED RANGE (BETWEEN) <<<<<
 
@@ -1140,8 +1097,8 @@ async def test_pagecount_filter(
     )
     assert not error, f"Pagecount exclusive range failed (status {error.status}): {error.error}"
     expected = {"Archive with 15 pages", "Archive with 20 pages", "Archive with 25 pages"}
-    assert get_result_titles(response) == expected, \
-        f"Pagecount exclusive range mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Pagecount exclusive range mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Pagecount exclusive range test passed.")
     # <<<<< PAGECOUNT TESTS: EXCLUSIVE RANGE <<<<<
 
@@ -1161,8 +1118,8 @@ async def test_pagecount_filter(
     )
     assert not error, f"Pagecount with title filter failed (status {error.status}): {error.error}"
     expected = {"Archive with 25 pages", "Archive with 30 pages", "Archive with 50 pages", "Archive with 100 pages"}
-    assert get_result_titles(response) == expected, \
-        f"Pagecount with title filter mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Pagecount with title filter mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Pagecount combined with title filter test passed.")
     # <<<<< PAGECOUNT TESTS: COMBINED WITH OTHER FILTERS <<<<<
 
@@ -1255,17 +1212,14 @@ async def test_readcount_filter(
     LOGGER.debug("Simulated reading progress for 6 archives.")
     # <<<<< SETUP: SIMULATE READS <<<<<
 
-    # Helper function for assertions
-    def get_result_titles(response) -> Set[str]:
-        return {r.title for r in response.data}
 
     # >>>>> READCOUNT TESTS: EXACT MATCH >>>>>
     response, error = await lrr_client.search_api.search_archive_index(
         SearchArchiveIndexRequest(search_filter="read:15", groupby_tanks=False)
     )
     assert not error, f"Readcount exact failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Archive Read 15 Pages"}, \
-        f"Readcount exact mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Archive Read 15 Pages"}, \
+        f"Readcount exact mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Readcount exact match test passed.")
     # <<<<< READCOUNT TESTS: EXACT MATCH <<<<<
 
@@ -1274,8 +1228,8 @@ async def test_readcount_filter(
         SearchArchiveIndexRequest(search_filter="read:0", groupby_tanks=False)
     )
     assert not error, f"Readcount 0 (unread) failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Unread Archive"}, \
-        f"Readcount 0 mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Unread Archive"}, \
+        f"Readcount 0 mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Readcount 0 (unread) test passed.")
     # <<<<< READCOUNT TESTS: UNREAD (EXACT 0) <<<<<
 
@@ -1285,8 +1239,8 @@ async def test_readcount_filter(
     )
     assert not error, f"Readcount > failed (status {error.status}): {error.error}"
     expected = {"Archive Read 25 Pages", "Archive Read 30 Pages"}
-    assert get_result_titles(response) == expected, \
-        f"Readcount > mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Readcount > mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Readcount greater than test passed.")
     # <<<<< READCOUNT TESTS: GREATER THAN <<<<<
 
@@ -1296,8 +1250,8 @@ async def test_readcount_filter(
     )
     assert not error, f"Readcount >= failed (status {error.status}): {error.error}"
     expected = {"Archive Read 20 Pages", "Archive Read 25 Pages", "Archive Read 30 Pages"}
-    assert get_result_titles(response) == expected, \
-        f"Readcount >= mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Readcount >= mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Readcount greater than or equal test passed.")
     # <<<<< READCOUNT TESTS: GREATER THAN OR EQUAL <<<<<
 
@@ -1307,8 +1261,8 @@ async def test_readcount_filter(
     )
     assert not error, f"Readcount < failed (status {error.status}): {error.error}"
     expected = {"Unread Archive", "Archive Read 5 Pages"}
-    assert get_result_titles(response) == expected, \
-        f"Readcount < mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Readcount < mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Readcount less than test passed.")
     # <<<<< READCOUNT TESTS: LESS THAN <<<<<
 
@@ -1318,8 +1272,8 @@ async def test_readcount_filter(
     )
     assert not error, f"Readcount <= failed (status {error.status}): {error.error}"
     expected = {"Unread Archive", "Archive Read 5 Pages", "Archive Read 10 Pages"}
-    assert get_result_titles(response) == expected, \
-        f"Readcount <= mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Readcount <= mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Readcount less than or equal test passed.")
     # <<<<< READCOUNT TESTS: LESS THAN OR EQUAL <<<<<
 
@@ -1330,8 +1284,8 @@ async def test_readcount_filter(
     )
     assert not error, f"Readcount range failed (status {error.status}): {error.error}"
     expected = {"Archive Read 10 Pages", "Archive Read 15 Pages", "Archive Read 20 Pages"}
-    assert get_result_titles(response) == expected, \
-        f"Readcount range mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Readcount range mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Readcount combined range test passed.")
     # <<<<< READCOUNT TESTS: COMBINED RANGE <<<<<
 
@@ -1342,8 +1296,8 @@ async def test_readcount_filter(
     )
     assert not error, f"Readcount exclusive range failed (status {error.status}): {error.error}"
     expected = {"Archive Read 10 Pages", "Archive Read 15 Pages", "Archive Read 20 Pages"}
-    assert get_result_titles(response) == expected, \
-        f"Readcount exclusive range mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Readcount exclusive range mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Readcount exclusive range test passed.")
     # <<<<< READCOUNT TESTS: EXCLUSIVE RANGE <<<<<
 
@@ -1357,8 +1311,8 @@ async def test_readcount_filter(
         "Archive Read 5 Pages", "Archive Read 10 Pages", "Archive Read 15 Pages",
         "Archive Read 20 Pages", "Archive Read 25 Pages", "Archive Read 30 Pages"
     }
-    assert get_result_titles(response) == expected, \
-        f"Readcount >0 mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Readcount >0 mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Readcount >0 (any read) test passed.")
     # <<<<< READCOUNT TESTS: ANY READ (>0) <<<<<
 
@@ -1369,8 +1323,8 @@ async def test_readcount_filter(
     )
     assert not error, f"Readcount + pagecount filter failed (status {error.status}): {error.error}"
     expected = {"Archive Read 15 Pages", "Archive Read 20 Pages", "Archive Read 25 Pages", "Archive Read 30 Pages"}
-    assert get_result_titles(response) == expected, \
-        f"Readcount + pagecount mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, \
+        f"Readcount + pagecount mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Readcount combined with pagecount filter test passed.")
     # <<<<< READCOUNT TESTS: COMBINED WITH PAGE FILTER <<<<<
 
@@ -1445,9 +1399,6 @@ async def test_multi_token_edge_cases(
     LOGGER.debug(f"Uploaded {len(title_to_arcid)} archives.")
     # <<<<< CREATE & UPLOAD ARCHIVES <<<<<
 
-    # Helper function for assertions
-    def get_result_titles(response) -> Set[str]:
-        return {r.title for r in response.data}
 
     # >>>>> MULTI-TOKEN TESTS: AND LOGIC WITH MISSING TAGS >>>>>
     # When searching with "artist:shirow masamune, full color, artbook", ALL tokens must match.
@@ -1458,7 +1409,7 @@ async def test_multi_token_edge_cases(
     )
     assert not error, f"Multi-token AND logic search failed (status {error.status}): {error.error}"
     # Returns 0 because no archive has ALL three: artist:shirow masamune + full color + artbook
-    assert len(response.data) == 0, f"Expected 0 results (AND logic, missing tags), got {len(response.data)}: {get_result_titles(response)}"
+    assert len(response.data) == 0, f"Expected 0 results (AND logic, missing tags), got {len(response.data)}: { {r.title for r in response.data} }"
     LOGGER.debug("Multi-token AND logic with missing tags test passed.")
     # <<<<< MULTI-TOKEN TESTS: AND LOGIC WITH MISSING TAGS <<<<<
 
@@ -1471,7 +1422,7 @@ async def test_multi_token_edge_cases(
     assert not error, f"Unnamespaced tag search failed (status {error.status}): {error.error}"
     # Archives with both artbook AND full color tags
     expected = {"Fate GO MEMO", "Fate GO MEMO 2", "Standalone Artbook"}
-    assert get_result_titles(response) == expected, f"Unnamespaced tag search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Unnamespaced tag search mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Unnamespaced tokens as tags search test passed.")
     # <<<<< MULTI-TOKEN TESTS: UNNAMESPACED TOKENS AS TAGS <<<<<
 
@@ -1482,7 +1433,7 @@ async def test_multi_token_edge_cases(
     )
     assert not error, f"Single namespaced search failed (status {error.status}): {error.error}"
     expected = {"Ghost in the Shell 1.5 - Human-Error Processor", "Ghost in the Shell Manga"}
-    assert get_result_titles(response) == expected, f"Single namespaced search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Single namespaced search mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Single namespaced token search test passed.")
     # <<<<< MULTI-TOKEN TESTS: SINGLE NAMESPACED TOKEN <<<<<
 
@@ -1493,7 +1444,7 @@ async def test_multi_token_edge_cases(
     )
     assert not error, f"Unnamespaced title match search failed (status {error.status}): {error.error}"
     expected = {"Ghost in the Shell 1.5 - Human-Error Processor", "Ghost in the Shell Manga"}
-    assert get_result_titles(response) == expected, f"Unnamespaced title match mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Unnamespaced title match mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Unnamespaced token matching title search test passed.")
     # <<<<< MULTI-TOKEN TESTS: UNNAMESPACED MATCHING TITLE <<<<<
 
@@ -1503,7 +1454,7 @@ async def test_multi_token_edge_cases(
         SearchArchiveIndexRequest(search_filter="artist:wada rco, character:ereshkigal", groupby_tanks=False)
     )
     assert not error, f"Multiple namespaced tokens search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Fate GO MEMO 2"}, f"Multiple namespaced tokens mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Fate GO MEMO 2"}, f"Multiple namespaced tokens mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Multiple namespaced tokens search test passed.")
     # <<<<< MULTI-TOKEN TESTS: MULTIPLE NAMESPACED TOKENS <<<<<
 
@@ -1514,7 +1465,7 @@ async def test_multi_token_edge_cases(
     )
     assert not error, f"Multiple unnamespaced tokens search failed (status {error.status}): {error.error}"
     expected = {"Ghost in the Shell 1.5 - Human-Error Processor", "Ghost in the Shell Manga"}
-    assert get_result_titles(response) == expected, f"Multiple unnamespaced tokens mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Multiple unnamespaced tokens mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Multiple unnamespaced tokens search test passed.")
     # <<<<< MULTI-TOKEN TESTS: UNNAMESPACED ONLY <<<<<
 
@@ -1535,7 +1486,7 @@ async def test_multi_token_edge_cases(
     )
     assert not error, f"Trailing comma search failed (status {error.status}): {error.error}"
     expected = {"Ghost in the Shell 1.5 - Human-Error Processor", "Ghost in the Shell Manga"}
-    assert get_result_titles(response) == expected, f"Trailing comma search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Trailing comma search mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Empty token (trailing comma) handling test passed.")
     # <<<<< MULTI-TOKEN TESTS: EMPTY TOKEN HANDLING <<<<<
 
@@ -1606,16 +1557,13 @@ async def test_unicode_search(
     LOGGER.debug(f"Uploaded {len(title_to_arcid)} archives.")
     # <<<<< CREATE & UPLOAD ARCHIVES <<<<<
 
-    # Helper function for assertions
-    def get_result_titles(response) -> Set[str]:
-        return {r.title for r in response.data}
 
     # >>>>> UNICODE TESTS: JAPANESE TITLE SEARCH >>>>>
     response, error = await lrr_client.search_api.search_archive_index(
         SearchArchiveIndexRequest(search_filter="日本語", groupby_tanks=False)
     )
     assert not error, f"Japanese title search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"日本語タイトル"}, f"Japanese title search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"日本語タイトル"}, f"Japanese title search mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Japanese title search test passed.")
     # <<<<< UNICODE TESTS: JAPANESE TITLE SEARCH <<<<<
 
@@ -1624,7 +1572,7 @@ async def test_unicode_search(
         SearchArchiveIndexRequest(search_filter="artist:日本語作者", groupby_tanks=False)
     )
     assert not error, f"Japanese tag search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"日本語タイトル"}, f"Japanese tag search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"日本語タイトル"}, f"Japanese tag search mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Japanese tag search test passed.")
     # <<<<< UNICODE TESTS: JAPANESE TAG SEARCH <<<<<
 
@@ -1633,7 +1581,7 @@ async def test_unicode_search(
         SearchArchiveIndexRequest(search_filter="Mixed タイトル", groupby_tanks=False)
     )
     assert not error, f"Mixed ASCII/Japanese search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Mixed タイトル Test"}, f"Mixed search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Mixed タイトル Test"}, f"Mixed search mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Mixed ASCII and Japanese search test passed.")
     # <<<<< UNICODE TESTS: MIXED ASCII AND JAPANESE <<<<<
 
@@ -1642,7 +1590,7 @@ async def test_unicode_search(
         SearchArchiveIndexRequest(search_filter="한국어", groupby_tanks=False)
     )
     assert not error, f"Korean search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"한국어 제목"}, f"Korean search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"한국어 제목"}, f"Korean search mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Korean title search test passed.")
     # <<<<< UNICODE TESTS: KOREAN SEARCH <<<<<
 
@@ -1651,7 +1599,7 @@ async def test_unicode_search(
         SearchArchiveIndexRequest(search_filter="中文", groupby_tanks=False)
     )
     assert not error, f"Chinese search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"中文标题"}, f"Chinese search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"中文标题"}, f"Chinese search mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Chinese title search test passed.")
     # <<<<< UNICODE TESTS: CHINESE SEARCH <<<<<
 
@@ -1660,7 +1608,7 @@ async def test_unicode_search(
         SearchArchiveIndexRequest(search_filter="Русский", groupby_tanks=False)
     )
     assert not error, f"Cyrillic search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Русский заголовок"}, f"Cyrillic search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Русский заголовок"}, f"Cyrillic search mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Cyrillic title search test passed.")
     # <<<<< UNICODE TESTS: CYRILLIC SEARCH <<<<<
 
@@ -1669,7 +1617,7 @@ async def test_unicode_search(
         SearchArchiveIndexRequest(search_filter="★", groupby_tanks=False)
     )
     assert not error, f"Special symbol search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"Special ★ Characters ♪"}, f"Special symbol search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"Special ★ Characters ♪"}, f"Special symbol search mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Special symbol (★) search test passed.")
     # <<<<< UNICODE TESTS: SPECIAL SYMBOL SEARCH <<<<<
 
@@ -1678,7 +1626,7 @@ async def test_unicode_search(
         SearchArchiveIndexRequest(search_filter="series:テスト", groupby_tanks=False)
     )
     assert not error, f"Unicode namespace search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"日本語タイトル"}, f"Unicode namespace search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"日本語タイトル"}, f"Unicode namespace search mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Unicode tag namespace search test passed.")
     # <<<<< UNICODE TESTS: UNICODE TAG NAMESPACE SEARCH <<<<<
 
@@ -1687,7 +1635,7 @@ async def test_unicode_search(
         SearchArchiveIndexRequest(search_filter='"日本語タイトル"', groupby_tanks=False)
     )
     assert not error, f"Exact Unicode search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == {"日本語タイトル"}, f"Exact Unicode search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == {"日本語タイトル"}, f"Exact Unicode search mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Exact Unicode search with quotes test passed.")
     # <<<<< UNICODE TESTS: EXACT UNICODE SEARCH WITH QUOTES <<<<<
 
@@ -1699,7 +1647,7 @@ async def test_unicode_search(
     assert not error, f"Partial Unicode search failed (status {error.status}): {error.error}"
     # Should match both "日本語タイトル" and "Mixed タイトル Test"
     expected = {"日本語タイトル", "Mixed タイトル Test"}
-    assert get_result_titles(response) == expected, f"Partial Unicode search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Partial Unicode search mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Partial Unicode match search test passed.")
     # <<<<< UNICODE TESTS: PARTIAL UNICODE MATCH <<<<<
 
@@ -1797,9 +1745,6 @@ async def test_combined_filters(
     LOGGER.debug("Created category with 2 archives.")
     # <<<<< SETUP: CREATE CATEGORY <<<<<
 
-    # Helper function for assertions
-    def get_result_titles(response) -> Set[str]:
-        return {r.title for r in response.data}
 
     # >>>>> COMBINED FILTER TESTS: NEWONLY ALONE >>>>>
     response, error = await lrr_client.search_api.search_archive_index(
@@ -1807,7 +1752,7 @@ async def test_combined_filters(
     )
     assert not error, f"Newonly filter failed (status {error.status}): {error.error}"
     expected = {"New Tagged Archive", "New Untagged Archive", "New Tagged In Category"}
-    assert get_result_titles(response) == expected, f"Newonly filter mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Newonly filter mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Newonly filter test passed.")
     # <<<<< COMBINED FILTER TESTS: NEWONLY ALONE <<<<<
 
@@ -1817,7 +1762,7 @@ async def test_combined_filters(
     )
     assert not error, f"Untaggedonly filter failed (status {error.status}): {error.error}"
     expected = {"New Untagged Archive", "Old Untagged Archive"}
-    assert get_result_titles(response) == expected, f"Untaggedonly filter mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Untaggedonly filter mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Untaggedonly filter test passed.")
     # <<<<< COMBINED FILTER TESTS: UNTAGGEDONLY ALONE <<<<<
 
@@ -1828,7 +1773,7 @@ async def test_combined_filters(
     assert not error, f"Newonly + untaggedonly filter failed (status {error.status}): {error.error}"
     # Should only return archives that are BOTH new AND untagged
     expected = {"New Untagged Archive"}
-    assert get_result_titles(response) == expected, f"Newonly + untaggedonly filter mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Newonly + untaggedonly filter mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Newonly + untaggedonly combined filter test passed.")
     # <<<<< COMBINED FILTER TESTS: NEWONLY + UNTAGGEDONLY <<<<<
 
@@ -1839,7 +1784,7 @@ async def test_combined_filters(
     assert not error, f"Newonly + category filter failed (status {error.status}): {error.error}"
     # Should only return new archives in the category
     expected = {"New Tagged In Category"}
-    assert get_result_titles(response) == expected, f"Newonly + category filter mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Newonly + category filter mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Newonly + category filter test passed.")
     # <<<<< COMBINED FILTER TESTS: NEWONLY + CATEGORY <<<<<
 
@@ -1850,7 +1795,7 @@ async def test_combined_filters(
     assert not error, f"Untaggedonly + search filter failed (status {error.status}): {error.error}"
     # Should only return untagged archives matching "New" in title
     expected = {"New Untagged Archive"}
-    assert get_result_titles(response) == expected, f"Untaggedonly + search filter mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Untaggedonly + search filter mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Untaggedonly + search filter test passed.")
     # <<<<< COMBINED FILTER TESTS: UNTAGGEDONLY + SEARCH <<<<<
 
@@ -1860,7 +1805,7 @@ async def test_combined_filters(
     )
     assert not error, f"All filters + search failed (status {error.status}): {error.error}"
     expected = {"New Untagged Archive"}
-    assert get_result_titles(response) == expected, f"All filters + search mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"All filters + search mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Newonly + untaggedonly + search filter test passed.")
     # <<<<< COMBINED FILTER TESTS: NEWONLY + UNTAGGEDONLY + SEARCH <<<<<
 
@@ -1871,7 +1816,7 @@ async def test_combined_filters(
         SearchArchiveIndexRequest(search_filter="Category", newonly=True, untaggedonly=True, groupby_tanks=False)
     )
     assert not error, f"No match combined filter failed (status {error.status}): {error.error}"
-    assert len(response.data) == 0, f"Expected 0 results, got {len(response.data)}: {get_result_titles(response)}"
+    assert len(response.data) == 0, f"Expected 0 results, got {len(response.data)}: { {r.title for r in response.data} }"
     LOGGER.debug("No match combined filter test passed.")
     # <<<<< COMBINED FILTER TESTS: NEWONLY + UNTAGGEDONLY (NO MATCH) <<<<<
 
@@ -1881,7 +1826,7 @@ async def test_combined_filters(
     )
     assert not error, f"Category + search filter failed (status {error.status}): {error.error}"
     expected = {"New Tagged In Category", "Old Tagged In Category"}
-    assert get_result_titles(response) == expected, f"Category + search filter mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Category + search filter mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Category + search filter test passed.")
     # <<<<< COMBINED FILTER TESTS: CATEGORY + SEARCH <<<<<
 
@@ -1952,10 +1897,6 @@ async def test_exclusion_only_search(
     all_titles = set(title_to_arcid.keys())
     # <<<<< CREATE & UPLOAD ARCHIVES <<<<<
 
-    # Helper function for assertions
-    def get_result_titles(response) -> Set[str]:
-        return {r.title for r in response.data}
-
     # >>>>> EXCLUSION TESTS: SINGLE EXCLUSION >>>>>
     response, error = await lrr_client.search_api.search_archive_index(
         SearchArchiveIndexRequest(search_filter="-artist:alpha", groupby_tanks=False)
@@ -1963,7 +1904,7 @@ async def test_exclusion_only_search(
     assert not error, f"Single exclusion search failed (status {error.status}): {error.error}"
     # Should return all archives EXCEPT those with artist:alpha
     expected = all_titles - {"Archive by Artist A", "Second Archive by Artist A"}
-    assert get_result_titles(response) == expected, f"Single exclusion mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Single exclusion mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Single exclusion search test passed.")
     # <<<<< EXCLUSION TESTS: SINGLE EXCLUSION <<<<<
 
@@ -1974,7 +1915,7 @@ async def test_exclusion_only_search(
     assert not error, f"Multiple exclusions search failed (status {error.status}): {error.error}"
     # Should exclude archives with artist:alpha OR artist:beta
     expected = {"Archive by Artist C", "Archive Without Artist Tag", "Completely Untagged"}
-    assert get_result_titles(response) == expected, f"Multiple exclusions mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Multiple exclusions mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Multiple exclusions search test passed.")
     # <<<<< EXCLUSION TESTS: MULTIPLE EXCLUSIONS <<<<<
 
@@ -1985,7 +1926,7 @@ async def test_exclusion_only_search(
     assert not error, f"Genre exclusion search failed (status {error.status}): {error.error}"
     # Should exclude archives with genre:action
     expected = {"Archive by Artist B", "Second Archive by Artist A", "Completely Untagged"}
-    assert get_result_titles(response) == expected, f"Genre exclusion mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Genre exclusion mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Genre exclusion search test passed.")
     # <<<<< EXCLUSION TESTS: EXCLUSION WITH GENRE <<<<<
 
@@ -1996,7 +1937,7 @@ async def test_exclusion_only_search(
     )
     assert not error, f"Exclude all artists search failed (status {error.status}): {error.error}"
     expected = {"Archive Without Artist Tag", "Completely Untagged"}
-    assert get_result_titles(response) == expected, f"Exclude all artists mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Exclude all artists mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Exclude all matching artists test passed.")
     # <<<<< EXCLUSION TESTS: EXCLUDE ALL MATCHING <<<<<
 
@@ -2009,7 +1950,7 @@ async def test_exclusion_only_search(
     # genre:action matches: Artist A, Artist C, Without Artist Tag
     # Minus artist:alpha removes: Artist A
     expected = {"Archive by Artist C", "Archive Without Artist Tag"}
-    assert get_result_titles(response) == expected, f"Positive + exclusion mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Positive + exclusion mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Positive + exclusion search test passed.")
     # <<<<< EXCLUSION TESTS: POSITIVE + EXCLUSION <<<<<
 
@@ -2021,7 +1962,7 @@ async def test_exclusion_only_search(
     assert not error, f"Title + exclusion search failed (status {error.status}): {error.error}"
     # Titles containing "Archive" (excludes "Completely Untagged"), minus artist:alpha
     expected = {"Archive by Artist B", "Archive by Artist C", "Archive Without Artist Tag"}
-    assert get_result_titles(response) == expected, f"Title + exclusion mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Title + exclusion mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Title + exclusion search test passed.")
     # <<<<< EXCLUSION TESTS: EXCLUSION WITH TITLE SEARCH <<<<<
 
@@ -2033,7 +1974,7 @@ async def test_exclusion_only_search(
     assert not error, f"Exact exclusion search failed (status {error.status}): {error.error}"
     # Exact match for "artist:alpha" - should exclude archives with exactly that tag
     expected = all_titles - {"Archive by Artist A", "Second Archive by Artist A"}
-    assert get_result_titles(response) == expected, f"Exact exclusion mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Exact exclusion mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Exact exclusion search test passed.")
     # <<<<< EXCLUSION TESTS: EXCLUSION WITH EXACT MATCH <<<<<
 
@@ -2043,7 +1984,7 @@ async def test_exclusion_only_search(
         SearchArchiveIndexRequest(search_filter="-nonexistent:tag", groupby_tanks=False)
     )
     assert not error, f"Nonexistent exclusion search failed (status {error.status}): {error.error}"
-    assert get_result_titles(response) == all_titles, f"Nonexistent exclusion should return all: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == all_titles, f"Nonexistent exclusion should return all: { {r.title for r in response.data} }"
     LOGGER.debug("Nonexistent exclusion search test passed.")
     # <<<<< EXCLUSION TESTS: EXCLUDE NONEXISTENT <<<<<
 
@@ -2063,7 +2004,7 @@ async def test_exclusion_only_search(
     # New archives: Second Archive by Artist A, Without Artist Tag, Untagged
     # Minus artist:alpha removes: Second Archive by Artist A
     expected = {"Archive Without Artist Tag", "Completely Untagged"}
-    assert get_result_titles(response) == expected, f"Exclusion + newonly filter mismatch: {get_result_titles(response)}"
+    assert {r.title for r in response.data} == expected, f"Exclusion + newonly filter mismatch: { {r.title for r in response.data} }"
     LOGGER.debug("Exclusion + newonly filter test passed.")
     # <<<<< EXCLUSION TESTS: EXCLUSION WITH NEWONLY FILTER <<<<<
 

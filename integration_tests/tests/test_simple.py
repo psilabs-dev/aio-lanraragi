@@ -19,45 +19,36 @@ import pytest
 import playwright.async_api
 import pytest_asyncio
 import aiohttp
-from urllib.parse import urlparse, parse_qs
 
 from lanraragi.clients.client import LRRClient
-from lanraragi.clients.utils import _build_err_response
 from lanraragi.models.archive import (
     ClearNewArchiveFlagRequest,
     DeleteArchiveRequest,
     DeleteArchiveResponse,
-    ExtractArchiveRequest,
     GetArchiveCategoriesRequest,
     GetArchiveMetadataRequest,
     GetArchiveThumbnailRequest,
     UpdateArchiveThumbnailRequest,
     UpdateReadingProgressionRequest,
 )
-from lanraragi.models.base import (
-    LanraragiErrorResponse,
-    LanraragiResponse
-)
+from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
 from lanraragi.models.category import (
-    AddArchiveToCategoryRequest,
     AddArchiveToCategoryResponse,
     CreateCategoryRequest,
     DeleteCategoryRequest,
     GetCategoryRequest,
-    GetCategoryResponse,
-    RemoveArchiveFromCategoryRequest,
     UpdateBookmarkLinkRequest,
-    UpdateCategoryRequest
+    UpdateCategoryRequest,
 )
 from lanraragi.models.database import GetDatabaseStatsRequest
 from lanraragi.models.minion import (
     GetMinionJobDetailRequest,
-    GetMinionJobStatusRequest
+    GetMinionJobStatusRequest,
 )
 from lanraragi.models.misc import (
     GetAvailablePluginsRequest,
     GetOpdsCatalogRequest,
-    RegenerateThumbnailRequest
+    RegenerateThumbnailRequest,
 )
 from lanraragi.models.tankoubon import (
     AddArchiveToTankoubonRequest,
@@ -69,7 +60,19 @@ from lanraragi.models.tankoubon import (
     UpdateTankoubonRequest,
 )
 
-from aio_lanraragi_tests.helpers import expect_no_error_logs, get_bounded_sem, save_archives, upload_archive, upload_archives
+from aio_lanraragi_tests.helpers import (
+    add_archive_to_category,
+    delete_archive,
+    expect_no_error_logs,
+    get_bookmark_category_detail,
+    get_bounded_sem,
+    load_pages_from_archive,
+    remove_archive_from_category,
+    retry_on_lock,
+    save_archives,
+    upload_archive,
+    upload_archives,
+)
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.common import LRR_INDEX_TITLE
@@ -119,108 +122,6 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) ->  Generator[LR
     finally:
         await client.close()
 
-async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
-    async with semaphore:
-        # Use retry logic for extract_archive as it can encounter 423 errors
-        response, error = await retry_on_lock(lambda: client.archive_api.extract_archive(ExtractArchiveRequest(arcid=arcid, force=False)))
-        if error:
-            return (None, error)
-        
-        pages = response.pages
-        tasks = []
-        async def load_page(page_api: str):
-            url = client.build_url(page_api)
-            url_parsed = urlparse(url)
-            params = parse_qs(url_parsed.query)
-            url = url.split("?")[0]
-            try:
-                status, content = await client.download_file(url, client.headers, params=params)
-            except asyncio.TimeoutError:
-                timeout_msg = f"Request timed out after {client.client_session.timeout.total}s"
-                LOGGER.error(f"Failed to get page {page_api} (timeout): {timeout_msg}")
-                return (None, _build_err_response(timeout_msg, 500))
-            if status == 200:
-                return (content, None)
-            return (None, _build_err_response(content, status)) # TODO: this is wrong.
-        for page in pages[:3]:
-            tasks.append(asyncio.create_task(load_page(page)))
-        gathered: List[Tuple[bytes, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
-        for _, error in gathered:
-            if error:
-                return (None, error)
-        return (LanraragiResponse(), None)
-
-async def get_bookmark_category_detail(client: LRRClient, semaphore: asyncio.Semaphore) -> Tuple[GetCategoryResponse, LanraragiErrorResponse]:
-    async with semaphore:
-        response, error = await client.category_api.get_bookmark_link()
-        assert not error, f"Failed to get bookmark link (status {error.status}): {error.error}"
-        category_id = response.category_id
-        response, error = await client.category_api.get_category(GetCategoryRequest(category_id=category_id))
-        assert not error, f"Failed to get category (status {error.status}): {error.error}"
-        return (response, error)
-
-async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[DeleteArchiveResponse, LanraragiErrorResponse]:
-    retry_count = 0
-    async with semaphore:
-        while True:
-            response, error = await client.archive_api.delete_archive(DeleteArchiveRequest(arcid=arcid))
-            if error and error.status == 423: # locked resource
-                retry_count += 1
-                if retry_count > 10:
-                    return response, error
-                tts = 2 ** retry_count
-                LOGGER.debug(f"[delete_archive][{arcid}] locked resource error; retrying in {tts}s.")
-                await asyncio.sleep(tts)
-                continue
-            return response, error
-
-async def add_archive_to_category(client: LRRClient, category_id: str, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[AddArchiveToCategoryResponse, LanraragiErrorResponse]:
-    retry_count = 0
-    async with semaphore:
-        while True:
-            response, error = await client.category_api.add_archive_to_category(AddArchiveToCategoryRequest(category_id=category_id, arcid=arcid))
-            if error and error.status == 423: # locked resource
-                retry_count += 1
-                if retry_count > 10:
-                    return response, error
-                tts = 2 ** retry_count
-                LOGGER.debug(f"[add_archive_to_category][{category_id}][{arcid}] locked resource error; retrying in {tts}s.")
-                await asyncio.sleep(tts)
-                continue
-            return response, error
-
-async def remove_archive_from_category(client: LRRClient, category_id: str, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
-    retry_count = 0
-    async with semaphore:
-        while True:
-            response, error = await client.category_api.remove_archive_from_category(RemoveArchiveFromCategoryRequest(category_id=category_id, arcid=arcid))
-            if error and error.status == 423: # locked resource
-                retry_count += 1
-                if retry_count > 10:
-                    return response, error
-                tts = 2 ** retry_count
-                LOGGER.debug(f"[remove_archive_from_category][{category_id}][{arcid}] locked resource error; retrying in {tts}s.")
-                await asyncio.sleep(tts)
-                continue
-            return response, error
-
-async def retry_on_lock(operation_func, max_retries: int = 10) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
-    """
-    Wrapper function that retries an operation if it encounters a 423 locked resource error.
-    """
-    retry_count = 0
-    while True:
-        response, error = await operation_func()
-        if error and error.status == 423: # locked resource
-            retry_count += 1
-            if retry_count > max_retries:
-                return response, error
-            await asyncio.sleep(2 ** retry_count)
-            continue
-        return response, error
-
-def pmf(t: float) -> float:
-    return 2 ** (-t * 100)
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Cache priming required only for flaky Windows testing environments.")
 @pytest.mark.asyncio
