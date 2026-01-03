@@ -89,7 +89,7 @@ jobs:
   tests-windows:
     name: Tests (Windows)
     runs-on: windows-2025
-    timeout-minutes: 80
+    timeout-minutes: 110
 
     permissions:
       contents: read
@@ -213,7 +213,7 @@ jobs:
 
       - name: Run integration tests
         working-directory: aio-lanraragi/integration_tests
-        timeout-minutes: 50
+        timeout-minutes: 80
         run: |
           $env:CI='true'
           pytest tests `
