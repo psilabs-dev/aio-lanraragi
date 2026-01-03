@@ -203,6 +203,7 @@ async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploym
         await page.click("input[type='submit'][value='Login']")
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_INDEX_TITLE
+        await browser.close()
 
     # check logs for errors
     expect_no_error_logs(environment)
@@ -227,6 +228,7 @@ async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploym
         await page.wait_for_load_state("networkidle")
         assert "Wrong Password." in await page.content()
         assert await page.title() == LRR_LOGIN_TITLE
+        await browser.close()
 
     # check logs for errors
     expect_no_error_logs(environment)
@@ -252,6 +254,7 @@ async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploym
         await page.wait_for_load_state("networkidle")
         assert "Wrong Password." in await page.content()
         assert await page.title() == LRR_LOGIN_TITLE
+        await browser.close()
 
     # check logs for errors
     expect_no_error_logs(environment)
@@ -296,6 +299,7 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
         await page.get_by_role("checkbox", name="Enabling No-Fun Mode will").check()
         LOGGER.info("Clicking save settings.")
         await page.get_by_role("button", name="Save Settings").click()
+        await browser.close()
 
     environment.restart()
 
@@ -306,6 +310,7 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
         await page.goto(lrr_client.lrr_base_url)
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_LOGIN_TITLE
+        await browser.close()
 
     # check logs for errors
     expect_no_error_logs(environment)
@@ -338,37 +343,41 @@ async def test_api_auth_matrix(
     environment.setup(with_api_key=True, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
     temp_lrr_client = environment.lrr_client()
     num_archives = 10
+    first_arcid = None
 
-    # >>>>> TEST CONNECTION STAGE >>>>>
-    response, error = await temp_lrr_client.misc_api.get_server_info()
-    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    try:
+        # >>>>> TEST CONNECTION STAGE >>>>>
+        response, error = await temp_lrr_client.misc_api.get_server_info()
+        assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
 
-    LOGGER.debug("Established connection with test LRR server.")
-    # verify we are working with a new server.
-    response, error = await temp_lrr_client.archive_api.get_all_archives()
-    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
-    assert len(response.data) == 0, "Server contains archives!"
-    del response, error
-    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
-    # <<<<< TEST CONNECTION STAGE <<<<<
+        LOGGER.debug("Established connection with test LRR server.")
+        # verify we are working with a new server.
+        response, error = await temp_lrr_client.archive_api.get_all_archives()
+        assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+        assert len(response.data) == 0, "Server contains archives!"
+        del response, error
+        assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
+        # <<<<< TEST CONNECTION STAGE <<<<<
 
-    # >>>>> UPLOAD STAGE >>>>>
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-        LOGGER.debug(f"Creating {num_archives} archives to upload.")
-        write_responses = save_archives(num_archives, tmpdir, npgenerator) # archives all have min 10 pages.
-        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+        # >>>>> UPLOAD STAGE >>>>>
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            LOGGER.debug(f"Creating {num_archives} archives to upload.")
+            write_responses = save_archives(num_archives, tmpdir, npgenerator) # archives all have min 10 pages.
+            assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
 
-        # archive metadata
-        LOGGER.debug("Uploading archives to server.")
-        await upload_archives(write_responses, npgenerator, semaphore, temp_lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
-    # <<<<< UPLOAD STAGE <<<<<
+            # archive metadata
+            LOGGER.debug("Uploading archives to server.")
+            await upload_archives(write_responses, npgenerator, semaphore, temp_lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
+        # <<<<< UPLOAD STAGE <<<<<
 
-    # Get first archive, close client and disable API key.
-    response, error = await temp_lrr_client.archive_api.get_all_archives()
-    assert not error, f"Failed to get all archives: {error.error}"
-    first_arcid = response.data[0].arcid
-    await temp_lrr_client.close()
+        # Get first archive ID for later tests.
+        response, error = await temp_lrr_client.archive_api.get_all_archives()
+        assert not error, f"Failed to get all archives: {error.error}"
+        first_arcid = response.data[0].arcid
+    finally:
+        await temp_lrr_client.close()
+
     environment.update_api_key(None)
 
     # generate the parameters list, then randomize it to remove ordering effect.
