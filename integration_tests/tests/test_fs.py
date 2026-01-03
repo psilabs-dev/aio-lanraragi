@@ -22,9 +22,9 @@ from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.helpers import (
     delete_archive,
-    expect_no_error_logs,
     get_bounded_sem,
     save_archives,
+    xfail_catch_flakes_inner,
     upload_archives,
 )
 
@@ -115,35 +115,7 @@ async def test_xfail_catch_flakes(lrr_client: LRRClient, semaphore: asyncio.Sema
 
     Therefore, occasional test case failures here are expected and ignored.
     """
-    num_archives = 100
-
-    # >>>>> TEST CONNECTION STAGE >>>>>
-    response, error = await lrr_client.misc_api.get_server_info()
-    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-
-    LOGGER.debug("Established connection with test LRR server.")
-    # verify we are working with a new server.
-    response, error = await lrr_client.archive_api.get_all_archives()
-    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
-    assert len(response.data) == 0, "Server contains archives!"
-    del response, error
-    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
-    # <<<<< TEST CONNECTION STAGE <<<<<
-
-    # >>>>> UPLOAD STAGE >>>>>
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-        LOGGER.debug(f"Creating {num_archives} archives to upload.")
-        write_responses = save_archives(num_archives, tmpdir, npgenerator)
-        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
-
-        # archive metadata
-        LOGGER.debug("Uploading archives to server.")
-        await upload_archives(write_responses, npgenerator, semaphore, lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
-    # <<<<< UPLOAD STAGE <<<<<
-
-    # no error logs
-    expect_no_error_logs(environment)
+    await xfail_catch_flakes_inner(lrr_client, semaphore, environment, num_archives=100, npgenerator=npgenerator)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
