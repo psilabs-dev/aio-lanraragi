@@ -1,4 +1,7 @@
+from http import HTTPMethod
+import json
 import sys
+import time
 import aiofiles
 import asyncio
 import errno
@@ -13,6 +16,7 @@ import aiohttp
 
 from lanraragi.clients.client import LRRClient
 from lanraragi.clients.utils import _build_err_response
+from lanraragi.models.minion import GetMinionJobStatusRequest
 from lanraragi.models.archive import (
     DeleteArchiveRequest,
     DeleteArchiveResponse,
@@ -498,3 +502,33 @@ async def xfail_catch_flakes_inner(
 
     # no error logs
     expect_no_error_logs(environment)
+
+async def trigger_stat_rebuild(lrr_client: LRRClient, timeout_seconds: int = 60) -> None:
+    """
+    Trigger a stat hash rebuild and wait for completion.
+
+    This is required for certain index features that rely on stat indexes.
+    """
+    status, content = await lrr_client.handle_request(
+        HTTPMethod.POST,
+        lrr_client.build_url("/api/minion/build_stat_hashes/queue"),
+        lrr_client.headers,
+        data={"args": "[]", "priority": "3"}
+    )
+    assert status == 200, f"Failed to queue build_stat_hashes: {content}"
+    build_stat_hashes_data = json.loads(content)
+    job_id = int(build_stat_hashes_data["job"])
+
+    start_time = time.time()
+    while True:
+        assert time.time() - start_time < timeout_seconds, f"build_stat_hashes timed out after {timeout_seconds}s"
+        response, error = await lrr_client.minion_api.get_minion_job_status(
+            GetMinionJobStatusRequest(job_id=job_id)
+        )
+        assert not error, f"Failed to get job status: {error.error}"
+        state = response.state.lower()
+        if state == "finished":
+            break
+        elif state == "failed":
+            raise AssertionError("build_stat_hashes job failed")
+        await asyncio.sleep(0.5)

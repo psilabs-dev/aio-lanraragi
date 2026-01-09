@@ -10,7 +10,7 @@ including environment deployment, client creation, and test utilities.
 
 import asyncio
 import logging
-from typing import Dict, Generator
+from typing import AsyncGenerator, Dict, Generator
 
 import numpy as np
 import pytest
@@ -29,11 +29,9 @@ LOGGER = logging.getLogger(__name__)
 def resource_prefix() -> Generator[str, None, None]:
     yield "test_"
 
-
 @pytest.fixture
 def port_offset() -> Generator[int, None, None]:
-    yield 11
-
+    yield 10
 
 @pytest.fixture
 def environment(request: pytest.FixtureRequest, port_offset: int, resource_prefix: str):
@@ -62,7 +60,7 @@ def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
 
 
 @pytest_asyncio.fixture
-async def lrr_client(environment: AbstractLRRDeploymentContext) -> Generator[LRRClient, None, None]:
+async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerator[LRRClient, None]:
     """
     Provides a LRRClient for testing with async cleanup.
     """

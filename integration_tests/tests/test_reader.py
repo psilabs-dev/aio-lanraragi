@@ -11,7 +11,7 @@ from collections import Counter
 from pathlib import Path
 import sys
 import tempfile
-from typing import Dict, Generator
+from typing import AsyncGenerator, Dict, Generator
 
 import pytest
 import pytest_asyncio
@@ -30,19 +30,13 @@ from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 
 LOGGER = logging.getLogger(__name__)
 
-
-# ===== FIXTURES =====
-# Using port offset 12 to avoid conflicts with simple (10) and search (11)
-
 @pytest.fixture
 def resource_prefix() -> Generator[str, None, None]:
-    yield "reader_"
-
+    yield "test_"
 
 @pytest.fixture
 def port_offset() -> Generator[int, None, None]:
-    yield 12
-
+    yield 10
 
 @pytest.fixture
 def environment(request: pytest.FixtureRequest, port_offset: int, resource_prefix: str):
@@ -65,15 +59,12 @@ def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
 
 
 @pytest_asyncio.fixture
-async def lrr_client(environment: AbstractLRRDeploymentContext) -> Generator[LRRClient, None, None]:
+async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerator[LRRClient, None]:
     client = environment.lrr_client()
     try:
         yield client
     finally:
         await client.close()
-
-
-# ===== HELPER FUNCTIONS =====
 
 async def _run_preload_duplicate_fetch_test(
     lrr_client: LRRClient,
@@ -148,9 +139,6 @@ async def _run_preload_duplicate_fetch_test(
         "unique_requests": len(get_request_counts),
         "duplicates": get_duplicates,
     }
-
-
-# ===== TEST CASES =====
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
