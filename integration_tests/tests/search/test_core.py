@@ -17,17 +17,13 @@ a flake-catching xfail test is included at the start to prime Windows test envir
 """
 
 import asyncio
-from http import HTTPMethod
-import json
 import logging
 from pathlib import Path
 import pytest
 import sys
 import tempfile
-import time
 from typing import Dict
 
-from lanraragi.models.minion import GetMinionJobStatusRequest
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import (
     ClearNewArchiveFlagRequest,
@@ -48,6 +44,7 @@ from aio_lanraragi_tests.helpers import (
     create_archive_file,
     expect_no_error_logs,
     retry_on_lock,
+    trigger_stat_rebuild,
     xfail_catch_flakes_inner,
     upload_archive,
 )
@@ -406,31 +403,7 @@ async def test_search_functionality(
     # >>>>> TANKOUBON GROUPING TESTS: GROUPING ON >>>>>
     # Tankoubon grouping requires stat indexes to include tankoubon data.
     # Trigger a stat rebuild and wait for completion before testing.
-
-    status, content = await lrr_client.handle_request(
-        HTTPMethod.POST,
-        lrr_client.build_url("/api/minion/build_stat_hashes/queue"),
-        lrr_client.headers,
-        data={"args": "[]", "priority": "3"}
-    )
-    assert status == 200, f"Failed to queue build_stat_hashes: {content}"
-    build_stat_hashes_data = json.loads(content)
-    job_id = int(build_stat_hashes_data["job"])
-
-    # Wait for stat rebuild to complete
-    start_time = time.time()
-    while True:
-        assert time.time() - start_time < 60, "build_stat_hashes timed out after 60s"
-        response, error = await lrr_client.minion_api.get_minion_job_status(
-            GetMinionJobStatusRequest(job_id=job_id)
-        )
-        assert not error, f"Failed to get job status: {error.error}"
-        state = response.state.lower()
-        if state == "finished":
-            break
-        elif state == "failed":
-            raise AssertionError("build_stat_hashes job failed")
-        await asyncio.sleep(0.5)
+    await trigger_stat_rebuild(lrr_client)
     LOGGER.debug("Stat hashes rebuilt for tankoubon grouping test.")
 
     response, error = await lrr_client.search_api.search_archive_index(

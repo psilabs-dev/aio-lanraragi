@@ -508,6 +508,8 @@ async def trigger_stat_rebuild(lrr_client: LRRClient, timeout_seconds: int = 60)
     Trigger a stat hash rebuild and wait for completion.
 
     This is required for certain index features that rely on stat indexes.
+
+    If state is failed, throws AssertionError.
     """
     status, content = await lrr_client.handle_request(
         HTTPMethod.POST,
