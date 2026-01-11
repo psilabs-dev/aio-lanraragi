@@ -180,7 +180,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
 
     @abc.abstractmethod
     def setup(
-        self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
+        self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, enable_metrics: bool=False, lrr_debug_mode: bool=False,
         environment: Dict[str, str]={},
         test_connection_max_retries: int=4
     ):
@@ -321,6 +321,20 @@ class AbstractLRRDeploymentContext(abc.ABC):
         """
         self.redis_client.select(2)
         self.redis_client.hset("LRR_CONFIG", "nofunmode", "1")
+
+    def enable_metrics(self):
+        """
+        Enable metrics and endpoint.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "enablemetrics", "1")
+
+    def disable_metrics(self):
+        """
+        Disable metrics and endpoint.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "enablemetrics", "0")
 
     def disable_nofun_mode(self):
         """

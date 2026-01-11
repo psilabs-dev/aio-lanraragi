@@ -4,6 +4,7 @@ from lanraragi.clients.api_context import ApiContextManager
 from lanraragi.clients.api_clients.archive import _ArchiveApiClient
 from lanraragi.clients.api_clients.category import _CategoryApiClient
 from lanraragi.clients.api_clients.database import _DatabaseApiClient
+from lanraragi.clients.api_clients.metrics import _MetricsApiClient
 from lanraragi.clients.api_clients.minion import _MinionApiClient
 from lanraragi.clients.api_clients.misc import _MiscApiClient
 from lanraragi.clients.api_clients.search import _SearchApiClient
@@ -70,6 +71,14 @@ class LRRClient(ApiContextManager):
         self._database_api = value
 
     @property
+    def metrics_api(self) -> _MetricsApiClient:
+        return self._metrics_api
+
+    @metrics_api.setter
+    def metrics_api(self, value: _MetricsApiClient):
+        self._metrics_api = value
+
+    @property
     def minion_api(self) -> _MinionApiClient:
         """
         https://sugoi.gitbook.io/lanraragi/api-documentation/minion-api
@@ -124,6 +133,7 @@ class LRRClient(ApiContextManager):
         self._archive_api = _ArchiveApiClient(self)
         self._category_api = _CategoryApiClient(self)
         self._database_api = _DatabaseApiClient(self)
+        self._metrics_api = _MetricsApiClient(self)
         self._minion_api = _MinionApiClient(self)
         self._misc_api = _MiscApiClient(self)
         self._shinobu_api = _ShinobuApiClient(self)

@@ -270,7 +270,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def setup(
-        self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
+        self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, enable_metrics: bool=False, lrr_debug_mode: bool=False,
         environment: Dict[str, str]={},
         test_connection_max_retries: int=4
     ):
@@ -464,6 +464,10 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.enable_cors()
         else:
             self.disable_cors()
+        if enable_metrics:
+            self.enable_metrics()
+        else:
+            self.disable_metrics()
         self.logger.debug("Redis post-connect configuration complete.")
 
         # start lrr
