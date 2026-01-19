@@ -10,7 +10,7 @@ import numpy as np
 from pathlib import Path
 import shutil
 import sys
-from typing import Dict, Generator, List, Tuple
+from typing import AsyncGenerator, Dict, Generator, List, Tuple
 import pytest
 import pytest_asyncio
 
@@ -87,13 +87,13 @@ def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
     yield get_bounded_sem()
 
 @pytest_asyncio.fixture
-async def client_session() -> Generator[aiohttp.ClientSession, None, None]:
+async def client_session() -> AsyncGenerator[aiohttp.ClientSession, None]:
     session = aiohttp.ClientSession()
     yield session
     await session.close()
 
 @pytest_asyncio.fixture
-async def lrr_client(environment: AbstractLRRDeploymentContext) -> Generator[LRRClient, None, None]:
+async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerator[LRRClient, None]:
     """
     Provides a LRRClient for testing with proper async cleanup.
     """

@@ -10,7 +10,7 @@ including environment deployment, client creation, and test utilities.
 
 import asyncio
 import logging
-from typing import Dict, Generator
+from typing import AsyncGenerator, Dict, Generator
 
 import numpy as np
 import pytest
@@ -62,7 +62,7 @@ def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
 
 
 @pytest_asyncio.fixture
-async def lrr_client(environment: AbstractLRRDeploymentContext) -> Generator[LRRClient, None, None]:
+async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerator[LRRClient, None]:
     """
     Provides a LRRClient for testing with async cleanup.
     """
