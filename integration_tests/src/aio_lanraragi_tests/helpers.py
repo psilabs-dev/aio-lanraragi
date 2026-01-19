@@ -515,7 +515,7 @@ async def trigger_stat_rebuild(lrr_client: LRRClient, timeout_seconds: int = 60)
         HTTPMethod.POST,
         lrr_client.build_url("/api/minion/build_stat_hashes/queue"),
         lrr_client.headers,
-        data={"args": "[]", "priority": "3"}
+        params={"args": "[]", "priority": "3"}
     )
     assert status == 200, f"Failed to queue build_stat_hashes: {content}"
     build_stat_hashes_data = json.loads(content)
