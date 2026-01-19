@@ -453,6 +453,9 @@ async def test_enable_cors_preflight(environment: AbstractLRRDeploymentContext, 
     ):
         headers = response.headers
 
+        # confirm the preflight response is OK
+        assert response.status in (200, 204), f"Preflight should return 2xx status, got {response.status}"
+
         # confirm the CORS headers exist.
         assert "Access-Control-Allow-Headers" in headers, "Allowed headers not in headers when CORS is enabled."
         assert "Access-Control-Allow-Methods" in headers, "Allowed methods not present in headers when CORS is enabled."
