@@ -6,6 +6,7 @@ import aiohttp
 import numpy as np
 from typing import AsyncGenerator, Dict, Generator, List
 import playwright.async_api
+import playwright.async_api._generated
 from pydantic import BaseModel, Field
 import pytest
 import pytest_asyncio
@@ -14,7 +15,13 @@ from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import UpdateReadingProgressionRequest
 
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE, LRR_LOGIN_TITLE
-from aio_lanraragi_tests.helpers import expect_no_error_logs, get_bounded_sem, save_archives, upload_archives
+from aio_lanraragi_tests.helpers import (
+    assert_browser_responses_ok,
+    expect_no_error_logs,
+    get_bounded_sem,
+    save_archives,
+    upload_archives
+)
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 
@@ -166,9 +173,17 @@ async def sample_test_api_auth_matrix(
 
         try:
             page = await bc.new_page()
+
+            # capture all network request responses
+            responses: List[playwright.async_api._generated.Response] = []
+            page.on("response", lambda response: responses.append(response))
+
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("networkidle")
             assert await page.title() == expected_title
+
+            # check browser responses were OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
         finally:
             await bc.close()
             await browser.close()
@@ -202,6 +217,11 @@ async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploym
 
         try:
             page = await browser.new_page()
+
+            # capture all network request responses
+            responses: List[playwright.async_api._generated.Response] = []
+            page.on("response", lambda response: responses.append(response))
+
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("networkidle")
             assert await page.title() == LRR_LOGIN_TITLE
@@ -211,6 +231,9 @@ async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploym
             await page.click("input[type='submit'][value='Login']")
             await page.wait_for_load_state("networkidle")
             assert await page.title() == LRR_INDEX_TITLE
+
+            # check browser responses were OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
         finally:
             await bc.close()
             await browser.close()
@@ -232,6 +255,11 @@ async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploym
 
         try:
             page = await browser.new_page()
+
+            # capture all network request responses
+            responses: List[playwright.async_api._generated.Response] = []
+            page.on("response", lambda response: responses.append(response))
+
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("networkidle")
             assert await page.title() == LRR_LOGIN_TITLE
@@ -241,6 +269,9 @@ async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploym
             await page.wait_for_load_state("networkidle")
             assert "Wrong Password." in await page.content()
             assert await page.title() == LRR_LOGIN_TITLE
+
+            # check browser responses were OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
         finally:
             await bc.close()
             await browser.close()
@@ -262,6 +293,11 @@ async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploym
 
         try:
             page = await browser.new_page()
+
+            # capture all network request responses
+            responses: List[playwright.async_api._generated.Response] = []
+            page.on("response", lambda response: responses.append(response))
+
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("networkidle")
             assert await page.title() == LRR_LOGIN_TITLE
@@ -272,6 +308,9 @@ async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploym
             await page.wait_for_load_state("networkidle")
             assert "Wrong Password." in await page.content()
             assert await page.title() == LRR_LOGIN_TITLE
+
+            # check browser responses were OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
         finally:
             await bc.close()
             await browser.close()
@@ -292,6 +331,11 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
 
         try:
             page = await browser.new_page()
+
+            # capture all network request responses
+            responses: List[playwright.async_api._generated.Response] = []
+            page.on("response", lambda response: responses.append(response))
+
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("networkidle")
             assert await page.title() == LRR_INDEX_TITLE
@@ -322,6 +366,9 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
             await page.get_by_role("checkbox", name="Enabling No-Fun Mode will").check()
             LOGGER.info("Clicking save settings.")
             await page.get_by_role("button", name="Save Settings").click()
+
+            # check browser responses were OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
         finally:
             await bc.close()
             await browser.close()
@@ -335,9 +382,17 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
 
         try:
             page = await browser.new_page()
+
+            # capture all network request responses
+            responses: List[playwright.async_api._generated.Response] = []
+            page.on("response", lambda response: responses.append(response))
+
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("networkidle")
             assert await page.title() == LRR_LOGIN_TITLE
+
+            # check browser responses were OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
         finally:
             await bc.close()
             await browser.close()

@@ -17,6 +17,7 @@ from typing import AsyncGenerator, Dict, Generator, List, Tuple
 import numpy as np
 import pytest
 import playwright.async_api
+import playwright.async_api._generated
 import pytest_asyncio
 import aiohttp
 
@@ -69,6 +70,7 @@ from lanraragi.models.tankoubon import (
 
 from aio_lanraragi_tests.helpers import (
     add_archive_to_category,
+    assert_browser_responses_ok,
     delete_archive,
     expect_no_error_logs,
     get_bookmark_category_detail,
@@ -1071,6 +1073,11 @@ async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semap
 
         try:
             page = await browser.new_page()
+
+            # capture all network request responses
+            responses: List[playwright.async_api._generated.Response] = []
+            page.on("response", lambda response: responses.append(response))
+
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("networkidle")
             assert await page.title() == LRR_INDEX_TITLE
@@ -1095,6 +1102,9 @@ async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semap
             await playwright.async_api.expect(
                 page.get_by_role("combobox", name="Search Title, Artist, Series")
             ).to_have_value("tag-1")
+
+            # check browser responses were OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
         finally:
             await bc.close()
             await browser.close()
