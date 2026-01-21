@@ -162,11 +162,16 @@ async def sample_test_api_auth_matrix(
     expected_title = LRR_LOGIN_TITLE if is_nofunmode else LRR_INDEX_TITLE
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
-        page = await browser.new_page()
-        await page.goto(lrr_client.lrr_base_url)
-        await page.wait_for_load_state("networkidle")
-        assert await page.title() == expected_title
-        await browser.close()
+        bc = await browser.new_context()
+
+        try:
+            page = await bc.new_page()
+            await page.goto(lrr_client.lrr_base_url)
+            await page.wait_for_load_state("networkidle")
+            assert await page.title() == expected_title
+        finally:
+            await bc.close()
+            await browser.close()
 
     # test progress endpoint.
     progress_is_public = not is_auth_progress
@@ -193,16 +198,22 @@ async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploym
 
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
-        page = await browser.new_page()
-        await page.goto(lrr_client.lrr_base_url)
-        await page.wait_for_load_state("networkidle")
-        assert await page.title() == LRR_LOGIN_TITLE
+        bc = await browser.new_context()
 
-        # right password test
-        await page.fill("#pw_field", DEFAULT_LRR_PASSWORD)
-        await page.click("input[type='submit'][value='Login']")
-        await page.wait_for_load_state("networkidle")
-        assert await page.title() == LRR_INDEX_TITLE
+        try:
+            page = await browser.new_page()
+            await page.goto(lrr_client.lrr_base_url)
+            await page.wait_for_load_state("networkidle")
+            assert await page.title() == LRR_LOGIN_TITLE
+
+            # right password test
+            await page.fill("#pw_field", DEFAULT_LRR_PASSWORD)
+            await page.click("input[type='submit'][value='Login']")
+            await page.wait_for_load_state("networkidle")
+            assert await page.title() == LRR_INDEX_TITLE
+        finally:
+            await bc.close()
+            await browser.close()
 
     # check logs for errors
     expect_no_error_logs(environment)
@@ -217,16 +228,22 @@ async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploym
 
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
-        page = await browser.new_page()
-        await page.goto(lrr_client.lrr_base_url)
-        await page.wait_for_load_state("networkidle")
-        assert await page.title() == LRR_LOGIN_TITLE
+        bc = await browser.new_context()
 
-        # empty password test
-        await page.click("input[type='submit'][value='Login']")
-        await page.wait_for_load_state("networkidle")
-        assert "Wrong Password." in await page.content()
-        assert await page.title() == LRR_LOGIN_TITLE
+        try:
+            page = await browser.new_page()
+            await page.goto(lrr_client.lrr_base_url)
+            await page.wait_for_load_state("networkidle")
+            assert await page.title() == LRR_LOGIN_TITLE
+
+            # empty password test
+            await page.click("input[type='submit'][value='Login']")
+            await page.wait_for_load_state("networkidle")
+            assert "Wrong Password." in await page.content()
+            assert await page.title() == LRR_LOGIN_TITLE
+        finally:
+            await bc.close()
+            await browser.close()
 
     # check logs for errors
     expect_no_error_logs(environment)
@@ -241,17 +258,23 @@ async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploym
 
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
-        page = await browser.new_page()
-        await page.goto(lrr_client.lrr_base_url)
-        await page.wait_for_load_state("networkidle")
-        assert await page.title() == LRR_LOGIN_TITLE
+        bc = await browser.new_context()
 
-        # right password test
-        await page.fill("#pw_field", "password")
-        await page.click("input[type='submit'][value='Login']")
-        await page.wait_for_load_state("networkidle")
-        assert "Wrong Password." in await page.content()
-        assert await page.title() == LRR_LOGIN_TITLE
+        try:
+            page = await browser.new_page()
+            await page.goto(lrr_client.lrr_base_url)
+            await page.wait_for_load_state("networkidle")
+            assert await page.title() == LRR_LOGIN_TITLE
+
+            # right password test
+            await page.fill("#pw_field", "password")
+            await page.click("input[type='submit'][value='Login']")
+            await page.wait_for_load_state("networkidle")
+            assert "Wrong Password." in await page.content()
+            assert await page.title() == LRR_LOGIN_TITLE
+        finally:
+            await bc.close()
+            await browser.close()
 
     # check logs for errors
     expect_no_error_logs(environment)
@@ -265,47 +288,59 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
     environment.setup(with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
-        page = await browser.new_page()
-        await page.goto(lrr_client.lrr_base_url)
-        await page.wait_for_load_state("networkidle")
-        assert await page.title() == LRR_INDEX_TITLE
+        bc = await browser.new_context()
 
-        # enter admin portal
-        # exit overlay
-        if "New Version Release Notes" in await page.content():
-            LOGGER.info("Closing new releases overlay.")
-            await page.keyboard.press("Escape")
+        try:
+            page = await browser.new_page()
+            await page.goto(lrr_client.lrr_base_url)
+            await page.wait_for_load_state("networkidle")
+            assert await page.title() == LRR_INDEX_TITLE
 
-        assert "Admin Login" in await page.content(), "Admin Login not found!"
+            # enter admin portal
+            # exit overlay
+            if "New Version Release Notes" in await page.content():
+                LOGGER.info("Closing new releases overlay.")
+                await page.keyboard.press("Escape")
 
-        LOGGER.info("Click Admin Login button")
-        await page.get_by_role("link", name="Admin Login").click()
-        assert await page.title() == LRR_LOGIN_TITLE
+            assert "Admin Login" in await page.content(), "Admin Login not found!"
 
-        LOGGER.info("Entering default password")
-        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-        await page.get_by_role("button", name="Login").click()
-        await page.wait_for_load_state("networkidle")
-        assert await page.title() == LRR_INDEX_TITLE
+            LOGGER.info("Click Admin Login button")
+            await page.get_by_role("link", name="Admin Login").click()
+            assert await page.title() == LRR_LOGIN_TITLE
 
-        LOGGER.info("Clicking settings button.")
-        await page.get_by_role("link", name="Settings").click()
-        LOGGER.info("Clicking security settings.")
-        await page.get_by_text("Security").click()
-        LOGGER.info("Enabling No-Fun Mode.")
-        await page.get_by_role("checkbox", name="Enabling No-Fun Mode will").check()
-        LOGGER.info("Clicking save settings.")
-        await page.get_by_role("button", name="Save Settings").click()
+            LOGGER.info("Entering default password")
+            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+            await page.get_by_role("button", name="Login").click()
+            await page.wait_for_load_state("networkidle")
+            assert await page.title() == LRR_INDEX_TITLE
+
+            LOGGER.info("Clicking settings button.")
+            await page.get_by_role("link", name="Settings").click()
+            LOGGER.info("Clicking security settings.")
+            await page.get_by_text("Security").click()
+            LOGGER.info("Enabling No-Fun Mode.")
+            await page.get_by_role("checkbox", name="Enabling No-Fun Mode will").check()
+            LOGGER.info("Clicking save settings.")
+            await page.get_by_role("button", name="Save Settings").click()
+        finally:
+            await bc.close()
+            await browser.close()
 
     environment.restart()
 
     LOGGER.info("Checking that LRR server is locked after restart.")
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
-        page = await browser.new_page()
-        await page.goto(lrr_client.lrr_base_url)
-        await page.wait_for_load_state("networkidle")
-        assert await page.title() == LRR_LOGIN_TITLE
+        bc = await browser.new_context()
+
+        try:
+            page = await browser.new_page()
+            await page.goto(lrr_client.lrr_base_url)
+            await page.wait_for_load_state("networkidle")
+            assert await page.title() == LRR_LOGIN_TITLE
+        finally:
+            await bc.close()
+            await browser.close()
 
     # check logs for errors
     expect_no_error_logs(environment)

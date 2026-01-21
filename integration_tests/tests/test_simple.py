@@ -1067,30 +1067,35 @@ async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semap
     # >>>>> UI STAGE >>>>>
     async with playwright.async_api.async_playwright() as p:
         browser = await p.webkit.launch()
+        bc = await browser.new_context()
 
-        page = await browser.new_page()
-        await page.goto(lrr_client.lrr_base_url)
-        await page.wait_for_load_state("networkidle")
-        assert await page.title() == LRR_INDEX_TITLE
+        try:
+            page = await browser.new_page()
+            await page.goto(lrr_client.lrr_base_url)
+            await page.wait_for_load_state("networkidle")
+            assert await page.title() == LRR_INDEX_TITLE
 
-        # enter admin portal
-        # exit overlay
-        if "New Version Release Notes" in await page.content():
-            LOGGER.info("Closing new releases overlay.")
-            await page.keyboard.press("Escape")
+            # enter admin portal
+            # exit overlay
+            if "New Version Release Notes" in await page.content():
+                LOGGER.info("Closing new releases overlay.")
+                await page.keyboard.press("Escape")
 
-        # click search bar
-        LOGGER.info("Applying search filter: \"tag-1\"...")
-        await page.get_by_role("combobox", name="Search Title, Artist, Series").click()
-        await page.get_by_role("combobox", name="Search Title, Artist, Series").fill("tag-1")
-        await page.get_by_role("button", name="Apply Filter").click()
+            # click search bar
+            LOGGER.info("Applying search filter: \"tag-1\"...")
+            await page.get_by_role("combobox", name="Search Title, Artist, Series").click()
+            await page.get_by_role("combobox", name="Search Title, Artist, Series").fill("tag-1")
+            await page.get_by_role("button", name="Apply Filter").click()
 
-        LOGGER.info("Opening reader for \"Test Archive\"...")
-        await page.get_by_role("link", name="Test Archive").nth(1).click()
+            LOGGER.info("Opening reader for \"Test Archive\"...")
+            await page.get_by_role("link", name="Test Archive").nth(1).click()
 
-        LOGGER.info("Going back to index page and checking search bar...")
-        await page.get_by_role("link", name="").click()
-        await playwright.async_api.expect(
-            page.get_by_role("combobox", name="Search Title, Artist, Series")
-        ).to_have_value("tag-1")
+            LOGGER.info("Going back to index page and checking search bar...")
+            await page.get_by_role("link", name="").click()
+            await playwright.async_api.expect(
+                page.get_by_role("combobox", name="Search Title, Artist, Series")
+            ).to_have_value("tag-1")
+        finally:
+            await bc.close()
+            await browser.close()
     # <<<<< UI STAGE <<<<<
