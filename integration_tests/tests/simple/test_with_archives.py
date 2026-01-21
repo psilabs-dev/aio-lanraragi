@@ -54,19 +54,18 @@ from lanraragi.models.tankoubon import (
     UpdateTankoubonRequest,
 )
 
-from aio_lanraragi_tests.helpers import (
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext, expect_no_error_logs
+from aio_lanraragi_tests.utils.api_wrappers import (
     add_archive_to_category,
     delete_archive,
-    expect_no_error_logs,
     get_bookmark_category_detail,
     load_pages_from_archive,
     remove_archive_from_category,
-    retry_on_lock,
     save_archives,
-    upload_archives,
-    xfail_catch_flakes_inner
+    upload_archives
 )
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.utils.concurrency import retry_on_lock
+from aio_lanraragi_tests.utils.flakes import xfail_catch_flakes_inner
 
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False # for debugging.
@@ -166,7 +165,7 @@ async def test_archive_upload(lrr_client: LRRClient, semaphore: asyncio.Semaphor
     # <<<<< DELETE ARCHIVE ASYNC STAGE <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -253,7 +252,7 @@ async def test_archive_read(lrr_client: LRRClient, semaphore: asyncio.Semaphore,
     # <<<<< SIMULATE READ ARCHIVE STAGE <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -413,7 +412,7 @@ async def test_archive_category_interaction(lrr_client: LRRClient, semaphore: as
     # <<<<< VERIFY ARCHIVE CATEGORY MEMBERSHIP CLEARED VIA ARCHIVE API <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -484,7 +483,7 @@ async def test_search_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, n
     # <<<<< DISCARD SEARCH CACHE STAGE <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -527,7 +526,7 @@ async def test_database_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore,
     # <<<<< CLEAN DATABASE STAGE <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -622,7 +621,7 @@ async def test_tankoubon_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore
     # <<<<< DELETE TANKOUBON STAGE <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -683,7 +682,7 @@ async def test_misc_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npg
     # <<<<< REGENERATE THUMBNAILS STAGE <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -733,4 +732,4 @@ async def test_minion_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, n
     # <<<<< GET MINION JOB DETAILS STAGE <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)

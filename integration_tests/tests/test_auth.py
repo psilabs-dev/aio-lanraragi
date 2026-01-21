@@ -15,15 +15,11 @@ from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import UpdateReadingProgressionRequest
 
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE, LRR_LOGIN_TITLE
-from aio_lanraragi_tests.helpers import (
-    assert_browser_responses_ok,
-    expect_no_error_logs,
-    get_bounded_sem,
-    save_archives,
-    upload_archives
-)
 from aio_lanraragi_tests.deployment.factory import generate_deployment
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext, expect_no_error_logs
+from aio_lanraragi_tests.utils.api_wrappers import save_archives, upload_archives
+from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
+from aio_lanraragi_tests.utils.playwright import assert_browser_responses_ok
 
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False # for debugging.
@@ -201,7 +197,7 @@ async def sample_test_api_auth_matrix(
         assert error.status == 401, f"Expected status 401, got: {error.status}."
 
     # check logs for errors
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -239,7 +235,7 @@ async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploym
             await browser.close()
 
     # check logs for errors
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -277,7 +273,7 @@ async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploym
             await browser.close()
 
     # check logs for errors
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -316,7 +312,7 @@ async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploym
             await browser.close()
 
     # check logs for errors
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -398,7 +394,7 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
             await browser.close()
 
     # check logs for errors
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -519,7 +515,7 @@ async def test_disable_cors_preflight(environment: AbstractLRRDeploymentContext,
         assert "Access-Control-Allow-Origin" not in headers, "Allowed origin not present in headers when CORS is enabled."
 
     # check logs for errors
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
 async def test_enable_cors_preflight(environment: AbstractLRRDeploymentContext, lrr_client: LRRClient, is_lrr_debug_mode: bool):
@@ -550,4 +546,4 @@ async def test_enable_cors_preflight(environment: AbstractLRRDeploymentContext, 
         assert actual_allowed_origin == expected_allowed_origin, "CORS allowed origin does not match."
 
     # check logs for errors
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)

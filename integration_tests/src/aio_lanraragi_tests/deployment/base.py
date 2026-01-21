@@ -11,6 +11,7 @@ import gzip
 
 from lanraragi.clients.client import LRRClient
 
+from aio_lanraragi_tests.log_parse import parse_lrr_logs
 from aio_lanraragi_tests.common import DEFAULT_LRR_PORT, DEFAULT_REDIS_PORT
 from aio_lanraragi_tests.exceptions import DeploymentException
 
@@ -481,3 +482,16 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Returns a LRRClient object configured to connect to this server.
         """
         return LRRClient(self.lrr_base_url, self.lrr_api_key, ssl=ssl, client_session=client_session, connector=connector, logger=logger)
+    
+def expect_no_error_logs(environment: AbstractLRRDeploymentContext, logger: logging.Logger):
+    """
+    Assert no logs with error level severity in LRR and Shinobu.
+    """
+    for event in parse_lrr_logs(environment.read_lrr_logs()):
+        assert event.severity_level != 'error', "LANraragi process emitted error logs."
+    
+    if environment.shinobu_logs_path.exists():
+        for event in parse_lrr_logs(environment.read_log(environment.shinobu_logs_path)):
+            assert event.severity_level != 'error', "Shinobu process emitted error logs."
+    else:
+        logger.warning("No shinobu logs found.")

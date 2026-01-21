@@ -33,8 +33,8 @@ from aio_lanraragi_tests.archive_generation.metadata.zipf_utils import get_archi
 from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest, WriteArchiveResponse
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, compute_archive_id
 from aio_lanraragi_tests.exceptions import DeploymentException
-from aio_lanraragi_tests.helpers import trigger_stat_rebuild, upload_archive
 
+from aio_lanraragi_tests.utils.api_wrappers import trigger_stat_rebuild, upload_archive
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import GetArchiveMetadataRequest, UpdateArchiveMetadataRequest, UploadArchiveResponse
 from lanraragi.models.base import LanraragiErrorResponse
