@@ -10,7 +10,7 @@ from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest, WriteArchiveResponse, WriteArchiveResponseStatus
 from aio_lanraragi_tests.archive_generation.page import save_page_to_dir
 
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 def write_archive_to_disk(request: WriteArchiveRequest) -> WriteArchiveResponse:
     """
@@ -36,7 +36,7 @@ def write_archive_to_disk(request: WriteArchiveRequest) -> WriteArchiveResponse:
         request.save_path = tmp_save_dir
         response = write_archive_to_disk(request)
         if response.status == WriteArchiveResponseStatus.FAILURE:
-            logger.error(f"Failed to write pages to disk due to error: {response.error}")
+            LOGGER.error(f"Failed to write pages to disk due to error: {response.error}")
             return response
 
         response.save_path = save_path
