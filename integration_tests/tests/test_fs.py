@@ -10,7 +10,7 @@ import numpy as np
 from pathlib import Path
 import shutil
 import sys
-from typing import Dict, Generator, List, Tuple
+from typing import AsyncGenerator, Dict, Generator, List, Tuple
 import pytest
 import pytest_asyncio
 
@@ -20,7 +20,7 @@ from lanraragi.models.base import LanraragiErrorResponse
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
-from aio_lanraragi_tests.helpers import expect_no_error_logs, get_bounded_sem, save_archives, upload_archives
+from aio_lanraragi_tests.helpers import delete_archive, get_bounded_sem, save_archives, upload_archives, xfail_catch_flakes_inner
 
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False
@@ -81,25 +81,21 @@ def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
     yield get_bounded_sem()
 
 @pytest_asyncio.fixture
-async def client_session() -> Generator[aiohttp.ClientSession, None, None]:
+async def client_session() -> AsyncGenerator[aiohttp.ClientSession, None]:
     session = aiohttp.ClientSession()
     yield session
     await session.close()
 
-async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[DeleteArchiveResponse, LanraragiErrorResponse]:
-    retry_count = 0
-    async with semaphore:
-        while True:
-            response, error = await client.archive_api.delete_archive(DeleteArchiveRequest(arcid=arcid))
-            if error and error.status == 423: # locked resource
-                retry_count += 1
-                if retry_count > 10:
-                    return response, error
-                tts = 2 ** retry_count
-                LOGGER.debug(f"[delete_archive][{arcid}] locked resource error; retrying in {tts}s.")
-                await asyncio.sleep(tts)
-                continue
-            return response, error
+@pytest_asyncio.fixture
+async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerator[LRRClient, None]:
+    """
+    Provides a LRRClient for testing with proper async cleanup.
+    """
+    client = environment.lrr_client()
+    try:
+        yield client
+    finally:
+        await client.close()
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Cache priming required only for flaky Windows testing environments.")
 @pytest.mark.asyncio
@@ -112,35 +108,7 @@ async def test_xfail_catch_flakes(lrr_client: LRRClient, semaphore: asyncio.Sema
 
     Therefore, occasional test case failures here are expected and ignored.
     """
-    num_archives = 100
-
-    # >>>>> TEST CONNECTION STAGE >>>>>
-    response, error = await lrr_client.misc_api.get_server_info()
-    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-
-    LOGGER.debug("Established connection with test LRR server.")
-    # verify we are working with a new server.
-    response, error = await lrr_client.archive_api.get_all_archives()
-    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
-    assert len(response.data) == 0, "Server contains archives!"
-    del response, error
-    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
-    # <<<<< TEST CONNECTION STAGE <<<<<
-
-    # >>>>> UPLOAD STAGE >>>>>
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-        LOGGER.debug(f"Creating {num_archives} archives to upload.")
-        write_responses = save_archives(num_archives, tmpdir, npgenerator)
-        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
-
-        # archive metadata
-        LOGGER.debug("Uploading archives to server.")
-        await upload_archives(write_responses, npgenerator, semaphore, lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
-    # <<<<< UPLOAD STAGE <<<<<
-
-    # no error logs
-    expect_no_error_logs(environment)
+    await xfail_catch_flakes_inner(lrr_client, semaphore, environment, num_archives=100, npgenerator=npgenerator)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio

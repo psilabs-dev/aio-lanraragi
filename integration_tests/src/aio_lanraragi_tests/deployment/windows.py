@@ -457,6 +457,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def teardown(self, remove_data: bool=False):
         """
         Forceful shutdown of LRR and Redis and remove the content path, preparing it for another test.
+        Additionally, close all closable resources/clients.
         """
         contents_dir = self.archives_dir
         log_dir = self.logs_dir
@@ -465,7 +466,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         redis_dir = self.redis_dir
         temp_dir = self.temp_dir
         self.stop()
-
+        if hasattr(self, "_redis_client") and self._redis_client is not None:
+            self._redis_client.close()
         if remove_data:
             if contents_dir.exists():
                 self._remove_ro(contents_dir)
@@ -693,7 +695,36 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def stop_redis(self, timeout: int = 10):
-        self.redis_client.shutdown(now=True, force=True)
+        """
+        Stop the Redis server and wait for it to terminate.
+
+        Sends a shutdown command to Redis and waits for the port to become
+        available before returning. In testing, this ensures complete termination and
+        prevents subsequent tests from connecting to a dying Redis instance.
+        """
+        port = self.redis_port
+
+        # If port is already free, Redis is already stopped
+        if is_port_available(port):
+            self.logger.debug(f"Redis port {port} is already available.")
+            return
+
+        # Send shutdown command to Redis
+        try:
+            self.redis_client.shutdown(now=True, force=True)
+        except redis.exceptions.ConnectionError:
+            # Redis may already be shutting down or dead
+            self.logger.debug("Redis connection error during shutdown (may already be terminating).")
+
+        # Wait for Redis to actually terminate
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if is_port_available(port):
+                self.logger.debug(f"Redis terminated, port {port} is now available.")
+                return
+            time.sleep(0.5)
+
+        self.logger.warning(f"Redis port {port} still occupied after {timeout}s shutdown wait.")
 
     @override
     def get_lrr_logs(self, tail: int=100) -> bytes:

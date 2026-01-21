@@ -540,7 +540,16 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def teardown(self, remove_data: bool=False):
+        """
+        Remove all resources and close all closable resources/clients/connections.
+        """
         self._reset_docker_test_env(remove_data=remove_data)
+        if hasattr(self, "_redis_client") and self._redis_client is not None:
+            self._redis_client.close()
+        if self._docker_api:
+            self._docker_api.close()
+        if self._docker_client:
+            self._docker_client.close()
         self.logger.info("Cleanup complete.")
 
     def _get_container_by_name(self, container_name: str) -> Optional[docker.models.containers.Container]:
@@ -609,7 +618,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.lrr_container.remove(v=True, force=True)
             self.logger.debug(f"Removed container: {self.lrr_container_name}")
 
-        if remove_data and self.redis_container and self.redis_container == 'running':
+        if remove_data and self.redis_container and self.redis_container.status == 'running':
             self.redis_container.exec_run(["bash", "-c", "rm -rf /data/*"], user='redis')
         if self.redis_container:
             self.redis_container.stop(timeout=1)
