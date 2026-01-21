@@ -21,7 +21,7 @@ def pytest_addoption(parser: pytest.Parser):
     New containers/networks will be created on each session. If an exception or invalid
     event occurred, an attempt will be made to clean up all test objects.
 
-    If running on a Windows machine, the `--windows-runfile` flag must be provided.
+    If running on a Windows machine, the `--windist` path must be provided.
 
     Parameters
     ----------
