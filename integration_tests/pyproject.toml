@@ -48,11 +48,11 @@ log_format  = "[%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
 log_date_format = "%H:%M:%S"
 
 [tool.ruff]
-extend-select = ["ASYNC", "C4", "SIM"]
+lint.extend-select = ["ASYNC", "C4", "SIM"]
 show-fixes = true
 target-version = "py312"
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 
 [tool.setuptools.package-data]
