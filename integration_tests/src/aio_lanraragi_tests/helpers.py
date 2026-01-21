@@ -1,17 +1,38 @@
+from http import HTTPMethod
+import json
 import sys
+import time
 import aiofiles
 import asyncio
 import errno
 import logging
 import numpy as np
 from pathlib import Path
-from typing import List, Optional, Set, Tuple
+import tempfile
+from typing import Awaitable, Callable, List, Optional, Set, Tuple, TypeVar
+from urllib.parse import urlparse, parse_qs
+import playwright.async_api._generated
 
 import aiohttp
 
 from lanraragi.clients.client import LRRClient
-from lanraragi.models.archive import UploadArchiveRequest, UploadArchiveResponse
-from lanraragi.models.base import LanraragiErrorResponse
+from lanraragi.clients.utils import _build_err_response
+from lanraragi.models.minion import GetMinionJobStatusRequest
+from lanraragi.models.archive import (
+    DeleteArchiveRequest,
+    DeleteArchiveResponse,
+    ExtractArchiveRequest,
+    UploadArchiveRequest,
+    UploadArchiveResponse,
+)
+from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
+from lanraragi.models.category import (
+    AddArchiveToCategoryRequest,
+    AddArchiveToCategoryResponse,
+    GetCategoryRequest,
+    GetCategoryResponse,
+    RemoveArchiveFromCategoryRequest,
+)
 
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
@@ -22,6 +43,7 @@ from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.log_parse import parse_lrr_logs
 
 LOGGER = logging.getLogger(__name__)
+ResponseT = TypeVar('ResponseT', bound=LanraragiResponse)
 
 def get_bounded_sem(on_unix: int=8, on_windows: int=2) -> asyncio.Semaphore:
     """
@@ -263,7 +285,283 @@ def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Gen
             create_page_request = CreatePageRequest(
                 width=1080, height=1920, filename=page_filename, image_format='PNG', text=page_text
             )
-            create_page_requests.append(create_page_request)        
+            create_page_requests.append(create_page_request)
         requests.append(WriteArchiveRequest(create_page_requests=create_page_requests, save_path=save_path, archival_strategy=ArchivalStrategyEnum.ZIP))
     responses = write_archives_to_disk(requests)
     return responses
+
+
+def create_archive_file(tmpdir: Path, name: str, num_pages: int) -> Path:
+    """Create a single archive with the specified number of pages."""
+    filename = f"{name}.zip"
+    save_path = tmpdir / filename
+
+    create_page_requests = []
+    for page_id in range(num_pages):
+        page_text = f"{name}-pg-{str(page_id + 1).zfill(len(str(num_pages)))}"
+        page_filename = f"{page_text}.png"
+        create_page_requests.append(CreatePageRequest(
+            width=100, height=100, filename=page_filename, image_format='PNG', text=page_text
+        ))
+
+    request = WriteArchiveRequest(
+        create_page_requests=create_page_requests,
+        save_path=save_path,
+        archival_strategy=ArchivalStrategyEnum.ZIP
+    )
+    responses = write_archives_to_disk([request])
+    assert responses[0].save_path == save_path
+    return save_path
+
+async def retry_on_lock(
+    operation_func: Callable[[], Awaitable[Tuple[ResponseT, LanraragiErrorResponse]]],
+    max_retries: int = 10
+) -> Tuple[ResponseT, LanraragiErrorResponse]:
+    """
+    Wrapper function that retries an operation if it encounters a 423 locked resource error.
+    """
+    retry_count = 0
+    while True:
+        response, error = await operation_func()
+        if error and error.status == 423:
+            retry_count += 1
+            if retry_count > max_retries:
+                return response, error
+            await asyncio.sleep(2 ** retry_count)
+            continue
+        return response, error
+
+
+async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[DeleteArchiveResponse, LanraragiErrorResponse]:
+    """Delete an archive with retry logic for locked resources."""
+    retry_count = 0
+    async with semaphore:
+        while True:
+            response, error = await client.archive_api.delete_archive(DeleteArchiveRequest(arcid=arcid))
+            if error and error.status == 423:
+                retry_count += 1
+                if retry_count > 10:
+                    return response, error
+                tts = 2 ** retry_count
+                LOGGER.debug(f"[delete_archive][{arcid}] locked resource error; retrying in {tts}s.")
+                await asyncio.sleep(tts)
+                continue
+            return response, error
+
+
+async def add_archive_to_category(client: LRRClient, category_id: str, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[AddArchiveToCategoryResponse, LanraragiErrorResponse]:
+    """Add an archive to a category with retry logic for locked resources."""
+    retry_count = 0
+    async with semaphore:
+        while True:
+            response, error = await client.category_api.add_archive_to_category(AddArchiveToCategoryRequest(category_id=category_id, arcid=arcid))
+            if error and error.status == 423:
+                retry_count += 1
+                if retry_count > 10:
+                    return response, error
+                tts = 2 ** retry_count
+                LOGGER.debug(f"[add_archive_to_category][{category_id}][{arcid}] locked resource error; retrying in {tts}s.")
+                await asyncio.sleep(tts)
+                continue
+            return response, error
+
+
+async def remove_archive_from_category(client: LRRClient, category_id: str, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
+    """Remove an archive from a category with retry logic for locked resources."""
+    retry_count = 0
+    async with semaphore:
+        while True:
+            response, error = await client.category_api.remove_archive_from_category(RemoveArchiveFromCategoryRequest(category_id=category_id, arcid=arcid))
+            if error and error.status == 423:
+                retry_count += 1
+                if retry_count > 10:
+                    return response, error
+                tts = 2 ** retry_count
+                LOGGER.debug(f"[remove_archive_from_category][{category_id}][{arcid}] locked resource error; retrying in {tts}s.")
+                await asyncio.sleep(tts)
+                continue
+            return response, error
+
+
+async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
+    """Load pages from an archive (extracts and fetches first 3 pages)."""
+    async with semaphore:
+        response, error = await retry_on_lock(lambda: client.archive_api.extract_archive(ExtractArchiveRequest(arcid=arcid, force=False)))
+        if error:
+            return (None, error)
+
+        pages = response.pages
+        tasks = []
+        async def load_page(page_api: str):
+            url = client.build_url(page_api)
+            url_parsed = urlparse(url)
+            params = parse_qs(url_parsed.query)
+            url = url.split("?")[0]
+            try:
+                status, content = await client.download_file(url, client.headers, params=params)
+            except asyncio.TimeoutError:
+                timeout_msg = f"Request timed out after {client.client_session.timeout.total}s"
+                LOGGER.error(f"Failed to get page {page_api} (timeout): {timeout_msg}")
+                return (None, _build_err_response(timeout_msg, 500))
+            if status == 200:
+                return (content, None)
+            return (None, _build_err_response(content, status))
+        for page in pages[:3]:
+            tasks.append(asyncio.create_task(load_page(page)))
+        gathered: List[Tuple[bytes, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        for _, error in gathered:
+            if error:
+                return (None, error)
+        return (LanraragiResponse(), None)
+
+
+async def get_bookmark_category_detail(client: LRRClient, semaphore: asyncio.Semaphore) -> Tuple[GetCategoryResponse, LanraragiErrorResponse]:
+    """Get the bookmark category details."""
+    async with semaphore:
+        response, error = await client.category_api.get_bookmark_link()
+        assert not error, f"Failed to get bookmark link (status {error.status}): {error.error}"
+        category_id = response.category_id
+        response, error = await client.category_api.get_category(GetCategoryRequest(category_id=category_id))
+        assert not error, f"Failed to get category (status {error.status}): {error.error}"
+        return (response, error)
+
+
+async def xfail_catch_flakes_inner(
+    lrr_client: LRRClient,
+    semaphore: asyncio.Semaphore,
+    environment: AbstractLRRDeploymentContext,
+    num_archives: int = 10,
+    npgenerator: Optional[np.random.Generator] = None,
+) -> None:
+    """
+    Inner implementation for xfail flake-catching test cases.
+
+    THIS FUNCTION EXISTS SOLELY TO BE CALLED BY TEST CASES.
+
+    On Windows test environments (particularly in CI), the first test case in a module
+    that performs concurrent archive uploads often fails due to network flakes such as:
+    - Remote host connection closures
+    - Connection refused errors
+    - High client request pressure overwhelming an unprepared host
+
+    This function "warms up" the Windows test host by performing a lightweight archive
+    upload operation before the actual test cases run. The calling test case should be
+    decorated with:
+        @pytest.mark.skipif(sys.platform != "win32", reason="Cache priming required only for flaky Windows testing environments.")
+        @pytest.mark.asyncio
+        @pytest.mark.xfail
+
+    The xfail marker ensures that occasional failures in this warmup test are expected
+    and ignored, while still providing the cache-priming benefit for subsequent tests.
+
+    Args:
+        lrr_client:     The LANraragi client instance.
+        semaphore:      Semaphore for controlling concurrent operations.
+        environment:    The LRR deployment context.
+        num_archives:   Number of archives to upload for warmup (default: 10 for light warmup,
+                        use 100 for heavy warmup in tests with bulk uploads).
+        npgenerator:    Optional numpy random generator. If provided, uses save_archives() +
+                        upload_archives() for random archive generation. If None, uses
+                        create_archive_file() + upload_archive() for deterministic generation.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+
+    LOGGER.debug("Established connection with test LRR server.")
+    response, error = await lrr_client.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+    assert len(response.data) == 0, "Server contains archives!"
+    del response, error
+    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        LOGGER.debug(f"Creating {num_archives} archives to upload for warmup.")
+
+        if npgenerator is not None:
+            # Heavy warmup: use random archive generation
+            write_responses = save_archives(num_archives, tmpdir, npgenerator)
+            assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+            await upload_archives(write_responses, npgenerator, semaphore, lrr_client)
+        else:
+            # Light warmup: use deterministic archive generation
+            archive_specs = [
+                {"name": f"warmup_{i}", "title": f"Warmup Archive {i}", "tags": "warmup:test", "pages": 5}
+                for i in range(num_archives)
+            ]
+            for spec in archive_specs:
+                save_path = create_archive_file(tmpdir, spec["name"], spec["pages"])
+                await upload_archive(
+                    lrr_client, save_path, save_path.name, semaphore,
+                    title=spec["title"], tags=spec["tags"]
+                )
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # no error logs
+    expect_no_error_logs(environment)
+
+async def trigger_stat_rebuild(lrr_client: LRRClient, timeout_seconds: int = 60) -> None:
+    """
+    Trigger a stat hash rebuild and wait for completion.
+
+    This is required for certain index features that rely on stat indexes.
+
+    If state is failed, throws AssertionError.
+    """
+    status, content = await lrr_client.handle_request(
+        HTTPMethod.POST,
+        lrr_client.build_url("/api/minion/build_stat_hashes/queue"),
+        lrr_client.headers,
+        params={"args": "[]", "priority": "3"}
+    )
+    assert status == 200, f"Failed to queue build_stat_hashes: {content}"
+    build_stat_hashes_data = json.loads(content)
+    job_id = int(build_stat_hashes_data["job"])
+
+    start_time = time.time()
+    while True:
+        assert time.time() - start_time < timeout_seconds, f"build_stat_hashes timed out after {timeout_seconds}s"
+        response, error = await lrr_client.minion_api.get_minion_job_status(
+            GetMinionJobStatusRequest(job_id=job_id)
+        )
+        assert not error, f"Failed to get job status: {error.error}"
+        state = response.state.lower()
+        if state == "finished":
+            break
+        elif state == "failed":
+            raise AssertionError("build_stat_hashes job failed")
+        await asyncio.sleep(0.5)
+
+async def assert_browser_responses_ok(responses: List[playwright.async_api._generated.Response], lrr_client: LRRClient, logger: logging.Logger=LOGGER):
+    """
+    Assert that all responses captured during a Playwright browser session were normal. This means:
+
+    - Any LRR-side URL returned a 2xx, 3xx, or 401 (unauthenticated) status code.
+    """
+    lrr_hostname = urlparse(lrr_client.lrr_host).hostname
+    hostnames = {lrr_hostname} if lrr_hostname != '127.0.0.1' else {'127.0.0.1', 'localhost'}
+
+    for response in responses:
+        url = response.url
+        status = response.status
+
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+
+        # Check that all LRR requests were handled successfully.
+        # if non-LRR, then throw warning if not successful (e.g. Github API rate limits).
+        if hostname in hostnames:
+            logger.debug(f"Request {url} (status {status})")
+
+            if status < 400 or status == 401:
+                continue
+
+            # get the error message.
+            text = await response.text()
+            raise AssertionError(f"Status {status} with {response.request.method} {response.url}: {text}")
+        elif status >= 400:
+            logger.warning(f"Status {status} with {response.request.method} {response.url}")

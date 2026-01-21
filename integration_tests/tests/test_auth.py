@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import aiohttp
 import numpy as np
-from typing import Dict, Generator, List
+from typing import AsyncGenerator, Dict, Generator, List
 import playwright.async_api
 from pydantic import BaseModel, Field
 import pytest
@@ -64,7 +64,7 @@ def semaphore() -> Generator[asyncio.BoundedSemaphore, None, None]:
     yield get_bounded_sem(on_unix=2, on_windows=1) # reduced val (we're not testing concurrency/upload).
 
 @pytest_asyncio.fixture
-async def lrr_client(environment: AbstractLRRDeploymentContext) -> Generator[LRRClient, None, None]:
+async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerator[LRRClient, None]:
     """
     Provides a LRRClient for testing with proper async cleanup.
     """

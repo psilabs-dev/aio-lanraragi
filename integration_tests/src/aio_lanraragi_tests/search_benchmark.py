@@ -14,7 +14,6 @@ The LRR/Redis deployment will have port offset 2, with resource prefix "benchmar
 """
 
 import asyncio
-from http import HTTPMethod
 import json
 import logging
 import math
@@ -34,12 +33,11 @@ from aio_lanraragi_tests.archive_generation.metadata.zipf_utils import get_archi
 from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest, WriteArchiveResponse
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, compute_archive_id
 from aio_lanraragi_tests.exceptions import DeploymentException
-from aio_lanraragi_tests.helpers import upload_archive
+from aio_lanraragi_tests.helpers import trigger_stat_rebuild, upload_archive
 
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import GetArchiveMetadataRequest, UpdateArchiveMetadataRequest, UploadArchiveResponse
 from lanraragi.models.base import LanraragiErrorResponse
-from lanraragi.models.minion import GetMinionJobStatusRequest
 
 LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -394,48 +392,14 @@ async def upload(staging_dir: str):
         upload_time = time.time() - upload_start_time
         print(f"All archives uploaded after {upload_time:.2f}s; checking archive count...")
 
-        status, content = await lrr_client.handle_request(
-            HTTPMethod.POST,
-            lrr_client.build_url("/api/minion/build_stat_hashes/queue"),
-            lrr_client.headers,
-            data={
-                "args": "[]",
-                "priority": "3"
-            }
-        )
-        if status != 200:
-            print(f"Failed to queue build_stat_hashes: {content}")
-            sys.exit(1)
-        build_stat_hashes_data = json.loads(content)
-        job_id = int(build_stat_hashes_data["job"])
-
         print("Waiting for stat hashes to build...")
         start_time = time.time()
-        last_state: str = "unknown"
-        while True:
-            if time.time() - start_time > 600: # give 60 minutes.
-                print(f"Failed to finish build_stat_hashes after 60m (last state: {last_state})")
-                sys.exit()
-            response, error = await lrr_client.minion_api.get_minion_job_status(GetMinionJobStatusRequest(
-                job_id=job_id
-            ))
-            if error:
-                print(f"Failed to get job status: {error.error}")
-                sys.exit(1)
-            state = (response.state).lower()
-            last_state = state
-            if state == "finished":
-                break
-            elif state == "failed":
-                print("build_stat_hashes job failed.")
-                sys.exit(1)
-            elif state == "active" or state == "inactive":
-                await asyncio.sleep(1)
-            else:
-                print(f"Unknown build_stat_hashes state: {state}")
-                sys.exit(1)
-
-        print(f"build_stat_hashes finished after {time.time() - start_time}s.")
+        try:
+            await trigger_stat_rebuild(lrr_client, timeout_seconds=600)
+        except AssertionError as e:
+            print(f"build_stat_hashes failed: {e}")
+            sys.exit(1)
+        print(f"build_stat_hashes finished after {time.time() - start_time:.1f}s.")
         if not await require_upload(lrr_client, archives):
             print("Failed upload validation.")
             sys.exit(1)

@@ -67,9 +67,8 @@ def write_archives_to_disk(write_requests: List[WriteArchiveRequest]) -> List[Wr
     Write multiple archives to disk and return their responses with multiprocessing.
     """
     cpu_count = multiprocessing.cpu_count()
-    pool = multiprocessing.Pool(processes=cpu_count)
-    responses = pool.starmap(write_archive_to_disk, [(request,) for request in write_requests])
-    pool.close()
+    with multiprocessing.Pool(processes=cpu_count) as pool:
+        responses = pool.starmap(write_archive_to_disk, [(request,) for request in write_requests])
     return responses
 
 def create_comic(output: Union[str, Path], comic_id: str, width: int, height: int, num_pages: int, archival_strategy: ArchivalStrategyEnum=ArchivalStrategyEnum.ZIP) -> WriteArchiveResponse:
