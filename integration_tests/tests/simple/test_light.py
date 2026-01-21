@@ -13,11 +13,13 @@ import logging
 from pathlib import Path
 import sys
 import tempfile
+from typing import List
 
 import aiohttp
 import numpy as np
 import pytest
 import playwright.async_api
+import playwright.async_api._generated
 
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.category import (
@@ -32,6 +34,7 @@ from aio_lanraragi_tests.helpers import (
     expect_no_error_logs,
     save_archives,
     upload_archive,
+    assert_browser_responses_ok
 )
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.common import LRR_INDEX_TITLE
@@ -317,30 +320,42 @@ async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semap
     # >>>>> UI STAGE >>>>>
     async with playwright.async_api.async_playwright() as p:
         browser = await p.webkit.launch()
-        page = await browser.new_page()
-        await page.goto(lrr_client.lrr_base_url)
-        await page.wait_for_load_state("networkidle")
-        assert await page.title() == LRR_INDEX_TITLE
 
-        # enter admin portal
-        # exit overlay
-        if "New Version Release Notes" in await page.content():
-            LOGGER.info("Closing new releases overlay.")
-            await page.keyboard.press("Escape")
+        try:
+            page = await browser.new_page()
 
-        # click search bar
-        LOGGER.info("Applying search filter: \"tag-1\"...")
-        await page.get_by_role("combobox", name="Search Title, Artist, Series").click()
-        await page.get_by_role("combobox", name="Search Title, Artist, Series").fill("tag-1")
-        await page.get_by_role("button", name="Apply Filter").click()
+            # capture all network request responses
+            responses: List[playwright.async_api._generated.Response] = []
+            page.on("response", lambda response: responses.append(response))
 
-        LOGGER.info("Opening reader for \"Test Archive\"...")
-        await page.get_by_role("link", name="Test Archive").nth(1).click()
+            await page.goto(lrr_client.lrr_base_url)
+            await page.wait_for_load_state("networkidle")
+            assert await page.title() == LRR_INDEX_TITLE
 
-        LOGGER.info("Going back to index page and checking search bar...")
-        await page.get_by_role("link", name="").click()
-        await playwright.async_api.expect(
-            page.get_by_role("combobox", name="Search Title, Artist, Series")
-        ).to_have_value("tag-1")
-        await browser.close()
+            # enter admin portal
+            # exit overlay
+            if "New Version Release Notes" in await page.content():
+                LOGGER.info("Closing new releases overlay.")
+                await page.keyboard.press("Escape")
+
+            # click search bar
+            LOGGER.info("Applying search filter: \"tag-1\"...")
+            await page.get_by_role("combobox", name="Search Title, Artist, Series").click()
+            await page.get_by_role("combobox", name="Search Title, Artist, Series").fill("tag-1")
+            await page.get_by_role("button", name="Apply Filter").click()
+
+            LOGGER.info("Opening reader for \"Test Archive\"...")
+            await page.get_by_role("link", name="Test Archive").nth(1).click()
+
+            LOGGER.info("Going back to index page and checking search bar...")
+            await page.get_by_role("link", name="").click()
+            await playwright.async_api.expect(
+                page.get_by_role("combobox", name="Search Title, Artist, Series")
+            ).to_have_value("tag-1")
+
+            # check browser responses were OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+
+        finally:
+            await browser.close()
     # <<<<< UI STAGE <<<<<

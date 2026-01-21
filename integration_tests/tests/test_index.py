@@ -10,11 +10,12 @@ import asyncio
 import logging
 from pathlib import Path
 import tempfile
-from typing import AsyncGenerator, Dict, Generator
+from typing import AsyncGenerator, Dict, Generator, List
 
 import pytest
 import pytest_asyncio
 import playwright.async_api
+import playwright.async_api._generated
 
 from lanraragi.clients.client import LRRClient
 
@@ -27,6 +28,7 @@ from aio_lanraragi_tests.helpers import (
 )
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.helpers import assert_browser_responses_ok
 
 LOGGER = logging.getLogger(__name__)
 
@@ -64,6 +66,34 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerato
         yield client
     finally:
         await client.close()
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+async def test_index_page(lrr_client: LRRClient):
+    """
+    Test that the index page doesn't throw errors.
+    """
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+
+        try:
+            page = await browser.new_page()
+
+            # capture all network request responses
+            responses: List[playwright.async_api._generated.Response] = []
+            page.on("response", lambda response: responses.append(response))
+
+            await page.goto(lrr_client.lrr_base_url)
+            await page.wait_for_load_state('domcontentloaded')
+            await page.wait_for_load_state('networkidle')
+
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+
+            # check browser responses were OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+        finally:
+            await browser.close()
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -122,99 +152,108 @@ async def test_custom_column_sort_display(
     # >>>>> UI STAGE >>>>>
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
-        page = await browser.new_page()
 
-        await page.goto(lrr_client.lrr_base_url, timeout=60000)
-        await page.wait_for_load_state("domcontentloaded")
+        try:
+            page = await browser.new_page()
 
-        # Dismiss any popups (new version release notes)
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
+            # capture all network request responses
+            responses: List[playwright.async_api._generated.Response] = []
+            page.on("response", lambda response: responses.append(response))
 
-        # Wait for DataTable to initialize
-        await asyncio.sleep(2)
+            await page.goto(lrr_client.lrr_base_url, timeout=60000)
+            await page.wait_for_load_state("domcontentloaded")
 
-        # Configure custom columns via localStorage
-        await page.evaluate("""() => {
-            localStorage.setItem('columnCount', '2');
-            localStorage.setItem('customColumn1', 'artist');
-            localStorage.setItem('customColumn2', 'series');
-        }""")
+            # Dismiss any popups (new version release notes)
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
 
-        # Reload page to apply localStorage settings
-        await page.reload()
-        await page.wait_for_load_state("domcontentloaded")
+            # Wait for DataTable to initialize
+            await asyncio.sleep(2)
 
-        # Dismiss popup again if it appears
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
+            # Configure custom columns via localStorage
+            await page.evaluate("""() => {
+                localStorage.setItem('columnCount', '2');
+                localStorage.setItem('customColumn1', 'artist');
+                localStorage.setItem('customColumn2', 'series');
+            }""")
 
-        # Wait for DataTable to reinitialize
-        await asyncio.sleep(2)
+            # Reload page to apply localStorage settings
+            await page.reload()
+            await page.wait_for_load_state("domcontentloaded")
 
-        # Switch to compact/table mode to see column headers
-        compact_toggle = page.locator(".thumbnail-toggle")
-        await compact_toggle.click()
-        await asyncio.sleep(1)
+            # Dismiss popup again if it appears
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
 
-        # Check that the artist column header exists
-        artist_header_link = page.locator("#header-1")
-        await artist_header_link.wait_for(state="visible", timeout=5000)
+            # Wait for DataTable to reinitialize
+            await asyncio.sleep(2)
 
-        # The <th> element that DataTables uses for sorting
-        artist_th = page.locator("#customheader1")
-        sort_dropdown = page.locator("#namespace-sortby")
+            # Switch to compact/table mode to see column headers
+            compact_toggle = page.locator(".thumbnail-toggle")
+            await compact_toggle.click()
+            await asyncio.sleep(1)
 
-        # Click on artist column to sort by it
-        await artist_th.click()
-        await asyncio.sleep(2)
+            # Check that the artist column header exists
+            artist_header_link = page.locator("#header-1")
+            await artist_header_link.wait_for(state="visible", timeout=5000)
 
-        # Get DataTable order and dropdown value after click
-        order_after = await page.evaluate("() => IndexTable.dataTable ? IndexTable.dataTable.order()[0] : null")
-        sort_value_after_click = await sort_dropdown.input_value()
+            # The <th> element that DataTables uses for sorting
+            artist_th = page.locator("#customheader1")
+            sort_dropdown = page.locator("#namespace-sortby")
 
-        # The bug in PR #1436: `$("#columnCount").value` returns undefined because jQuery
-        # objects don't have a .value property. This causes the condition to fail and
-        # the dropdown incorrectly shows "title" even when sorting by a custom column.
-        #
-        # Expected: dropdown does NOT show "title" when sorting by custom column
-        # Broken: dropdown shows "title" (the fallback value)
-        assert sort_value_after_click != "title", (
-            f"Sort dropdown should NOT show 'title' after clicking artist column header. "
-            f"Got '{sort_value_after_click}'. "
-            f"This indicates the jQuery .value bug where columnCount.value returns undefined."
-        )
+            # Click on artist column to sort by it
+            await artist_th.click()
+            await asyncio.sleep(2)
 
-        # Verify DataTable is actually sorted by the custom column
-        assert order_after[0] == 1, (
-            f"DataTable should be sorted by column 1 (artist). Got column {order_after[0]}."
-        )
+            # Get DataTable order and dropdown value after click
+            order_after = await page.evaluate("() => IndexTable.dataTable ? IndexTable.dataTable.order()[0] : null")
+            sort_value_after_click = await sort_dropdown.input_value()
 
-        # Verify series column (customColumn2) also works
-        series_th = page.locator("#customheader2")
-        await series_th.click()
-        await asyncio.sleep(2)
+            # The bug in PR #1436: `$("#columnCount").value` returns undefined because jQuery
+            # objects don't have a .value property. This causes the condition to fail and
+            # the dropdown incorrectly shows "title" even when sorting by a custom column.
+            #
+            # Expected: dropdown does NOT show "title" when sorting by custom column
+            # Broken: dropdown shows "title" (the fallback value)
+            assert sort_value_after_click != "title", (
+                f"Sort dropdown should NOT show 'title' after clicking artist column header. "
+                f"Got '{sort_value_after_click}'. "
+                f"This indicates the jQuery .value bug where columnCount.value returns undefined."
+            )
 
-        sort_value_series = await sort_dropdown.input_value()
-        assert sort_value_series != "title", (
-            f"Sort dropdown should NOT show 'title' after clicking series column. "
-            f"Got '{sort_value_series}'."
-        )
+            # Verify DataTable is actually sorted by the custom column
+            assert order_after[0] == 1, (
+                f"DataTable should be sorted by column 1 (artist). Got column {order_after[0]}."
+            )
 
-        # Verify title column sorting works correctly
-        title_header = page.locator("#titleheader")
-        await title_header.click()
-        await asyncio.sleep(2)
+            # Verify series column (customColumn2) also works
+            series_th = page.locator("#customheader2")
+            await series_th.click()
+            await asyncio.sleep(2)
 
-        sort_value_title = await sort_dropdown.input_value()
-        assert sort_value_title == "title", (
-            f"Sort dropdown should show 'title' after clicking title column. "
-            f"Got '{sort_value_title}'."
-        )
+            sort_value_series = await sort_dropdown.input_value()
+            assert sort_value_series != "title", (
+                f"Sort dropdown should NOT show 'title' after clicking series column. "
+                f"Got '{sort_value_series}'."
+            )
 
-        await browser.close()
+            # Verify title column sorting works correctly
+            title_header = page.locator("#titleheader")
+            await title_header.click()
+            await asyncio.sleep(2)
+
+            sort_value_title = await sort_dropdown.input_value()
+            assert sort_value_title == "title", (
+                f"Sort dropdown should show 'title' after clicking title column. "
+                f"Got '{sort_value_title}'."
+            )
+
+            # check browser responses were OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+        finally:
+            await browser.close()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment)

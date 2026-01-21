@@ -11,11 +11,12 @@ from collections import Counter
 from pathlib import Path
 import sys
 import tempfile
-from typing import AsyncGenerator, Dict, Generator
+from typing import AsyncGenerator, Dict, Generator, List, Literal
 
 import pytest
 import pytest_asyncio
 import playwright.async_api
+import playwright.async_api._generated
 
 from lanraragi.clients.client import LRRClient
 
@@ -24,6 +25,7 @@ from aio_lanraragi_tests.helpers import (
     expect_no_error_logs,
     get_bounded_sem,
     upload_archive,
+    assert_browser_responses_ok
 )
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
@@ -70,7 +72,7 @@ async def _run_preload_duplicate_fetch_test(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
     environment: AbstractLRRDeploymentContext,
-    browser_name: str,
+    browser_name: Literal['webkit', 'chromium'],
 ) -> dict:
     """
     Core test logic for verifying preloaded images are not re-fetched.
@@ -99,32 +101,47 @@ async def _run_preload_duplicate_fetch_test(
 
     # >>>>> UI STAGE >>>>>
     async with playwright.async_api.async_playwright() as p:
-        browser_type = getattr(p, browser_name)
-        browser = await browser_type.launch()
-        page = await browser.new_page()
 
-        page_get_requests: list[str] = []
+        match browser_name:
+            case 'webkit':
+                browser = await p.webkit.launch()
+            case 'chromium':
+                browser = await p.chromium.launch()
+            case _:
+                raise AssertionError(f"Unsupported browser type: {browser_name}")
 
-        def on_request(request: playwright.async_api.Request):
-            url = request.url
-            if request.method == "GET" and "/api/archives/" in url and "/page" in url:
-                page_get_requests.append(url)
+        try:
+            page = await browser.new_page()
 
-        page.on("request", on_request)
+            # capture all network request responses
+            responses: List[playwright.async_api._generated.Response] = []
+            page.on("response", lambda response: responses.append(response))
 
-        reader_url = f"{lrr_client.lrr_base_url}/reader?id={archive_id}"
-        await page.goto(reader_url, timeout=60000)
-        await page.wait_for_load_state("domcontentloaded")
+            page_get_requests: list[str] = []
 
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
+            def on_request(request: playwright.async_api.Request):
+                url = request.url
+                if request.method == "GET" and "/api/archives/" in url and "/page" in url:
+                    page_get_requests.append(url)
 
-        await asyncio.sleep(1)
-        await page.keyboard.press("ArrowRight")
-        await asyncio.sleep(3)
+            page.on("request", on_request)
 
-        await browser.close()
+            reader_url = f"{lrr_client.lrr_base_url}/reader?id={archive_id}"
+            await page.goto(reader_url, timeout=60000)
+            await page.wait_for_load_state("domcontentloaded")
+
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
+
+            await asyncio.sleep(1)
+            await page.keyboard.press("ArrowRight")
+            await asyncio.sleep(3)
+
+            # check browser responses were OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+        finally:
+            await browser.close()
     # <<<<< UI STAGE <<<<<
 
     # >>>>> VALIDATION >>>>>
@@ -225,118 +242,127 @@ async def test_reader_page_navigation_updates_counter(
     # >>>>> UI STAGE >>>>>
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
-        page = await browser.new_page()
 
-        reader_url = f"{lrr_client.lrr_base_url}/reader?id={archive_id}"
-        await page.goto(reader_url, timeout=60000)
-        await page.wait_for_load_state("domcontentloaded")
+        try:
+            page = await browser.new_page()
 
-        # Dismiss any popups
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
+            # capture all network request responses
+            responses: List[playwright.async_api._generated.Response] = []
+            page.on("response", lambda response: responses.append(response))
 
-        # Wait for initial image to load
-        await asyncio.sleep(2)
+            reader_url = f"{lrr_client.lrr_base_url}/reader?id={archive_id}"
+            await page.goto(reader_url, timeout=60000)
+            await page.wait_for_load_state("domcontentloaded")
 
-        # Get initial state
-        img_element = page.locator("#img")
-        initial_src = await img_element.get_attribute("src")
+            # Dismiss any popups
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
 
-        # Get page counter values (current-page and max-page are separate spans)
-        current_page_elem = page.locator(".current-page").first
-        max_page_elem = page.locator(".max-page").first
-        initial_current = await current_page_elem.text_content()
-        initial_max = await max_page_elem.text_content()
+            # Wait for initial image to load
+            await asyncio.sleep(2)
 
-        LOGGER.debug(f"Initial page counter: current='{initial_current}', max='{initial_max}'")
-        LOGGER.debug(f"Initial image src: '{initial_src}'")
+            # Get initial state
+            img_element = page.locator("#img")
+            initial_src = await img_element.get_attribute("src")
 
-        # Verify initial image has a valid src (not empty, not undefined)
-        assert initial_src, "Initial image src should not be empty"
-        assert initial_src != "undefined", "Initial image src should not be 'undefined'"
-        assert len(initial_src) > 10, f"Initial image src seems invalid: {initial_src}"
+            # Get page counter values (current-page and max-page are separate spans)
+            current_page_elem = page.locator(".current-page").first
+            max_page_elem = page.locator(".max-page").first
+            initial_current = await current_page_elem.text_content()
+            initial_max = await max_page_elem.text_content()
 
-        # Verify initial counter shows page 1 of num_pages exactly
-        assert initial_current == "1", (
-            f"Initial current page should be '1', got: '{initial_current}'"
-        )
-        assert initial_max == str(num_pages), (
-            f"Initial max page should be '{num_pages}', got: '{initial_max}'"
-        )
+            LOGGER.debug(f"Initial page counter: current='{initial_current}', max='{initial_max}'")
+            LOGGER.debug(f"Initial image src: '{initial_src}'")
 
-        # Navigate to next page
-        await page.keyboard.press("ArrowRight")
-        await asyncio.sleep(2)
+            # Verify initial image has a valid src (not empty, not undefined)
+            assert initial_src, "Initial image src should not be empty"
+            assert initial_src != "undefined", "Initial image src should not be 'undefined'"
+            assert len(initial_src) > 10, f"Initial image src seems invalid: {initial_src}"
 
-        # Get state after navigation
-        new_src = await img_element.get_attribute("src")
-        new_current = await current_page_elem.text_content()
-        new_max = await max_page_elem.text_content()
+            # Verify initial counter shows page 1 of num_pages exactly
+            assert initial_current == "1", (
+                f"Initial current page should be '1', got: '{initial_current}'"
+            )
+            assert initial_max == str(num_pages), (
+                f"Initial max page should be '{num_pages}', got: '{initial_max}'"
+            )
 
-        LOGGER.debug(f"After navigation page counter: current='{new_current}', max='{new_max}'")
-        LOGGER.debug(f"After navigation image src: '{new_src}'")
+            # Navigate to next page
+            await page.keyboard.press("ArrowRight")
+            await asyncio.sleep(2)
 
-        # Verify image src changed
-        assert new_src != initial_src, (
-            f"Image src should change after navigation. "
-            f"Initial: {initial_src}, After: {new_src}"
-        )
+            # Get state after navigation
+            new_src = await img_element.get_attribute("src")
+            new_current = await current_page_elem.text_content()
+            new_max = await max_page_elem.text_content()
 
-        # Verify page counter updated to page 2 of num_pages exactly
-        assert new_current == "2", (
-            f"Current page should be '2' after navigation, got: '{new_current}'"
-        )
-        assert new_max == str(num_pages), (
-            f"Max page should still be '{num_pages}' after navigation, got: '{new_max}'"
-        )
+            LOGGER.debug(f"After navigation page counter: current='{new_current}', max='{new_max}'")
+            LOGGER.debug(f"After navigation image src: '{new_src}'")
 
-        # Store page 2 src for later comparison
-        page2_src = new_src
+            # Verify image src changed
+            assert new_src != initial_src, (
+                f"Image src should change after navigation. "
+                f"Initial: {initial_src}, After: {new_src}"
+            )
 
-        # Navigate right again (page 2 -> page 3)
-        await page.keyboard.press("ArrowRight")
-        await asyncio.sleep(2)
+            # Verify page counter updated to page 2 of num_pages exactly
+            assert new_current == "2", (
+                f"Current page should be '2' after navigation, got: '{new_current}'"
+            )
+            assert new_max == str(num_pages), (
+                f"Max page should still be '{num_pages}' after navigation, got: '{new_max}'"
+            )
 
-        page3_src = await img_element.get_attribute("src")
-        page3_current = await current_page_elem.text_content()
-        page3_max = await max_page_elem.text_content()
+            # Store page 2 src for later comparison
+            page2_src = new_src
 
-        LOGGER.debug(f"After second right: current='{page3_current}', max='{page3_max}'")
-        LOGGER.debug(f"After second right image src: '{page3_src}'")
+            # Navigate right again (page 2 -> page 3)
+            await page.keyboard.press("ArrowRight")
+            await asyncio.sleep(2)
 
-        assert page3_current == "3", (
-            f"Current page should be '3' after second right, got: '{page3_current}'"
-        )
-        assert page3_max == str(num_pages), (
-            f"Max page should still be '{num_pages}', got: '{page3_max}'"
-        )
-        assert page3_src != page2_src, (
-            f"Image src should change from page 2 to 3. Page2: {page2_src}, Page3: {page3_src}"
-        )
+            page3_src = await img_element.get_attribute("src")
+            page3_current = await current_page_elem.text_content()
+            page3_max = await max_page_elem.text_content()
 
-        # Navigate left (page 3 -> page 2)
-        await page.keyboard.press("ArrowLeft")
-        await asyncio.sleep(2)
+            LOGGER.debug(f"After second right: current='{page3_current}', max='{page3_max}'")
+            LOGGER.debug(f"After second right image src: '{page3_src}'")
 
-        back_src = await img_element.get_attribute("src")
-        back_current = await current_page_elem.text_content()
-        back_max = await max_page_elem.text_content()
+            assert page3_current == "3", (
+                f"Current page should be '3' after second right, got: '{page3_current}'"
+            )
+            assert page3_max == str(num_pages), (
+                f"Max page should still be '{num_pages}', got: '{page3_max}'"
+            )
+            assert page3_src != page2_src, (
+                f"Image src should change from page 2 to 3. Page2: {page2_src}, Page3: {page3_src}"
+            )
 
-        LOGGER.debug(f"After left navigation: current='{back_current}', max='{back_max}'")
-        LOGGER.debug(f"After left navigation image src: '{back_src}'")
+            # Navigate left (page 3 -> page 2)
+            await page.keyboard.press("ArrowLeft")
+            await asyncio.sleep(2)
 
-        assert back_current == "2", (
-            f"Current page should be '2' after left navigation, got: '{back_current}'"
-        )
-        assert back_max == str(num_pages), (
-            f"Max page should still be '{num_pages}', got: '{back_max}'"
-        )
-        assert back_src == page2_src, (
-            f"Image src should return to page 2 src. Expected: {page2_src}, Got: {back_src}"
-        )
+            back_src = await img_element.get_attribute("src")
+            back_current = await current_page_elem.text_content()
+            back_max = await max_page_elem.text_content()
 
-        await browser.close()
+            LOGGER.debug(f"After left navigation: current='{back_current}', max='{back_max}'")
+            LOGGER.debug(f"After left navigation image src: '{back_src}'")
+
+            assert back_current == "2", (
+                f"Current page should be '2' after left navigation, got: '{back_current}'"
+            )
+            assert back_max == str(num_pages), (
+                f"Max page should still be '{num_pages}', got: '{back_max}'"
+            )
+            assert back_src == page2_src, (
+                f"Image src should return to page 2 src. Expected: {page2_src}, Got: {back_src}"
+            )
+
+            # check browser responses were OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+        finally:
+            await browser.close()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment)

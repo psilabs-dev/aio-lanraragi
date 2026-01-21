@@ -7,11 +7,12 @@ import logging
 from pathlib import Path
 import sys
 import tempfile
-from typing import AsyncGenerator, Dict, Generator
+from typing import AsyncGenerator, Dict, Generator, List
 
 import pytest
 import pytest_asyncio
 import playwright.async_api
+import playwright.async_api._generated
 
 from lanraragi.clients.client import LRRClient
 
@@ -20,6 +21,7 @@ from aio_lanraragi_tests.helpers import (
     expect_no_error_logs,
     get_bounded_sem,
     upload_archive,
+    assert_browser_responses_ok
 )
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
@@ -99,71 +101,80 @@ async def test_edit_paste_prepends_pending_text_to_first_tag(
     # >>>>> UI STAGE >>>>>
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
-        context = await browser.new_context()
-        await context.grant_permissions(["clipboard-read", "clipboard-write"])
-        page = await context.new_page()
 
-        # Login (Edit page requires authentication)
-        login_url = f"{lrr_client.lrr_base_url}/login"
-        await page.goto(login_url, timeout=60000)
-        await page.wait_for_load_state("domcontentloaded")
+        try:
+            context = await browser.new_context()
+            await context.grant_permissions(["clipboard-read", "clipboard-write"])
+            page = await context.new_page()
 
-        password_input = page.locator("#pw_field")
-        await password_input.fill("kamimamita")
-        await page.keyboard.press("Enter")
-        await page.wait_for_load_state("networkidle")
+            # capture all network request responses
+            responses: List[playwright.async_api._generated.Response] = []
+            page.on("response", lambda response: responses.append(response))
 
-        # Navigate to Edit page
-        edit_url = f"{lrr_client.lrr_base_url}/edit?id={archive_id}"
-        await page.goto(edit_url, timeout=60000)
-        await page.wait_for_load_state("domcontentloaded")
+            # Login (Edit page requires authentication)
+            login_url = f"{lrr_client.lrr_base_url}/login"
+            await page.goto(login_url, timeout=60000)
+            await page.wait_for_load_state("domcontentloaded")
 
-        # Dismiss any popups
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
+            password_input = page.locator("#pw_field")
+            await password_input.fill("kamimamita")
+            await page.keyboard.press("Enter")
+            await page.wait_for_load_state("networkidle")
 
-        # Wait for tagger to initialize
-        await page.wait_for_function("Edit.tagInput !== null", timeout=10000)
+            # Navigate to Edit page
+            edit_url = f"{lrr_client.lrr_base_url}/edit?id={archive_id}"
+            await page.goto(edit_url, timeout=60000)
+            await page.wait_for_load_state("domcontentloaded")
 
-        tagger_new = page.locator(".tagger-new")
-        if await tagger_new.count() == 0:
-            pytest.skip("Tagger library not initialized. The handlePaste bug only applies when tagger is active.")
+            # Dismiss any popups
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
 
-        # Focus and type partial text
-        await tagger_new.click()
-        tagger_input = page.locator(".tagger-new input")
-        await tagger_input.wait_for(state="visible", timeout=5000)
-        await tagger_input.type("art", delay=50)
+            # Wait for tagger to initialize
+            await page.wait_for_function("Edit.tagInput !== null", timeout=10000)
 
-        input_value = await tagger_input.input_value()
-        assert input_value == "art", f"Expected 'art' before paste, got '{input_value}'"
+            tagger_new = page.locator(".tagger-new")
+            if await tagger_new.count() == 0:
+                pytest.skip("Tagger library not initialized. The handlePaste bug only applies when tagger is active.")
 
-        # Paste using native clipboard API
-        await page.evaluate("navigator.clipboard.writeText('ist:name')")
-        modifier = "Meta" if sys.platform == "darwin" else "Control"
-        await page.keyboard.press(f"{modifier}+v")
-        await asyncio.sleep(0.5)
+            # Focus and type partial text
+            await tagger_new.click()
+            tagger_input = page.locator(".tagger-new input")
+            await tagger_input.wait_for(state="visible", timeout=5000)
+            await tagger_input.type("art", delay=50)
 
-        # Get resulting tags using locators
-        tag_labels = page.locator(".tagger.wrap ul li:not(.tagger-new) .label")
-        tag_count = await tag_labels.count()
-        tag_texts = []
-        for i in range(tag_count):
-            text = await tag_labels.nth(i).text_content()
-            if text and not text.startswith("date_added:"):
-                tag_texts.append(text)
+            input_value = await tagger_input.input_value()
+            assert input_value == "art", f"Expected 'art' before paste, got '{input_value}'"
 
-        LOGGER.debug(f"Tags after paste: {tag_texts}")
+            # Paste using native clipboard API
+            await page.evaluate("navigator.clipboard.writeText('ist:name')")
+            modifier = "Meta" if sys.platform == "darwin" else "Control"
+            await page.keyboard.press(f"{modifier}+v")
+            await asyncio.sleep(0.5)
 
-        expected_tags = {"artist:name"}
-        actual_tags = set(tag_texts)
-        assert actual_tags == expected_tags, (
-            f"Expected exactly {expected_tags} after typing 'art' and pasting 'ist:name'. "
-            f"Got {actual_tags}."
-        )
+            # Get resulting tags using locators
+            tag_labels = page.locator(".tagger.wrap ul li:not(.tagger-new) .label")
+            tag_count = await tag_labels.count()
+            tag_texts = []
+            for i in range(tag_count):
+                text = await tag_labels.nth(i).text_content()
+                if text and not text.startswith("date_added:"):
+                    tag_texts.append(text)
 
-        await browser.close()
+            LOGGER.debug(f"Tags after paste: {tag_texts}")
+
+            expected_tags = {"artist:name"}
+            actual_tags = set(tag_texts)
+            assert actual_tags == expected_tags, (
+                f"Expected exactly {expected_tags} after typing 'art' and pasting 'ist:name'. "
+                f"Got {actual_tags}."
+            )
+
+            # check browser responses were OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+        finally:
+            await browser.close()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment)
