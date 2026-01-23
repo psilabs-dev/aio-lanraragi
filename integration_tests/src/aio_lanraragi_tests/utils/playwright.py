@@ -36,3 +36,11 @@ async def assert_browser_responses_ok(responses: List[playwright.async_api._gene
             raise AssertionError(f"Status {status} with {response.request.method} {response.url}: {text}")
         elif status >= 400:
             logger.warning(f"Status {status} with {response.request.method} {response.url}")
+
+async def assert_console_logs_ok(console_evts: List[playwright.async_api._generated.ConsoleMessage]):
+    """
+    Assert that all console logs captured during a Playwright browser session were not errors.
+    """
+
+    for evt in console_evts:
+        assert evt.type != "error", f"Console logged at error level: {evt.text}"

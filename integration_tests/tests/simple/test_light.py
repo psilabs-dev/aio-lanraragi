@@ -27,7 +27,7 @@ from lanraragi.models.category import (
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext, expect_no_error_logs
 from aio_lanraragi_tests.common import LRR_INDEX_TITLE
 from aio_lanraragi_tests.utils.api_wrappers import save_archives, upload_archive
-from aio_lanraragi_tests.utils.playwright import assert_browser_responses_ok
+from aio_lanraragi_tests.utils.playwright import assert_browser_responses_ok, assert_console_logs_ok
 
 LOGGER = logging.getLogger(__name__)
 
@@ -309,9 +309,11 @@ async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semap
         try:
             page = await browser.new_page()
 
-            # capture all network request responses
+            # capture all network and console traffic
             responses: List[playwright.async_api._generated.Response] = []
+            console_evts: List[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("networkidle")
@@ -338,8 +340,9 @@ async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semap
                 page.get_by_role("combobox", name="Search Title, Artist, Series")
             ).to_have_value("tag-1")
 
-            # check browser responses were OK.
+            # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts)
         finally:
             await bc.close()
             await browser.close()
