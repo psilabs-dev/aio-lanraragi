@@ -8,7 +8,7 @@ import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 # constants
 DEFAULT_REDIS_TAG = "redis:7.2.4"
@@ -21,7 +21,7 @@ def pytest_addoption(parser: pytest.Parser):
     New containers/networks will be created on each session. If an exception or invalid
     event occurred, an attempt will be made to clean up all test objects.
 
-    If running on a Windows machine, the `--windows-runfile` flag must be provided.
+    If running on a Windows machine, the `--windist` path must be provided.
 
     Parameters
     ----------
@@ -112,7 +112,7 @@ def pytest_sessionstart(session: pytest.Session):
     config.global_run_id = int(time.time() * 1000)
     global_run_id = config.global_run_id
     npseed: int = config.getoption("--npseed")
-    logger.info(
+    LOGGER.info(
         f"pytest run parameters: global_run_id={global_run_id}, npseed={npseed}"
     )
 
@@ -121,7 +121,7 @@ def pytest_sessionstart(session: pytest.Session):
     system = platform.system()
     version = platform.version()
     machine = platform.machine()
-    logger.info(
+    LOGGER.info(
         f"system_profile: system={system} version={version} machine={machine} "
         f"cpu_count={cpu_count} total_mem_gb={mem.total / (1024 ** 3):.2f} "
         f"avail_mem_gb={mem.available / (1024 ** 3):.2f}"
@@ -139,26 +139,26 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
     report: pytest.TestReport = outcome.get_result()
     if report.when == "call" and report.failed:
         if excinfo := call.excinfo:
-            logger.error(f"Test threw {excinfo.typename} with message \"{excinfo.value}\": dumping logs... ({item.nodeid})")
+            LOGGER.error(f"Test threw {excinfo.typename} with message \"{excinfo.value}\": dumping logs... ({item.nodeid})")
         else:
-            logger.error(f"Test failed: dumping logs... ({item.nodeid})")
+            LOGGER.error(f"Test failed: dumping logs... ({item.nodeid})")
         try:
             if hasattr(item.session, 'lrr_environments') and item.session.lrr_environments:
                 environments_by_prefix: Dict[str, AbstractLRRDeploymentContext] = item.session.lrr_environments
                 for prefix, environment in environments_by_prefix.items():
-                    logger.error(f">>>>> LRR LOGS (prefix: \"{prefix}\") >>>>>")
+                    LOGGER.error(f">>>>> LRR LOGS (prefix: \"{prefix}\") >>>>>")
                     lrr_logs = environment.read_lrr_logs()
                     lines = lrr_logs.split('\n')[-100:]
                     for line in lines:
-                        logger.error(line)
-                    logger.error(f"<<<<< LRR LOGS (prefix: \"{prefix}\") <<<<<")
-                    logger.error(f">>>>> SHINOBU LOGS (prefix: \"{prefix}\") >>>>>")
+                        LOGGER.error(line)
+                    LOGGER.error(f"<<<<< LRR LOGS (prefix: \"{prefix}\") <<<<<")
+                    LOGGER.error(f">>>>> SHINOBU LOGS (prefix: \"{prefix}\") >>>>>")
                     shinobu_logs = environment.read_log(environment.shinobu_logs_path)
                     lines = shinobu_logs.split('\n')[-100:]
                     for line in lines:
-                        logger.error(line)
-                    logger.error(f"<<<<< SHINOBU LOGS (prefix: \"{prefix}\") <<<<<")
+                        LOGGER.error(line)
+                    LOGGER.error(f"<<<<< SHINOBU LOGS (prefix: \"{prefix}\") <<<<<")
             else:
-                logger.info("No environment available.")
+                LOGGER.info("No environment available.")
         except Exception as e:
-            logger.error(f"Failed to dump failure info: {e}")
+            LOGGER.error(f"Failed to dump failure info: {e}")

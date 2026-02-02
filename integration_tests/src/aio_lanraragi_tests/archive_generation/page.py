@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 from aio_lanraragi_tests.archive_generation.models import LIGHT_GRAY, CreatePageRequest, CreatePageResponse, CreatePageResponseStatus, Page
 from aio_lanraragi_tests.archive_generation.utils import get_roberta_regular_font
 
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 def close_page(page: Page):
     if isinstance(page.image, Image.Image):
@@ -53,7 +53,7 @@ def create_page(request: CreatePageRequest) -> CreatePageResponse:
         __write_text_to_page(page)
         return CreatePageResponse(page=page, status=CreatePageResponseStatus.SUCCESS)
     except Exception as e:
-        logger.exception(f"Failed to create page from request: {str(request.__dict__)}")
+        LOGGER.exception(f"Failed to create page from request: {str(request.__dict__)}")
         return CreatePageResponse(page=None, status=CreatePageResponseStatus.FAILURE, error=str(e))
 
 @overload

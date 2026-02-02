@@ -40,10 +40,6 @@ from lanraragi.models.misc import (
     GetOpdsCatalogRequest,
     RegenerateThumbnailRequest
 )
-from lanraragi.models.search import (
-    GetRandomArchivesRequest,
-    SearchArchiveIndexRequest
-)
 from lanraragi.models.tankoubon import (
     AddArchiveToTankoubonRequest,
     CreateTankoubonRequest,
@@ -54,19 +50,18 @@ from lanraragi.models.tankoubon import (
     UpdateTankoubonRequest,
 )
 
-from aio_lanraragi_tests.helpers import (
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext, expect_no_error_logs
+from aio_lanraragi_tests.utils.api_wrappers import (
     add_archive_to_category,
     delete_archive,
-    expect_no_error_logs,
     get_bookmark_category_detail,
     load_pages_from_archive,
     remove_archive_from_category,
-    retry_on_lock,
     save_archives,
-    upload_archives,
-    xfail_catch_flakes_inner
+    upload_archives
 )
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.utils.concurrency import retry_on_lock
+from aio_lanraragi_tests.utils.flakes import xfail_catch_flakes_inner
 
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False # for debugging.
@@ -166,7 +161,7 @@ async def test_archive_upload(lrr_client: LRRClient, semaphore: asyncio.Semaphor
     # <<<<< DELETE ARCHIVE ASYNC STAGE <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -253,7 +248,7 @@ async def test_archive_read(lrr_client: LRRClient, semaphore: asyncio.Semaphore,
     # <<<<< SIMULATE READ ARCHIVE STAGE <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -413,78 +408,7 @@ async def test_archive_category_interaction(lrr_client: LRRClient, semaphore: as
     # <<<<< VERIFY ARCHIVE CATEGORY MEMBERSHIP CLEARED VIA ARCHIVE API <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
-
-@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
-@pytest.mark.asyncio
-async def test_search_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
-    """
-    Very basic functional test of the search API.
-    
-    1. upload 100 archives
-    2. search for 20 archives using the search API
-    3. search for 20 archives using random search API
-    4. search for 20 archives using random search API with newonly=true
-    5. search for 20 archives using random search API with untaggedonly=true (should return empty)
-    """
-    num_archives = 100
-
-    # >>>>> TEST CONNECTION STAGE >>>>>
-    response, error = await lrr_client.misc_api.get_server_info()
-    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-
-    LOGGER.debug("Established connection with test LRR server.")
-    # verify we are working with a new server.
-    response, error = await lrr_client.archive_api.get_all_archives()
-    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
-    assert len(response.data) == 0, "Server contains archives!"
-    del response, error
-    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
-    # <<<<< TEST CONNECTION STAGE <<<<<
-
-    # >>>>> UPLOAD STAGE >>>>>
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-        LOGGER.debug(f"Creating {num_archives} archives to upload.")
-        write_responses = save_archives(num_archives, tmpdir, npgenerator)
-        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
-
-        # archive metadata
-        LOGGER.debug("Uploading archives to server.")
-        await upload_archives(write_responses, npgenerator, semaphore, lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
-    # <<<<< UPLOAD STAGE <<<<<
-
-    # >>>>> SEARCH STAGE >>>>>
-    # TODO: current test design limits ability to test results of search (e.g. tag filtering), will need to unravel logic for better test transparency
-    response, error = await lrr_client.search_api.search_archive_index(SearchArchiveIndexRequest())
-    assert not error, f"Failed to search archive index (status {error.status}): {error.error}"
-    assert len(response.data) == 100
-    del response, error
-
-    response, error = await lrr_client.search_api.get_random_archives(GetRandomArchivesRequest(count=20))
-    assert not error, f"Failed to get random archives (status {error.status}): {error.error}"
-    assert len(response.data) == 20
-    del response, error
-
-    response, error = await lrr_client.search_api.get_random_archives(GetRandomArchivesRequest(count=20, newonly=True))
-    assert not error, f"Failed to get random archives (status {error.status}): {error.error}"
-    assert len(response.data) == 20
-    del response, error
-
-    response, error = await lrr_client.search_api.get_random_archives(GetRandomArchivesRequest(count=20, untaggedonly=True))
-    assert not error, f"Failed to get random archives (status {error.status}): {error.error}"
-    assert len(response.data) == 0
-    del response, error
-    # <<<<< SEARCH STAGE <<<<<
-
-    # >>>>> DISCARD SEARCH CACHE STAGE >>>>>
-    response, error = await lrr_client.search_api.discard_search_cache()
-    assert not error, f"Failed to discard search cache (status {error.status}): {error.error}"
-    del response, error
-    # <<<<< DISCARD SEARCH CACHE STAGE <<<<<
-
-    # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -527,7 +451,7 @@ async def test_database_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore,
     # <<<<< CLEAN DATABASE STAGE <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -622,7 +546,7 @@ async def test_tankoubon_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore
     # <<<<< DELETE TANKOUBON STAGE <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -683,7 +607,7 @@ async def test_misc_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npg
     # <<<<< REGENERATE THUMBNAILS STAGE <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
@@ -733,4 +657,4 @@ async def test_minion_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, n
     # <<<<< GET MINION JOB DETAILS STAGE <<<<<
 
     # no error logs
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)

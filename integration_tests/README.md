@@ -1,6 +1,6 @@
-# aio-lanraragi integration tests
+# LRR Integration Testing with Python
 
-This directory contains the API/integration testing package for "aio-lanraragi". It includes tools for setting up and tearing down LRR docker environments, and creating synthetic archive data.
+This directory contains the API/integration testing package for "aio-lanraragi". It includes tools for setting up and tearing down LRR docker/Windows environments, and creating synthetic archive data.
 
 Integration testing version updates apply only if changes to integration testing code or tests have occurred.
 
@@ -12,9 +12,16 @@ Integration testing relies on a deployment environment. Currently two environmen
 
 ### Docker Deployment
 
-Install `aio-lanraragi` from the root directory, then:
+This section assumes you have the following prerequisites:
+
+- Docker (confirm with `docker version`) and connection to Docker API (`ls /var/run/docker.sock`).
+
+Clone and install the project:
 ```sh
-cd integration_tests && pip install .
+git clone https://github.com/psilabs-dev/aio-lanraragi.git
+cd aio-lanraragi
+pip install -e ".[dev]"
+pip install -e ./integration_tests
 ```
 
 Enable BuildKit (or prepend it for your tests):
@@ -46,8 +53,35 @@ pytest tests --build /path/to/LANraragi/project
 
 ### Windows Deployment
 
-Run integration tests on Windows from a pre-built distribution and an available staging directory:
+This section assumes the following prerequisites for your development environment:
+
+- MSYS2 UCRT64 (ensure all your deps are in UCRT64) bash. To confirm, run `echo $MSYSTEM` and check that "UCRT64" is returned.
+- Visual Studio Desktop Development with C++ (tested in Community 2026)
+
+However, you may run into further issues; in which case, please consult the LRR Discord.
+
+Clone and install the project:
 ```sh
+git clone https://github.com/psilabs-dev/aio-lanraragi.git
+cd aio-lanraragi
+pip install -e ".[dev]"
+pip install -e ./integration_tests
+```
+
+Run the following from the LRR project root to install dependencies:
+```sh
+./tools/build/windows/install-deps.sh
+./tools/build/windows/install.sh
+```
+
+Create the LRR distribution:
+```sh
+./tools/build/windows/create-dist.sh
+```
+
+Run integration tests on Windows from a pre-built distribution and an available staging directory (which you need to create):
+```sh
+# use full paths!
 pytest tests --win-dist /path/to/win-dist --staging /path/to/staging
 ```
 

@@ -11,7 +11,7 @@ from typing import Optional
 import docker
 
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
-from aio_lanraragi_tests.utils import get_version
+from aio_lanraragi_tests.utils.version import get_version
 
 STAGING_RESOURCE_PREFIX = "staging_"
 STAGING_PORT_OFFSET = 1

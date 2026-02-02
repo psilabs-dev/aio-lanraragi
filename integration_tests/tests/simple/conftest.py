@@ -8,9 +8,9 @@ import pytest_asyncio
 
 from lanraragi.clients.client import LRRClient
 
-from aio_lanraragi_tests.helpers import get_bounded_sem
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
 
 LOGGER = logging.getLogger(__name__)
 

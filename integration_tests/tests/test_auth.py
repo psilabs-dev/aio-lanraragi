@@ -15,15 +15,11 @@ from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import UpdateReadingProgressionRequest
 
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE, LRR_LOGIN_TITLE
-from aio_lanraragi_tests.helpers import (
-    assert_browser_responses_ok,
-    expect_no_error_logs,
-    get_bounded_sem,
-    save_archives,
-    upload_archives
-)
 from aio_lanraragi_tests.deployment.factory import generate_deployment
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext, expect_no_error_logs
+from aio_lanraragi_tests.utils.api_wrappers import save_archives, upload_archives
+from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
+from aio_lanraragi_tests.utils.playwright import assert_browser_responses_ok, assert_console_logs_ok
 
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False # for debugging.
@@ -174,7 +170,7 @@ async def sample_test_api_auth_matrix(
         try:
             page = await bc.new_page()
 
-            # capture all network request responses
+            # capture all network and console traffic
             responses: List[playwright.async_api._generated.Response] = []
             page.on("response", lambda response: responses.append(response))
 
@@ -182,7 +178,7 @@ async def sample_test_api_auth_matrix(
             await page.wait_for_load_state("networkidle")
             assert await page.title() == expected_title
 
-            # check browser responses were OK.
+            # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
         finally:
             await bc.close()
@@ -201,7 +197,7 @@ async def sample_test_api_auth_matrix(
         assert error.status == 401, f"Expected status 401, got: {error.status}."
 
     # check logs for errors
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -218,7 +214,7 @@ async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploym
         try:
             page = await browser.new_page()
 
-            # capture all network request responses
+            # capture all network and console traffic
             responses: List[playwright.async_api._generated.Response] = []
             page.on("response", lambda response: responses.append(response))
 
@@ -232,14 +228,14 @@ async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploym
             await page.wait_for_load_state("networkidle")
             assert await page.title() == LRR_INDEX_TITLE
 
-            # check browser responses were OK.
+            # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
         finally:
             await bc.close()
             await browser.close()
 
     # check logs for errors
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -256,9 +252,11 @@ async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploym
         try:
             page = await browser.new_page()
 
-            # capture all network request responses
+            # capture all network and console traffic
             responses: List[playwright.async_api._generated.Response] = []
+            console_evts: List[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("networkidle")
@@ -270,14 +268,15 @@ async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploym
             assert "Wrong Password." in await page.content()
             assert await page.title() == LRR_LOGIN_TITLE
 
-            # check browser responses were OK.
+            # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts)
         finally:
             await bc.close()
             await browser.close()
 
     # check logs for errors
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -294,9 +293,11 @@ async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploym
         try:
             page = await browser.new_page()
 
-            # capture all network request responses
+            # capture all network and console traffic
             responses: List[playwright.async_api._generated.Response] = []
+            console_evts: List[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("networkidle")
@@ -309,14 +310,15 @@ async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploym
             assert "Wrong Password." in await page.content()
             assert await page.title() == LRR_LOGIN_TITLE
 
-            # check browser responses were OK.
+            # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts)
         finally:
             await bc.close()
             await browser.close()
 
     # check logs for errors
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -332,9 +334,11 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
         try:
             page = await browser.new_page()
 
-            # capture all network request responses
+            # capture all network and console traffic
             responses: List[playwright.async_api._generated.Response] = []
+            console_evts: List[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("networkidle")
@@ -367,8 +371,9 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
             LOGGER.info("Clicking save settings.")
             await page.get_by_role("button", name="Save Settings").click()
 
-            # check browser responses were OK.
+            # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts)
         finally:
             await bc.close()
             await browser.close()
@@ -383,22 +388,25 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
         try:
             page = await browser.new_page()
 
-            # capture all network request responses
+            # capture all network and console traffic
             responses: List[playwright.async_api._generated.Response] = []
+            console_evts: List[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("networkidle")
             assert await page.title() == LRR_LOGIN_TITLE
 
-            # check browser responses were OK.
+            # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts)
         finally:
             await bc.close()
             await browser.close()
 
     # check logs for errors
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -519,7 +527,7 @@ async def test_disable_cors_preflight(environment: AbstractLRRDeploymentContext,
         assert "Access-Control-Allow-Origin" not in headers, "Allowed origin not present in headers when CORS is enabled."
 
     # check logs for errors
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
 async def test_enable_cors_preflight(environment: AbstractLRRDeploymentContext, lrr_client: LRRClient, is_lrr_debug_mode: bool):
@@ -550,4 +558,4 @@ async def test_enable_cors_preflight(environment: AbstractLRRDeploymentContext, 
         assert actual_allowed_origin == expected_allowed_origin, "CORS allowed origin does not match."
 
     # check logs for errors
-    expect_no_error_logs(environment)
+    expect_no_error_logs(environment, LOGGER)

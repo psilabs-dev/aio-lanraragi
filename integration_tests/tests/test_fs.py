@@ -20,7 +20,9 @@ from lanraragi.models.base import LanraragiErrorResponse
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
-from aio_lanraragi_tests.helpers import delete_archive, get_bounded_sem, save_archives, upload_archives, xfail_catch_flakes_inner
+from aio_lanraragi_tests.utils.api_wrappers import delete_archive, save_archives, upload_archives
+from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
+from aio_lanraragi_tests.utils.flakes import xfail_catch_flakes_inner
 
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False
@@ -40,7 +42,6 @@ def is_lrr_debug_mode(request: pytest.FixtureRequest) -> Generator[bool, None, N
 @pytest.fixture
 def environment(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int) -> Generator[AbstractLRRDeploymentContext, None, None]:
     environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
-    request.session.lrr_environment = environment
 
     # configure environments to session
     environments: Dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
@@ -196,5 +197,5 @@ async def test_archive_upload_to_symlinked_dir(
     # <<<<< DELETE ARCHIVE ASYNC STAGE <<<<<
 
     # # no error logs
-    # # TODO: there are error logs (tankoubon missing archive ID)
-    # expect_no_error_logs(environment)
+    # TODO: reinstate this assertion once we've decided what to do with shinobu's file handling problem.
+    # expect_no_error_logs(environment, LOGGER)
