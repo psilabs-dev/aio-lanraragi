@@ -1,5 +1,4 @@
 import json
-from typing import List
 
 from lanraragi.models.archive import (
     GetAllArchivesResponse,
@@ -12,7 +11,7 @@ from lanraragi.models.archive import (
 
 def _process_get_all_archives_response(content: str) -> GetAllArchivesResponse:
     response_j = json.loads(content) # note: this is already a list.
-    records: List[GetAllArchivesResponseRecord] = []
+    records: list[GetAllArchivesResponseRecord] = []
     for record in response_j:
         arcid = record.get('arcid')
         isnew = record.get('isnew')
@@ -51,8 +50,8 @@ def _process_get_archive_metadata_response(content: str) -> GetArchiveMetadataRe
 
 def _process_get_archive_categories_response(content: str) -> GetArchiveCategoriesResponse:
     response_j = json.loads(content)
-    categories_data: List[dict] = response_j.get("categories", response_j)
-    categories: List[GetArchiveCategoriesCatRecord] = []
+    categories_data: list[dict] = response_j.get("categories", response_j)
+    categories: list[GetArchiveCategoriesCatRecord] = []
     for category in categories_data:
         archives = category.get("archives")
         id = category.get("id")

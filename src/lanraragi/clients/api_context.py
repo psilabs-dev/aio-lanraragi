@@ -5,9 +5,7 @@ import io
 import logging
 from typing import (
     Any,
-    Dict,
     Optional,
-    Tuple,
     TypeVar,
     Union,
     override,
@@ -36,7 +34,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         self._logger = logger
 
     @property
-    def headers(self) -> Dict[str, str]:
+    def headers(self) -> dict[str, str]:
         """
         LRR request headers. Is either an empty dict or contains authentication.
         """
@@ -258,9 +256,9 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
 
     async def handle_request(
             self, request_type: http.HTTPMethod, url: str, 
-            headers: Dict[str, str], params: Query=None, data: Any=None, json_data: Any=None,
+            headers: dict[str, str], params: Query=None, data: Any=None, json_data: Any=None,
             max_retries: int=0
-    ) -> Tuple[int, str]:
+    ) -> tuple[int, str]:
         """
         A more controlled API call which represents the boilerplate for handling requests on the HTTP layer.
         Because the LANraragi API requires authentication, headers are automatically required.
@@ -311,8 +309,8 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
                 continue
     
     async def download_thumbnail(
-            self, url: str, headers: Dict[str, str], params: Query=None, max_retries: int=0
-    ) -> Tuple[int, Union[bytes, str]]:
+            self, url: str, headers: dict[str, str], params: Query=None, max_retries: int=0
+    ) -> tuple[int, Union[bytes, str]]:
         """
         Specific to downloading thumbnails from the LANraragi server. (/api/archives/:id/thumbnail)
         """
@@ -342,8 +340,8 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
                 continue
 
     async def download_file(
-            self, url: str, headers: Dict[str, str], params: Query=None, max_retries: int=0
-    ) -> Tuple[int, Union[bytes, str]]:
+            self, url: str, headers: dict[str, str], params: Query=None, max_retries: int=0
+    ) -> tuple[int, Union[bytes, str]]:
         """
         Specific to downloading files from the LANraragi server.
         """

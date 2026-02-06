@@ -1,5 +1,4 @@
 import json
-from typing import List
 
 from lanraragi.models.category import (
     GetAllCategoriesResponse,
@@ -10,7 +9,7 @@ from lanraragi.models.category import (
 
 def _process_get_all_categories_response(content: str) -> GetAllCategoriesResponse:
     data = json.loads(content) # note: this is a list of categories.
-    categories: List[GetAllCategoriesResponseRecord] = []
+    categories: list[GetAllCategoriesResponseRecord] = []
     for category in data:
         archives = category.get("archives")
         id = category.get("id")

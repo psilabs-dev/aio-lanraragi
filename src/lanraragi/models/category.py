@@ -1,23 +1,23 @@
-from typing import List, Optional
+from typing import Optional
 from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
 class GetAllCategoriesResponseRecord(BaseModel):
-    archives: List[str] = Field(...)
+    archives: list[str] = Field(...)
     category_id: str = Field(...)
     name: str = Field(...)
     pinned: bool = Field(...)
     search: str = Field(...)
 
 class GetAllCategoriesResponse(LanraragiResponse):
-    data: List[GetAllCategoriesResponseRecord] = Field(...)
+    data: list[GetAllCategoriesResponseRecord] = Field(...)
 
 class GetCategoryRequest(LanraragiRequest):
     category_id: str = Field(...)
 
 class GetCategoryResponse(LanraragiResponse):
-    archives: List[str] = Field(...)
+    archives: list[str] = Field(...)
     category_id: str = Field(...)
     name: str = Field(...)
     pinned: bool = Field(...)

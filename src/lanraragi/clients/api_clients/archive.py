@@ -1,6 +1,5 @@
 import http
 import json
-from typing import List
 import aiohttp
 
 from lanraragi.clients.api_clients.base import _ApiClient
@@ -93,7 +92,7 @@ class _ArchiveApiClient(_ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
-            tankoubons: List[str] = response_j.get("tankoubons")
+            tankoubons: list[str] = response_j.get("tankoubons")
             return (GetArchiveTankoubonsResponse(tankoubons=tankoubons), None)
         return (None, _build_err_response(content, status))
     

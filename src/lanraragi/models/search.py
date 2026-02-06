@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
@@ -31,7 +31,7 @@ class SearchArchiveIndexResponseRecord(BaseModel):
         return v
 
 class SearchArchiveIndexResponse(LanraragiResponse):
-    data: List[SearchArchiveIndexResponseRecord] = Field(...)
+    data: list[SearchArchiveIndexResponseRecord] = Field(...)
     records_filtered: int = Field(...)
     records_total: int = Field(...)
 
@@ -44,7 +44,7 @@ class GetRandomArchivesRequest(LanraragiRequest):
     groupby_tanks: bool = Field("true")
 
 class GetRandomArchivesResponse(LanraragiResponse):
-    data: List[SearchArchiveIndexResponseRecord] = Field(...)
+    data: list[SearchArchiveIndexResponseRecord] = Field(...)
     records_total: int = Field(...)
 
 # <<<<< SEARCH <<<<<

@@ -1,5 +1,4 @@
 import json
-from typing import List
 
 from lanraragi.models.misc import (
     GetAvailablePluginsResponse,
@@ -43,7 +42,7 @@ def _process_get_server_info_response(content: str) -> GetServerInfoResponse:
 
 def _handle_get_available_plugins_response(content: str) -> GetAvailablePluginsResponse:
     response_j = json.loads(content)
-    plugins: List[GetAvailablePluginsResponsePlugin] = []
+    plugins: list[GetAvailablePluginsResponsePlugin] = []
     for plugin in response_j:
         author = plugin.get("author")
         description = plugin.get("description")

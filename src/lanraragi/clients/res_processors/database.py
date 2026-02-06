@@ -1,5 +1,4 @@
 import json
-from typing import List
 
 from lanraragi.models.database import (
     GetDatabaseBackupArchiveRecord,
@@ -12,7 +11,7 @@ from lanraragi.models.database import (
 
 def _process_get_database_stats_response(content: str) -> GetDatabaseStatsResponse:
     data = json.loads(content) # note: this is a list of tags, not a dictionary
-    tags: List[GetDatabaseStatsResponseTag] = []
+    tags: list[GetDatabaseStatsResponseTag] = []
     for tag in data:
         namespace = tag.get("namespace")
         text = tag.get("text")
@@ -25,7 +24,7 @@ def _process_get_database_stats_response(content: str) -> GetDatabaseStatsRespon
 
 def _process_get_database_backup_response(content: str) -> GetDatabaseBackupResponse:
     response_j = json.loads(content)
-    archive_records: List[GetDatabaseBackupArchiveRecord] = []
+    archive_records: list[GetDatabaseBackupArchiveRecord] = []
     if "archives" in response_j:
         for arc_record in response_j.get("archives"):
             archive_records.append(GetDatabaseBackupArchiveRecord(
@@ -37,7 +36,7 @@ def _process_get_database_backup_response(content: str) -> GetDatabaseBackupResp
                 filename=arc_record.get("filename")
             ))
     if "categories" in response_j:
-        category_records: List[GetDatabaseBackupCategoryRecord] = []
+        category_records: list[GetDatabaseBackupCategoryRecord] = []
         for cat_record in response_j.get("categories"):
             category_records.append(GetDatabaseBackupCategoryRecord(
                 archives=cat_record.get("archives"),
@@ -45,7 +44,7 @@ def _process_get_database_backup_response(content: str) -> GetDatabaseBackupResp
                 name=cat_record.get("name"),
                 search=cat_record.get("search")
             ))
-    tankoubon_records: List[GetDatabaseBackupTankoubonRecord] = []
+    tankoubon_records: list[GetDatabaseBackupTankoubonRecord] = []
     if "tankoubons" in response_j:
         for tank_record in response_j.get("tankoubons"):
             tankoubon_records.append(GetDatabaseBackupTankoubonRecord(

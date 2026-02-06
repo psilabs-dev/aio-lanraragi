@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Optional
 from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
@@ -14,10 +14,10 @@ class GetAllArchivesResponseRecord(BaseModel):
     title: str = Field(...)
 
 class GetAllArchivesResponse(LanraragiResponse):
-    data: List[GetAllArchivesResponseRecord] = Field(...)
+    data: list[GetAllArchivesResponseRecord] = Field(...)
 
 class GetUntaggedArchivesResponse(LanraragiResponse):
-    data: List[str] = Field(...)
+    data: list[str] = Field(...)
 
 class GetArchiveMetadataRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
@@ -38,20 +38,20 @@ class GetArchiveCategoriesRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
 
 class GetArchiveCategoriesCatRecord(BaseModel):
-    archives: List[str] = Field(...)
+    archives: list[str] = Field(...)
     category_id: str = Field(...)
     name: str = Field(...)
     pinned: bool = Field(...)
     search: str = Field(...)
 
 class GetArchiveCategoriesResponse(LanraragiResponse):
-    categories: List[GetArchiveCategoriesCatRecord] = Field(...)
+    categories: list[GetArchiveCategoriesCatRecord] = Field(...)
 
 class GetArchiveTankoubonsRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
 
 class GetArchiveTankoubonsResponse(LanraragiResponse):
-    tankoubons: List[str] = Field(...)
+    tankoubons: list[str] = Field(...)
 
 class GetArchiveThumbnailRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
@@ -83,7 +83,7 @@ class ExtractArchiveRequest(LanraragiRequest):
 
 class ExtractArchiveResponse(LanraragiResponse):
     job: Optional[int] = Field(None)
-    pages: List[str] = Field([])
+    pages: list[str] = Field([])
 
 class ClearNewArchiveFlagRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)

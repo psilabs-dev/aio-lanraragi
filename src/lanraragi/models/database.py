@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Optional
 from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
@@ -12,7 +12,7 @@ class GetDatabaseStatsResponseTag(BaseModel):
     weight: int = Field(...)
 
 class GetDatabaseStatsResponse(LanraragiResponse):
-    data: List[GetDatabaseStatsResponseTag] = Field(...)
+    data: list[GetDatabaseStatsResponseTag] = Field(...)
 
 class CleanDatabaseResponse(LanraragiResponse):
     deleted: int = Field(...)
@@ -27,7 +27,7 @@ class GetDatabaseBackupArchiveRecord(BaseModel):
     filename: Optional[str] = Field(None)
 
 class GetDatabaseBackupCategoryRecord(BaseModel):
-    archives: List[str] = Field(...)
+    archives: list[str] = Field(...)
     category_id: str = Field(...)
     name: str = Field(...)
     search: str = Field(...)
@@ -35,12 +35,12 @@ class GetDatabaseBackupCategoryRecord(BaseModel):
 class GetDatabaseBackupTankoubonRecord(BaseModel):
     tankid: str = Field(...)
     name: str = Field(...)
-    archives: List[str] = Field(...)
+    archives: list[str] = Field(...)
 
 class GetDatabaseBackupResponse(LanraragiResponse):
-    archives: List[GetDatabaseBackupArchiveRecord] = Field(...)
-    categories: List[GetDatabaseBackupCategoryRecord] = Field(...)
-    tankoubons: List[GetDatabaseBackupTankoubonRecord] = Field(...)
+    archives: list[GetDatabaseBackupArchiveRecord] = Field(...)
+    categories: list[GetDatabaseBackupCategoryRecord] = Field(...)
+    tankoubons: list[GetDatabaseBackupTankoubonRecord] = Field(...)
 
 __all__ = [
     "GetDatabaseStatsRequest",

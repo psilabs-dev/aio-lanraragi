@@ -1,4 +1,4 @@
-from typing import Dict, List, Literal, Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
@@ -36,12 +36,12 @@ class GetAvailablePluginsResponsePlugin(BaseModel):
     name: str = Field(...)
     namespace: str = Field(...)
     oneshot_arg: Optional[str] = Field(None)
-    parameters: Optional[List[Dict[str, str]]] = Field(None)
+    parameters: Optional[list[dict[str, str]]] = Field(None)
     type: Literal["login", "metadata", "script", "download", "all"] = Field(...)
     version: str = Field(...)
 
 class GetAvailablePluginsResponse(LanraragiResponse):
-    plugins: List[GetAvailablePluginsResponsePlugin] = Field(...)
+    plugins: list[GetAvailablePluginsResponsePlugin] = Field(...)
 
 class UsePluginRequest(LanraragiRequest):
     plugin: str = Field(..., description="Namespace of the plugin to use.")
@@ -49,7 +49,7 @@ class UsePluginRequest(LanraragiRequest):
     arg: Optional[str] = Field(None, description="Optional One-Shot argument to use when executing this Plugin.")
 
 class UsePluginResponse(LanraragiResponse):
-    data: Optional[Dict[str, str]] = Field(None)
+    data: Optional[dict[str, str]] = Field(None)
     type: Literal["login", "metadata", "script"] = Field(...)
 
 class UsePluginAsyncRequest(LanraragiRequest):

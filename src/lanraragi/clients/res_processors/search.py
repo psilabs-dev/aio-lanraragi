@@ -1,5 +1,4 @@
 import json
-from typing import List
 
 from lanraragi.models.search import (
     GetRandomArchivesResponse,
@@ -36,7 +35,7 @@ def _process_get_random_archives_response(content: str) -> GetRandomArchivesResp
     data = response_j.get('data')
     records_filtered = response_j.get('recordsFiltered')
     records_total = response_j.get('recordsTotal')
-    records: List[SearchArchiveIndexResponseRecord] = []
+    records: list[SearchArchiveIndexResponseRecord] = []
     for record in data:
         arcid = record.get('arcid')
         isnew = record.get('isnew')

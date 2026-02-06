@@ -1,10 +1,10 @@
-from typing import List, Optional
+from typing import Optional
 from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
 class TankoubonRecord(BaseModel):
-    archives: List[str] = Field(...)
+    archives: list[str] = Field(...)
     tank_id: str = Field(...)
     name: str = Field(...)
     summary: str = Field(...)
@@ -21,13 +21,13 @@ class TankoubonArchiveRecord(BaseModel):
     title: str = Field(...)
 
 class TankoubonFullDataRecord(TankoubonRecord):
-    full_data: List[TankoubonArchiveRecord] = Field(...)
+    full_data: list[TankoubonArchiveRecord] = Field(...)
 
 class GetAllTankoubonsRequest(LanraragiRequest):
     page: int = Field(..., description="The page of the list of Tankoubons.")
 
 class GetAllTankoubonsResponse(LanraragiResponse):
-    result: List[TankoubonRecord] = Field(...)
+    result: list[TankoubonRecord] = Field(...)
     filtered: int = Field(...)
     total: int = Field(...)
 
@@ -54,7 +54,7 @@ class TankoubonMetadata(BaseModel):
 
 class UpdateTankoubonRequest(LanraragiRequest):
     tank_id: str = Field(...)
-    archives: Optional[List[str]] = Field(None)
+    archives: Optional[list[str]] = Field(None)
     metadata: Optional[TankoubonMetadata] = Field(None)
 
 class UpdateTankoubonResponse(LanraragiResponse):

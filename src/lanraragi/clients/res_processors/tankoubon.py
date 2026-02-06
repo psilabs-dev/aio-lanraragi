@@ -1,5 +1,4 @@
 import json
-from typing import List
 
 from lanraragi.models.tankoubon import (
     GetTankoubonResponse,
@@ -12,7 +11,7 @@ from lanraragi.models.tankoubon import (
 
 def _handle_get_all_tankoubons_response(content: str) -> GetAllTankoubonsResponse:
     response_j = json.loads(content)
-    records: List[TankoubonRecord] = []
+    records: list[TankoubonRecord] = []
     for record in response_j.get("result"):
         records.append(TankoubonRecord(
             archives=record.get("archives"),
@@ -55,7 +54,7 @@ def _handle_get_tankoubon_response(content: str, is_full_data: bool) -> GetTanko
         return response
 
     # handle full data response
-    full_data_records: List[TankoubonArchiveRecord] = []
+    full_data_records: list[TankoubonArchiveRecord] = []
     for record in result_j.get("full_data"):
         full_data_records.append(TankoubonArchiveRecord(
             arcid=record.get("arcid"),
