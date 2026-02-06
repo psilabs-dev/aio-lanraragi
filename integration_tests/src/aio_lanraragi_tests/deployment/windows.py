@@ -658,7 +658,13 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 script = [
                     "taskkill", "/PID", str(pid), "/F", "/T"
                 ]
-                output = subprocess.run(script, capture_output=True, text=True)
+                output = subprocess.run(
+                    script,
+                    capture_output=True,
+                    text=True,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
                 if output.returncode != 0:
                     raise DeploymentException(f"Failed to stop LRR process with script {subprocess.list2cmdline(script)} ({output.returncode}): STDERR={output.stderr}")
                 else:
@@ -756,14 +762,23 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         )
         result = subprocess.run(
             ["powershell.exe", "-NoProfile", "-Command", ps],
-            capture_output=True, text=True
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         pids = [p.strip() for p in result.stdout.splitlines() if p.strip().isdigit()]
         if not pids:
             self.logger.warning("No perl.exe processes found in win-dist runtime path to kill.")
             return
         for p in pids:
-            output = subprocess.run(["taskkill", "/PID", p, "/F", "/T"], capture_output=True, text=True)
+            output = subprocess.run(
+                ["taskkill", "/PID", p, "/F", "/T"],
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
             if output.returncode == 0:
                 self.logger.debug(f"Killed perl process {p}: STDOUT = {output.stdout}")
             elif output.returncode == 128:
@@ -794,9 +809,17 @@ def _get_port_owner_pid(port: int) -> Optional[int]:
         "Where-Object { ($_.State -eq 'Listen' -or $_.State -eq 2) -and ($_.LocalAddress -eq '127.0.0.1' -or $_.LocalAddress -eq '0.0.0.0') } | "
         "Select-Object -First 1 -ExpandProperty OwningProcess"
     )
-    result = subprocess.run(
-        ["powershell.exe", "-NoProfile", "-Command", ps],
-        capture_output=True, text=True
-    )
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", ps],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
+    except OSError:
+        # Console/handle issues can occur in CI; treat as unknown PID.
+        return None
     pid = result.stdout.strip()
     return int(pid) if pid.isdigit() else None
