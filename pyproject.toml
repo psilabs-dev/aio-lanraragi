@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools", "setuptools_scm"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.9.25,<0.10.0"]
+build-backend = "uv_build"
 
 [project]
 name = "aio-lanraragi"
@@ -19,13 +19,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "build",
     "pytest                 >=8.0.0",
     "pytest-asyncio         >=0.25.0",
     "ruff",
-    "setuptools",
-    "tox",
-    "twine",
 ]
 
 [project.urls]
@@ -52,6 +48,5 @@ target-version = "py312"
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["lanraragi*"]
+[tool.uv.build-backend]
+module-name = "lanraragi"

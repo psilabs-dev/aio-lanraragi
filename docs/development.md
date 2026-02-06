@@ -20,7 +20,7 @@ Docker is required only if you plan to run integration tests with the Docker dep
 
 ## Environment Setup
 
-Add developer dependencies (includes ruff, tox, pytest and so on), and install "aio-lanraragi" in editable mode:
+Add developer dependencies (includes ruff, pytest and so on), and install "aio-lanraragi" in editable mode:
 
 ```sh
 pip install -e ".[dev]"
@@ -74,7 +74,7 @@ Any request or response from `LRRClient` API calls must inherit the `LanraragiRe
 
 ## Unit Testing
 
-Testing is mainly done with `pytest`, though you can also use `tox` to test multiple Python versions.
+Testing is mainly done with `pytest`.
 
 ```sh
 pytest tests/                   # if you're using virtualenv

@@ -56,11 +56,13 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
       - name: Install main package (aio-lanraragi)
         working-directory: aio-lanraragi
         run: |
-          python -m pip install --upgrade pip
-          pip install ".[dev]"
+          uv pip install --system ".[dev]"
 
       - name: Run unit tests
         working-directory: aio-lanraragi
@@ -71,7 +73,7 @@ jobs:
       - name: Install integration test library
         working-directory: aio-lanraragi/integration_tests
         run: |
-          pip install .
+          uv pip install --system .
           playwright install
 
       - name: Create staging directory
@@ -117,11 +119,13 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
       - name: Install main package (aio-lanraragi)
         working-directory: aio-lanraragi
         run: |
-          python -m pip install --upgrade pip
-          pip install ".[dev]"
+          uv pip install --system ".[dev]"
 
       - name: Run unit tests
         working-directory: aio-lanraragi
@@ -214,7 +218,7 @@ jobs:
       - name: Install test library
         working-directory: aio-lanraragi/integration_tests
         run: |
-          pip install .
+          uv pip install --system .
           playwright install
 
       - name: Create staging directory
