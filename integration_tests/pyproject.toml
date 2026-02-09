@@ -58,3 +58,4 @@ target-version = "py312"
 
 [tool.uv.build-backend]
 module-name = "aio_lanraragi_tests"
+source-include = ["src/aio_lanraragi_tests/resources/**"]
