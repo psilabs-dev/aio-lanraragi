@@ -1,5 +1,4 @@
 import logging
-from typing import List
 from urllib.parse import urlparse
 import playwright.async_api._generated
 
@@ -7,7 +6,7 @@ from lanraragi.clients.client import LRRClient
 
 LOGGER = logging.getLogger(__name__)
 
-async def assert_browser_responses_ok(responses: List[playwright.async_api._generated.Response], lrr_client: LRRClient, logger: logging.Logger=LOGGER):
+async def assert_browser_responses_ok(responses: list[playwright.async_api._generated.Response], lrr_client: LRRClient, logger: logging.Logger=LOGGER):
     """
     Assert that all responses captured during a Playwright browser session were normal. This means:
 
@@ -37,7 +36,7 @@ async def assert_browser_responses_ok(responses: List[playwright.async_api._gene
         elif status >= 400:
             logger.warning(f"Status {status} with {response.request.method} {response.url}")
 
-async def assert_console_logs_ok(console_evts: List[playwright.async_api._generated.ConsoleMessage]):
+async def assert_console_logs_ok(console_evts: list[playwright.async_api._generated.ConsoleMessage]):
     """
     Assert that all console logs captured during a Playwright browser session were not errors.
     """

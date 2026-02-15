@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
@@ -10,22 +10,22 @@ class GetMinionJobStatusRequest(LanraragiRequest):
 class GetMinionJobStatusResponse(LanraragiResponse):
     state: str = Field(...)
     task: str = Field(...)
-    error: Optional[str] = Field(None)
-    notes: Optional[dict[str, str]] = Field(None)
+    error: str | None = Field(None)
+    notes: dict[str, str] | None = Field(None)
 
 class GetMinionJobDetailRequest(LanraragiRequest):
     job_id: int = Field(..., description="ID of the job.")
 
 class GetMinionJobDetailResponseResult(BaseModel):
-    success: Optional[bool] = Field(None)
-    id: Optional[str] = Field(None)
-    message: Optional[str] = Field(None)
-    url: Optional[str] = Field(None)
-    category: Optional[str] = Field(None)
-    title: Optional[str] = Field(None)
-    error: Optional[str] = Field(None)
-    data: Optional[dict[str, Any]] = Field(None)
-    errors: Optional[list[str]] = Field(None)
+    success: bool | None = Field(None)
+    id: str | None = Field(None)
+    message: str | None = Field(None)
+    url: str | None = Field(None)
+    category: str | None = Field(None)
+    title: str | None = Field(None)
+    error: str | None = Field(None)
+    data: dict[str, Any] | None = Field(None)
+    errors: list[str] | None = Field(None)
 
 class GetMinionJobDetailResponse(LanraragiResponse):
     id: int = Field(...)
@@ -34,20 +34,20 @@ class GetMinionJobDetailResponse(LanraragiResponse):
     children: list[int] = Field(default_factory=list)
     created: str = Field(...)
     delayed: str = Field(...)
-    expires: Optional[str] = Field(None)
-    finished: Optional[str] = Field(None)
-    lax: Optional[int] = Field(None)
+    expires: str | None = Field(None)
+    finished: str | None = Field(None)
+    lax: int | None = Field(None)
     notes: dict[str, Any] = Field(default_factory=dict)
     parents: list[int] = Field(default_factory=list)
     priority: int = Field(0)
     queue: str = Field("default")
-    result: Optional[GetMinionJobDetailResponseResult] = Field(None)
-    retried: Optional[str] = Field(None)
+    result: GetMinionJobDetailResponseResult | None = Field(None)
+    retried: str | None = Field(None)
     retries: int = Field(0)
-    started: Optional[str] = Field(None)
+    started: str | None = Field(None)
     state: str = Field(...)
     task: str = Field(...)
-    time: Optional[str] = Field(None)
+    time: str | None = Field(None)
     worker: int = Field(default=0)
 
 __all__ = [

@@ -1,4 +1,3 @@
-from typing import Optional
 from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
@@ -7,10 +6,10 @@ class GetAllArchivesResponseRecord(BaseModel):
     arcid: str = Field(..., min_length=40, max_length=40)
     isnew: bool = Field(...)
     extension: str = Field(...)
-    tags: Optional[str] = Field(None)
-    lastreadtime: Optional[int] = Field(None)
-    pagecount: Optional[int] = Field(None)
-    progress: Optional[int] = Field(None)
+    tags: str | None = Field(None)
+    lastreadtime: int | None = Field(None)
+    pagecount: int | None = Field(None)
+    progress: int | None = Field(None)
     title: str = Field(...)
 
 class GetAllArchivesResponse(LanraragiResponse):
@@ -55,21 +54,21 @@ class GetArchiveTankoubonsResponse(LanraragiResponse):
 
 class GetArchiveThumbnailRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
-    page: Optional[int] = Field(None)
-    nofallback: Optional[bool] = Field(None)
+    page: int | None = Field(None)
+    nofallback: bool | None = Field(None)
 
 class GetArchiveThumbnailResponse(LanraragiResponse):
-    job: Optional[int] = Field(None)
-    content: Optional[bytes] = Field(None)
-    content_type: Optional[str] = Field(None)
+    job: int | None = Field(None)
+    content: bytes | None = Field(None)
+    content_type: str | None = Field(None)
 
 class QueueArchiveThumbnailExtractionRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
-    force: Optional[bool] = Field(None)
+    force: bool | None = Field(None)
 
 class QueueArchiveThumbnailExtractionResponse(LanraragiResponse):
-    job: Optional[int] = Field(...)
-    message: Optional[str] = Field(...)
+    job: int | None = Field(...)
+    message: str | None = Field(...)
 
 class DownloadArchiveRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
@@ -79,10 +78,10 @@ class DownloadArchiveResponse(LanraragiResponse):
 
 class ExtractArchiveRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
-    force: Optional[bool] = Field(None)
+    force: bool | None = Field(None)
 
 class ExtractArchiveResponse(LanraragiResponse):
-    job: Optional[int] = Field(None)
+    job: int | None = Field(None)
     pages: list[str] = Field([])
 
 class ClearNewArchiveFlagRequest(LanraragiRequest):
@@ -103,15 +102,15 @@ class UpdateReadingProgressionResponse(LanraragiResponse):
 class UploadArchiveRequest(LanraragiRequest):
     file: bytes = Field(...)
     filename: str = Field(...)
-    title: Optional[str] = Field(None)
-    tags: Optional[str] = Field(None)
-    summary: Optional[str] = Field(None)
-    category_id: Optional[str] = Field(None)
-    file_checksum: Optional[str] = Field(None)
+    title: str | None = Field(None)
+    tags: str | None = Field(None)
+    summary: str | None = Field(None)
+    category_id: str | None = Field(None)
+    file_checksum: str | None = Field(None)
 
 class UploadArchiveResponse(LanraragiResponse):
     arcid: str = Field(..., min_length=40, max_length=40)
-    filename: Optional[str] = Field(None)
+    filename: str | None = Field(None)
 
 class UpdateArchiveThumbnailRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
@@ -122,16 +121,16 @@ class UpdateArchiveThumbnailResponse(LanraragiResponse):
 
 class UpdateArchiveMetadataRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
-    title: Optional[str] = Field(None)
-    tags: Optional[str] = Field(None)
-    summary: Optional[str] = Field(None)
+    title: str | None = Field(None)
+    tags: str | None = Field(None)
+    summary: str | None = Field(None)
 
 class DeleteArchiveRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
 
 class DeleteArchiveResponse(LanraragiResponse):
     arcid: str = Field(..., min_length=40, max_length=40)
-    filename: Optional[str] = Field(None)
+    filename: str | None = Field(None)
 
 # <<<<< ARCHIVE <<<<<
 

@@ -2,7 +2,7 @@ import hashlib
 import socket
 import io
 from pathlib import Path
-from typing import List, Optional, overload, Union
+from typing import overload
 
 __JPG_SIGNATURES = [
     "FF D8 FF E0 00 10 4A 46 49 46 00 01",
@@ -68,7 +68,7 @@ def compute_upload_checksum(file_path: Path) -> str:
 def compute_upload_checksum(file_path: str) -> str:
     ...
 
-def compute_upload_checksum(file: Optional[Union[io.IOBase, Path, str]]) -> str:
+def compute_upload_checksum(file: io.IOBase | Path | str | None) -> str:
     """
     Compute the SHA1 hash of an Archive before an upload for in-transit integrity checks.
     """
@@ -94,7 +94,7 @@ def compute_archive_id(file_path: str) -> str:
 def compute_archive_id(file_path: Path) -> str:
     ...
 
-def compute_archive_id(file_path: Optional[Union[Path, str]]) -> str:
+def compute_archive_id(file_path: Path | str | None) -> str:
     """
     Compute the ID of a file in the same way as the server.
     """
@@ -112,7 +112,7 @@ def compute_archive_id(file_path: Optional[Union[Path, str]]) -> str:
         raise TypeError(f"Unsupported type: {type(file_path)}")
 
 
-def get_source_from_tags(tags: str) -> Union[str, None]:
+def get_source_from_tags(tags: str) -> str | None:
     """
     Return the source from tags if exists, else None.
     """
@@ -131,7 +131,7 @@ def get_signature_hex(archive_path: str) -> str:
 def get_signature_hex(archive_path: Path) -> str:
     ...
 
-def get_signature_hex(archive_path: Optional[Union[Path, str]]) -> str:
+def get_signature_hex(archive_path: Path | str | None) -> str:
     """
     Get first 8 bytes of archive in hex repr.
     """
@@ -142,7 +142,7 @@ def get_signature_hex(archive_path: Optional[Union[Path, str]]) -> str:
     else:
         raise TypeError(f"Unsupported file type: {type(archive_path)}")
 
-def is_valid_signature_hex(signature: str, allowed_signatures: List[str]=ALLOWED_SIGNATURES) -> bool:
+def is_valid_signature_hex(signature: str, allowed_signatures: list[str]=ALLOWED_SIGNATURES) -> bool:
     """
     Check if the hex signature corresponds to a file type supported by LANraragi.
     """

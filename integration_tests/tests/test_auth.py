@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import aiohttp
 import numpy as np
-from typing import AsyncGenerator, Dict, Generator, List
+from typing import AsyncGenerator, Generator
 import playwright.async_api
 import playwright.async_api._generated
 from pydantic import BaseModel, Field
@@ -50,7 +50,7 @@ def environment(request: pytest.FixtureRequest, resource_prefix: str, port_offse
     request.session.lrr_environment = environment
 
     # configure environments to session
-    environments: Dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
+    environments: dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
     request.session.lrr_environments = environments
 
     yield environment
@@ -171,7 +171,7 @@ async def sample_test_api_auth_matrix(
             page = await bc.new_page()
 
             # capture all network and console traffic
-            responses: List[playwright.async_api._generated.Response] = []
+            responses: list[playwright.async_api._generated.Response] = []
             page.on("response", lambda response: responses.append(response))
 
             await page.goto(lrr_client.lrr_base_url)
@@ -215,7 +215,7 @@ async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploym
             page = await browser.new_page()
 
             # capture all network and console traffic
-            responses: List[playwright.async_api._generated.Response] = []
+            responses: list[playwright.async_api._generated.Response] = []
             page.on("response", lambda response: responses.append(response))
 
             await page.goto(lrr_client.lrr_base_url)
@@ -253,8 +253,8 @@ async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploym
             page = await browser.new_page()
 
             # capture all network and console traffic
-            responses: List[playwright.async_api._generated.Response] = []
-            console_evts: List[playwright.async_api._generated.ConsoleMessage] = []
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
             page.on("console", lambda console: console_evts.append(console))
 
@@ -294,8 +294,8 @@ async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploym
             page = await browser.new_page()
 
             # capture all network and console traffic
-            responses: List[playwright.async_api._generated.Response] = []
-            console_evts: List[playwright.async_api._generated.ConsoleMessage] = []
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
             page.on("console", lambda console: console_evts.append(console))
 
@@ -335,8 +335,8 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
             page = await browser.new_page()
 
             # capture all network and console traffic
-            responses: List[playwright.async_api._generated.Response] = []
-            console_evts: List[playwright.async_api._generated.ConsoleMessage] = []
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
             page.on("console", lambda console: console_evts.append(console))
 
@@ -389,8 +389,8 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
             page = await browser.new_page()
 
             # capture all network and console traffic
-            responses: List[playwright.async_api._generated.Response] = []
-            console_evts: List[playwright.async_api._generated.ConsoleMessage] = []
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
             page.on("console", lambda console: console_evts.append(console))
 
@@ -470,7 +470,7 @@ async def test_api_auth_matrix(
     environment.update_api_key(None)
 
     # generate the parameters list, then randomize it to remove ordering effect.
-    test_params: List[ApiAuthMatrixParams] = []
+    test_params: list[ApiAuthMatrixParams] = []
     for is_nofunmode in [True, False]:
         for is_api_key_configured_server in [True, False]:
             for is_api_key_configured_client in [True, False]:

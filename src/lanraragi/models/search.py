@@ -1,26 +1,25 @@
-from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
 class SearchArchiveIndexRequest(LanraragiRequest):
-    category: Optional[str] = Field(None)
-    search_filter: Optional[str] = Field(None)
-    start: Optional[str] = Field(None)
-    sortby: Optional[str] = Field(None)
-    order: Optional[str] = Field(None)
-    newonly: Optional[bool] = Field(None)
-    untaggedonly: Optional[bool] = Field(None)
+    category: str | None = Field(None)
+    search_filter: str | None = Field(None)
+    start: str | None = Field(None)
+    sortby: str | None = Field(None)
+    order: str | None = Field(None)
+    newonly: bool | None = Field(None)
+    untaggedonly: bool | None = Field(None)
     groupby_tanks: bool = Field("true")
 
 class SearchArchiveIndexResponseRecord(BaseModel):
     arcid: str = Field(...)  # 40-char SHA1 for archives, TANK_<timestamp> for tankoubons
     isnew: bool = Field(...)
     extension: str = Field(...)
-    tags: Optional[str] = Field(None)
-    lastreadtime: Optional[int] = Field(None)
-    pagecount: Optional[int] = Field(None)
-    progress: Optional[int] = Field(None)
+    tags: str | None = Field(None)
+    lastreadtime: int | None = Field(None)
+    pagecount: int | None = Field(None)
+    progress: int | None = Field(None)
     title: str = Field(...)
 
     @field_validator("arcid")
@@ -36,11 +35,11 @@ class SearchArchiveIndexResponse(LanraragiResponse):
     records_total: int = Field(...)
 
 class GetRandomArchivesRequest(LanraragiRequest):
-    category: Optional[str] = Field(None)
-    filter: Optional[str] = Field(None)
+    category: str | None = Field(None)
+    filter: str | None = Field(None)
     count: int = Field(5)
-    newonly: Optional[bool] = Field(None)
-    untaggedonly: Optional[bool] = Field(None)
+    newonly: bool | None = Field(None)
+    untaggedonly: bool | None = Field(None)
     groupby_tanks: bool = Field("true")
 
 class GetRandomArchivesResponse(LanraragiResponse):

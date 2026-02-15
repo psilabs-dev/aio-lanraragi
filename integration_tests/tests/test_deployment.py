@@ -1,5 +1,4 @@
 import logging
-from typing import Dict
 import pytest
 
 from aio_lanraragi_tests.common import is_port_available
@@ -21,7 +20,7 @@ def test_two_deployment_toggling(request: pytest.FixtureRequest):
     env_2 = generate_deployment(request, prefix_2, 11, logger=LOGGER)
 
     # configure environments to session
-    environments: Dict[str, AbstractLRRDeploymentContext] = {
+    environments: dict[str, AbstractLRRDeploymentContext] = {
         prefix_1: env_1,
         prefix_2: env_2
     }

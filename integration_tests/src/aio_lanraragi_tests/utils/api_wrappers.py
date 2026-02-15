@@ -8,7 +8,6 @@ import errno
 import logging
 import numpy as np
 from pathlib import Path
-from typing import List, Optional, Set, Tuple
 from urllib.parse import urlparse, parse_qs
 
 import aiohttp
@@ -45,8 +44,8 @@ async def upload_archive(
     client: LRRClient, save_path: Path, filename: str, semaphore: asyncio.Semaphore,
     checksum: str=None, title: str=None, tags: str=None,
     max_retries: int=4, allow_duplicates: bool=False, retry_on_ise: bool=False,
-    stop_event: Optional[asyncio.Event]=None,
-) -> Tuple[UploadArchiveResponse, LanraragiErrorResponse]:
+    stop_event: asyncio.Event | None=None,
+) -> tuple[UploadArchiveResponse, LanraragiErrorResponse]:
     """
     Upload archive (while considering all the permutations of errors that can happen).
     One can argue that this should be in the client library...
@@ -122,10 +121,10 @@ async def upload_archive(
             except aiohttp.client_exceptions.ClientConnectorError as client_connector_error:
                 # ClientConnectorError is a subclass of ClientOSError.
                 inner_os_error: OSError = client_connector_error.os_error
-                os_errno: Optional[int] = getattr(inner_os_error, "errno", None)
-                os_winerr: Optional[int] = getattr(inner_os_error, "winerror", None)
+                os_errno: int | None = getattr(inner_os_error, "errno", None)
+                os_winerr: int | None = getattr(inner_os_error, "winerror", None)
 
-                POSIX_REFUSED: Set[int] = {errno.ECONNREFUSED}
+                POSIX_REFUSED: set[int] = {errno.ECONNREFUSED}
                 if hasattr(errno, "WSAECONNREFUSED"):
                     POSIX_REFUSED.add(errno.WSAECONNREFUSED)
                 if hasattr(errno, "WSAECONNRESET"):
@@ -174,10 +173,10 @@ async def upload_archive(
             # just raise whatever else comes up because we should handle them explicitly anyways
 
 async def upload_archives(
-    write_responses: List[WriteArchiveResponse],
+    write_responses: list[WriteArchiveResponse],
     npgenerator: np.random.Generator, semaphore: asyncio.Semaphore, lrr_client: LRRClient, force_sync: bool=False
-) -> List[UploadArchiveResponse]:
-    responses: List[UploadArchiveResponse] = []
+) -> list[UploadArchiveResponse]:
+    responses: list[UploadArchiveResponse] = []
 
     num_archives = len(write_responses)
     num_tags = 100
@@ -220,7 +219,7 @@ async def upload_archives(
         # post-gather handling.
         # if any unexpected error or exception occurs: throw them.
         # if a client connection error occurred: throw it to trigger a flake rerun.
-        first_connector_error: Optional[aiohttp.client_exceptions.ClientConnectorError] = None
+        first_connector_error: aiohttp.client_exceptions.ClientConnectorError | None = None
         for item in gathered:
             if isinstance(item, tuple):
                 response, error = item
@@ -242,7 +241,7 @@ async def upload_archives(
             raise first_connector_error
         return responses
 
-def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Generator) -> List[WriteArchiveResponse]:
+def save_archives(num_archives: int, work_dir: Path, np_generator: np.random.Generator) -> list[WriteArchiveResponse]:
     requests = []
     responses = []
     for archive_id in range(num_archives):
@@ -286,7 +285,7 @@ def create_archive_file(tmpdir: Path, name: str, num_pages: int) -> Path:
     assert responses[0].save_path == save_path
     return save_path
 
-async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[DeleteArchiveResponse, LanraragiErrorResponse]:
+async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> tuple[DeleteArchiveResponse, LanraragiErrorResponse]:
     """Delete an archive with retry logic for locked resources."""
     retry_count = 0
     async with semaphore:
@@ -302,7 +301,7 @@ async def delete_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semap
                 continue
             return response, error
 
-async def add_archive_to_category(client: LRRClient, category_id: str, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[AddArchiveToCategoryResponse, LanraragiErrorResponse]:
+async def add_archive_to_category(client: LRRClient, category_id: str, arcid: str, semaphore: asyncio.Semaphore) -> tuple[AddArchiveToCategoryResponse, LanraragiErrorResponse]:
     """Add an archive to a category with retry logic for locked resources."""
     retry_count = 0
     async with semaphore:
@@ -319,7 +318,7 @@ async def add_archive_to_category(client: LRRClient, category_id: str, arcid: st
             return response, error
 
 
-async def remove_archive_from_category(client: LRRClient, category_id: str, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
+async def remove_archive_from_category(client: LRRClient, category_id: str, arcid: str, semaphore: asyncio.Semaphore) -> tuple[LanraragiResponse, LanraragiErrorResponse]:
     """Remove an archive from a category with retry logic for locked resources."""
     retry_count = 0
     async with semaphore:
@@ -336,7 +335,7 @@ async def remove_archive_from_category(client: LRRClient, category_id: str, arci
             return response, error
 
 
-async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> Tuple[LanraragiResponse, LanraragiErrorResponse]:
+async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyncio.Semaphore) -> tuple[LanraragiResponse, LanraragiErrorResponse]:
     """Load pages from an archive (extracts and fetches first 3 pages)."""
     async with semaphore:
         response, error = await retry_on_lock(lambda: client.archive_api.extract_archive(ExtractArchiveRequest(arcid=arcid, force=False)))
@@ -361,14 +360,14 @@ async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyn
             return (None, _build_err_response(content, status))
         for page in pages[:3]:
             tasks.append(asyncio.create_task(load_page(page)))
-        gathered: List[Tuple[bytes, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        gathered: list[tuple[bytes, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
         for _, error in gathered:
             if error:
                 return (None, error)
         return (LanraragiResponse(), None)
 
 
-async def get_bookmark_category_detail(client: LRRClient, semaphore: asyncio.Semaphore) -> Tuple[GetCategoryResponse, LanraragiErrorResponse]:
+async def get_bookmark_category_detail(client: LRRClient, semaphore: asyncio.Semaphore) -> tuple[GetCategoryResponse, LanraragiErrorResponse]:
     """Get the bookmark category details."""
     async with semaphore:
         response, error = await client.category_api.get_bookmark_link()

@@ -1,4 +1,3 @@
-from typing import Optional
 from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
@@ -20,11 +19,11 @@ class CleanDatabaseResponse(LanraragiResponse):
 
 class GetDatabaseBackupArchiveRecord(BaseModel):
     arcid: str = Field(..., min_length=40, max_length=40)
-    title: Optional[str] = Field(None)
-    tags: Optional[str] = Field(None)
-    summary: Optional[str] = Field(None)
-    thumbhash: Optional[str] = Field(None)
-    filename: Optional[str] = Field(None)
+    title: str | None = Field(None)
+    tags: str | None = Field(None)
+    summary: str | None = Field(None)
+    thumbhash: str | None = Field(None)
+    filename: str | None = Field(None)
 
 class GetDatabaseBackupCategoryRecord(BaseModel):
     archives: list[str] = Field(...)

@@ -1,4 +1,3 @@
-from typing import Optional
 from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
@@ -25,17 +24,17 @@ class GetCategoryResponse(LanraragiResponse):
 
 class CreateCategoryRequest(LanraragiRequest):
     name: str = Field(...)
-    pinned: Optional[bool] = Field(None)
-    search: Optional[str] = Field(None)
+    pinned: bool | None = Field(None)
+    search: str | None = Field(None)
 
 class CreateCategoryResponse(LanraragiResponse):
     category_id: str = Field(...)
 
 class UpdateCategoryRequest(LanraragiRequest):
     category_id: str = Field(...)
-    pinned: Optional[bool] = Field(None)
-    name: Optional[str] = Field(None)
-    search: Optional[str] = Field(None)
+    pinned: bool | None = Field(None)
+    name: str | None = Field(None)
+    search: str | None = Field(None)
 
 class UpdateCategoryResponse(LanraragiResponse):
     category_id: str = Field(...)
@@ -45,7 +44,7 @@ class DeleteCategoryRequest(LanraragiRequest):
 
 class GetBookmarkLinkResponse(LanraragiResponse):
     # may not be present if bookmark link is disabled
-    category_id: Optional[str] = Field(None)
+    category_id: str | None = Field(None)
 
 class UpdateBookmarkLinkRequest(LanraragiRequest):
     category_id: str = Field(...)

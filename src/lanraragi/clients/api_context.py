@@ -5,9 +5,7 @@ import io
 import logging
 from typing import (
     Any,
-    Optional,
     TypeVar,
-    Union,
     override,
 )
 
@@ -74,14 +72,14 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         self._lrr_base_url = lrr_base_url
     
     @property
-    def lrr_api_key(self) -> Optional[str]:
+    def lrr_api_key(self) -> str | None:
         """
         Unencoded API key for LANraragi
         """
         return self._lrr_api_key
 
     @lrr_api_key.setter
-    def lrr_api_key(self, lrr_api_key: Optional[str]):
+    def lrr_api_key(self, lrr_api_key: str | None):
         if lrr_api_key is not None:
             self.headers["Authorization"] = _build_auth_header(lrr_api_key)
         else:
@@ -111,12 +109,12 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
 
     def __init__(
             self,
-            lrr_base_url: str, lrr_api_key: Optional[str]=None,
+            lrr_base_url: str, lrr_api_key: str | None=None,
             ssl: bool=True,
-            session: Optional[aiohttp.ClientSession]=None,
-            client_session: Optional[aiohttp.ClientSession]=None,
-            connector: Optional[aiohttp.BaseConnector]=None,
-            logger: Optional[logging.Logger]=None
+            session: aiohttp.ClientSession | None=None,
+            client_session: aiohttp.ClientSession | None=None,
+            connector: aiohttp.BaseConnector | None=None,
+            logger: logging.Logger | None=None
     ):
         """
         Instantiates an ApiContextManager instance and context.
@@ -168,7 +166,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         """
         return
 
-    def update_api_key(self, api_key: Optional[str]):
+    def update_api_key(self, api_key: str | None):
         """
         Update the API key.
 
@@ -310,7 +308,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
     
     async def download_thumbnail(
             self, url: str, headers: dict[str, str], params: Query=None, max_retries: int=0
-    ) -> tuple[int, Union[bytes, str]]:
+    ) -> tuple[int, bytes | str]:
         """
         Specific to downloading thumbnails from the LANraragi server. (/api/archives/:id/thumbnail)
         """
@@ -341,7 +339,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
 
     async def download_file(
             self, url: str, headers: dict[str, str], params: Query=None, max_retries: int=0
-    ) -> tuple[int, Union[bytes, str]]:
+    ) -> tuple[int, bytes | str]:
         """
         Specific to downloading files from the LANraragi server.
         """

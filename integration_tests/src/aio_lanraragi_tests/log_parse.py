@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional
+from typing import Literal
 from datetime import datetime, timezone
 import re
 from pydantic import BaseModel
@@ -14,11 +14,11 @@ class LogEvent(BaseModel):
         ts = datetime.fromtimestamp(self.log_time, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         return f"[{ts}] [{self.namespace}] [{self.severity_level}] {self.message}"
 
-def parse_lrr_logs(log_content: str, after: Optional[int]=None, before: Optional[int]=None) -> List[LogEvent]:
+def parse_lrr_logs(log_content: str, after: int | None=None, before: int | None=None) -> list[LogEvent]:
     """
     Parse logs from lanraragi.log and shinobu.log.
     """
-    events: List[LogEvent] = []
+    events: list[LogEvent] = []
     line_re = re.compile(
         r"^\[(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] "
         r"\[(?P<ns>[^\]]+)\] "

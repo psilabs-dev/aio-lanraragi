@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import time
 import stat
-from typing import Optional, override, Dict
+from typing import override
 import threading
 from collections import deque
 
@@ -37,7 +37,7 @@ class _WindowsConsole(AbstractContextManager):
     """
 
     @property
-    def attach_to_pid(self) -> Optional[int]:
+    def attach_to_pid(self) -> int | None:
         """
         PID (if any) whose console we plan to attach to.
         """
@@ -83,7 +83,7 @@ class _WindowsConsole(AbstractContextManager):
     def allocated_console(self, value: bool):
         self._allocated_console = value
 
-    def __init__(self, attach_to_pid: Optional[int] = None):
+    def __init__(self, attach_to_pid: int | None = None):
         self.attach_to_pid = attach_to_pid
         self.had_console = False
         self.detached_parent = False
@@ -228,14 +228,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self._redis_client = client
 
     @property
-    def lrr_pid(self) -> Optional[int]:
+    def lrr_pid(self) -> int | None:
         """
         PID for the LRR process. If not cached, tries to get it via the expected port.
         """
         return _get_port_owner_pid(self.lrr_port)
     
     @property
-    def redis_pid(self) -> Optional[int]:
+    def redis_pid(self) -> int | None:
         """
         PID for the Redis process (which is just the owner of the Redis port).
         """
@@ -266,7 +266,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     def __init__(
         self, windist_path: str, staging_directory: str, resource_prefix: str, port_offset: int,
-        logger: Optional[logging.Logger]=None
+        logger: logging.Logger | None=None
     ):
         self.resource_prefix = resource_prefix
         self.port_offset = port_offset
@@ -284,7 +284,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
-        environment: Dict[str, str]={},
+        environment: dict[str, str]={},
         test_connection_max_retries: int=4
     ):
         """
@@ -801,7 +801,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 p = root_path / name
                 p.chmod(p.stat().st_mode | stat.S_IWRITE)
 
-def _get_port_owner_pid(port: int) -> Optional[int]:
+def _get_port_owner_pid(port: int) -> int | None:
     # Prefer LISTEN state owner to avoid TIME_WAIT rows (OwningProcess 0)
     ps = (
         f"$p={port}; "

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import AsyncGenerator, Dict, Generator
+from typing import AsyncGenerator, Generator
 
 import numpy as np
 import pytest
@@ -31,7 +31,7 @@ def environment(request: pytest.FixtureRequest, port_offset: int, resource_prefi
     environment.setup(with_api_key=True, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
 
     # configure environments to session
-    environments: Dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
+    environments: dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
     request.session.lrr_environments = environments
 
     yield environment

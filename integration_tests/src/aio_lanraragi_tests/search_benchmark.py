@@ -24,7 +24,6 @@ import docker
 import numpy as np
 import shutil
 import sys
-from typing import Dict, List, Optional, Tuple
 
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
@@ -125,7 +124,7 @@ def require_generate(staging_dir: str=None) -> bool:
         if not path.exists():
             LOGGER.warning(f"Archive does not exist: {path}")
             return False
-        tag_list: List[str] = archive["tag_list"]
+        tag_list: list[str] = archive["tag_list"]
         has_series_info = False
         for tag in tag_list:
             if tag.startswith('series_id:'):
@@ -159,8 +158,8 @@ def generate(staging_dir: str=None, num_archives: int=None, num_tags: int=None, 
         sys.exit(1)
 
     archives_dir.mkdir(parents=True, exist_ok=True)
-    requests: List[WriteArchiveRequest] = []
-    responses: List[WriteArchiveResponse] = []
+    requests: list[WriteArchiveRequest] = []
+    responses: list[WriteArchiveResponse] = []
 
     # ensure sharded subdirectories with up to 1,000 archives each
     num_subdirs = (num_archives - 1) // 1000 + 1
@@ -188,17 +187,17 @@ def generate(staging_dir: str=None, num_archives: int=None, num_tags: int=None, 
     archive_idx_to_tag_idx_list = get_archive_idx_to_tag_idxs_map(num_archives, num_tags, 0, 20, np_generator)
     archive_idx_to_artist_idx_list = get_archive_idx_to_tag_idxs_map(num_archives, num_artists, 1, 1, np_generator)
 
-    arcidx_to_arcid: Dict[int, str] = {}
+    arcidx_to_arcid: dict[int, str] = {}
     for arcidx, response in enumerate(responses):
         save_path = response.save_path
         arcid = compute_archive_id(save_path)
         arcidx_to_arcid[arcidx] = arcid
 
-    tag_idx_to_tag_id: Dict[int, str] = {idx: f"tag-{idx}" for idx in range(num_tags)}
-    artist_idx_to_artist_id: Dict[int, str] = {artistidx: f"artist:artist-{artistidx}" for artistidx in range(num_artists)}
+    tag_idx_to_tag_id: dict[int, str] = {idx: f"tag-{idx}" for idx in range(num_tags)}
+    artist_idx_to_artist_id: dict[int, str] = {artistidx: f"artist:artist-{artistidx}" for artistidx in range(num_artists)}
 
     # generate mock date created tags
-    archive_idx_to_dates_list: Dict[int, str] = {}
+    archive_idx_to_dates_list: dict[int, str] = {}
     for arcidx in range(num_archives):
         epoch_time = int(np_generator.integers(1700000000, 1762000000))
         archive_idx_to_dates_list[arcidx] = f"date_created:{epoch_time}"
@@ -211,8 +210,8 @@ def generate(staging_dir: str=None, num_archives: int=None, num_tags: int=None, 
     arcidx_to_optional_series_idx_list = get_archive_idx_to_tag_idxs_map(
         num_archives, DEFAULT_NUM_SERIES, 0, 1, np_generator, poisson_lam=0.2
     )
-    arcidx_to_series_tags: Dict[int, List[str]] = {}
-    series_idx_counter: Dict[int, int] = {}
+    arcidx_to_series_tags: dict[int, list[str]] = {}
+    series_idx_counter: dict[int, int] = {}
     for arcidx, series_idx_list in arcidx_to_optional_series_idx_list.items():
         if arcidx not in arcidx_to_series_tags:
             arcidx_to_series_tags[arcidx] = []
@@ -321,7 +320,7 @@ async def upload(staging_dir: str):
         upload_start_time = time.time()
 
         sem = asyncio.BoundedSemaphore(value=4)
-        avg_batch_times: List[float] = []
+        avg_batch_times: list[float] = []
         total_batches = math.ceil(len(archives) / batch_size)
 
         for batch_idx, i in enumerate(range(0, len(archives), batch_size), start=1):
@@ -354,7 +353,7 @@ async def upload(staging_dir: str):
 
             # we might have received some duplicates but duplicates might be a result of buggy logging,
             # so we're going to remove those duplicates and try again in another run.
-            results: List[Tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+            results: list[tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
             for result in results:
                 response, error = result
                 if error and error.status == 409:
@@ -463,7 +462,7 @@ if __name__ == "__main__":
     try:
         match args.command:
             case 'up':
-                docker_api: Optional[docker.APIClient] = None
+                docker_api: docker.APIClient | None = None
                 if args.docker_api:
                     docker_api = docker.APIClient(base_url="unix://var/run/docker.sock")
                 up(
