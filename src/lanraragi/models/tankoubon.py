@@ -4,7 +4,7 @@ from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
 class TankoubonRecord(BaseModel):
     archives: list[str] = Field(...)
-    tank_id: str = Field(...)
+    tank_id: str = Field(..., validation_alias="id")
     name: str = Field(...)
     summary: str = Field(...)
     tags: str = Field(...)

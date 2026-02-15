@@ -4,7 +4,7 @@ from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
 class GetAllCategoriesResponseRecord(BaseModel):
     archives: list[str] = Field(...)
-    category_id: str = Field(...)
+    category_id: str = Field(..., validation_alias="id")
     name: str = Field(...)
     pinned: bool = Field(...)
     search: str = Field(...)
@@ -17,7 +17,7 @@ class GetCategoryRequest(LanraragiRequest):
 
 class GetCategoryResponse(LanraragiResponse):
     archives: list[str] = Field(...)
-    category_id: str = Field(...)
+    category_id: str = Field(..., validation_alias="id")
     name: str = Field(...)
     pinned: bool = Field(...)
     search: str = Field(...)

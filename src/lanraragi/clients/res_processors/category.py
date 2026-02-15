@@ -1,4 +1,4 @@
-import json
+from pydantic import TypeAdapter
 
 from lanraragi.models.category import (
     GetAllCategoriesResponse,
@@ -6,32 +6,13 @@ from lanraragi.models.category import (
     GetCategoryResponse
 )
 
+_all_categories_adapter = TypeAdapter(list[GetAllCategoriesResponseRecord])
 
 def _process_get_all_categories_response(content: str) -> GetAllCategoriesResponse:
-    data = json.loads(content) # note: this is a list of categories.
-    categories: list[GetAllCategoriesResponseRecord] = []
-    for category in data:
-        archives = category.get("archives")
-        id = category.get("id")
-        name = category.get("name")
-        pinned = category.get("pinned") == "1"
-        search = category.get("search")
-        categories.append(GetAllCategoriesResponseRecord(
-            archives=archives, category_id=id, name=name, pinned=pinned, search=search
-        ))
-    response = GetAllCategoriesResponse(
-        data=categories
-    )
-    return response
+    return GetAllCategoriesResponse(data=_all_categories_adapter.validate_json(content))
 
 def _process_get_category_response(content: str) -> GetCategoryResponse:
-    response_j = json.loads(content)
-    archives = response_j.get("archives")
-    id = response_j.get("id")
-    name = response_j.get("name")
-    pinned = response_j.get("pinned") == "1"
-    search = response_j.get("search")
-    return GetCategoryResponse(archives=archives, category_id=id, name=name, pinned=pinned, search=search)
+    return GetCategoryResponse.model_validate_json(content)
 
 __all__ = [
     "_process_get_all_categories_response",

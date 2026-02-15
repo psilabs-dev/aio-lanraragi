@@ -27,7 +27,7 @@ class GetDatabaseBackupArchiveRecord(BaseModel):
 
 class GetDatabaseBackupCategoryRecord(BaseModel):
     archives: list[str] = Field(...)
-    category_id: str = Field(...)
+    category_id: str = Field(..., validation_alias="catid")
     name: str = Field(...)
     search: str = Field(...)
 
@@ -37,9 +37,9 @@ class GetDatabaseBackupTankoubonRecord(BaseModel):
     archives: list[str] = Field(...)
 
 class GetDatabaseBackupResponse(LanraragiResponse):
-    archives: list[GetDatabaseBackupArchiveRecord] = Field(...)
-    categories: list[GetDatabaseBackupCategoryRecord] = Field(...)
-    tankoubons: list[GetDatabaseBackupTankoubonRecord] = Field(...)
+    archives: list[GetDatabaseBackupArchiveRecord] = Field(default_factory=list)
+    categories: list[GetDatabaseBackupCategoryRecord] = Field(default_factory=list)
+    tankoubons: list[GetDatabaseBackupTankoubonRecord] = Field(default_factory=list)
 
 __all__ = [
     "GetDatabaseStatsRequest",

@@ -31,8 +31,8 @@ class SearchArchiveIndexResponseRecord(BaseModel):
 
 class SearchArchiveIndexResponse(LanraragiResponse):
     data: list[SearchArchiveIndexResponseRecord] = Field(...)
-    records_filtered: int = Field(...)
-    records_total: int = Field(...)
+    records_filtered: int = Field(..., validation_alias="recordsFiltered")
+    records_total: int = Field(..., validation_alias="recordsTotal")
 
 class GetRandomArchivesRequest(LanraragiRequest):
     category: str | None = Field(None)
@@ -44,7 +44,7 @@ class GetRandomArchivesRequest(LanraragiRequest):
 
 class GetRandomArchivesResponse(LanraragiResponse):
     data: list[SearchArchiveIndexResponseRecord] = Field(...)
-    records_total: int = Field(...)
+    records_total: int = Field(..., validation_alias="recordsTotal")
 
 # <<<<< SEARCH <<<<<
 

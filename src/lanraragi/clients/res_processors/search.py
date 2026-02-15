@@ -1,58 +1,13 @@
-import json
-
 from lanraragi.models.search import (
     GetRandomArchivesResponse,
-    SearchArchiveIndexResponse,
-    SearchArchiveIndexResponseRecord
+    SearchArchiveIndexResponse
 )
 
 def _process_search_archive_index_response(content: str) -> SearchArchiveIndexResponse:
-    response_j = json.loads(content)
-    data = response_j.get('data')
-    records_filtered = response_j.get('recordsFiltered')
-    records_total = response_j.get('recordsTotal')
-    records = []
-    for record in data:
-        arcid = record.get('arcid')
-        isnew = record.get('isnew')
-        extension = record.get('extension')
-        pagecount = record.get('pagecount')
-        progress = record.get('progress')
-        tags = record.get('tags')
-        lastreadtime = record.get('lastreadtime')
-        title = record.get('title')
-        records.append(SearchArchiveIndexResponseRecord(
-            arcid=arcid, isnew=isnew, extension=extension, pagecount=pagecount,
-            progress=progress, tags=tags, lastreadtime=lastreadtime, title=title
-        ))
-    response = SearchArchiveIndexResponse(
-        data=records, records_filtered=records_filtered, records_total=records_total
-    )
-    return response
+    return SearchArchiveIndexResponse.model_validate_json(content)
 
 def _process_get_random_archives_response(content: str) -> GetRandomArchivesResponse:
-    response_j = json.loads(content)
-    data = response_j.get('data')
-    records_filtered = response_j.get('recordsFiltered')
-    records_total = response_j.get('recordsTotal')
-    records: list[SearchArchiveIndexResponseRecord] = []
-    for record in data:
-        arcid = record.get('arcid')
-        isnew = record.get('isnew')
-        extension = record.get('extension')
-        pagecount = record.get('pagecount')
-        progress = record.get('progress')
-        tags = record.get('tags')
-        lastreadtime = record.get('lastreadtime')
-        title = record.get('title')
-        records.append(SearchArchiveIndexResponseRecord(
-            arcid=arcid, isnew=isnew, extension=extension, pagecount=pagecount, 
-            progress=progress, tags=tags, lastreadtime=lastreadtime, title=title
-        ))
-    response = GetRandomArchivesResponse(
-        data=records, records_filtered=records_filtered, records_total=records_total
-    )
-    return response
+    return GetRandomArchivesResponse.model_validate_json(content)
 
 __all__ = [
     "_process_search_archive_index_response",

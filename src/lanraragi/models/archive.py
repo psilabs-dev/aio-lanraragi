@@ -38,7 +38,7 @@ class GetArchiveCategoriesRequest(LanraragiRequest):
 
 class GetArchiveCategoriesCatRecord(BaseModel):
     archives: list[str] = Field(...)
-    category_id: str = Field(...)
+    category_id: str = Field(..., validation_alias="id")
     name: str = Field(...)
     pinned: bool = Field(...)
     search: str = Field(...)
