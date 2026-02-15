@@ -3,7 +3,6 @@ import multiprocessing
 from pathlib import Path
 import tarfile
 import tempfile
-from typing import List, Union
 import zipfile
 
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
@@ -62,7 +61,7 @@ def write_archive_to_disk(request: WriteArchiveRequest) -> WriteArchiveResponse:
         else:
             raise NotImplementedError(f"The compression strategy is not implemented: {strategy.name}")
 
-def write_archives_to_disk(write_requests: List[WriteArchiveRequest]) -> List[WriteArchiveResponse]:
+def write_archives_to_disk(write_requests: list[WriteArchiveRequest]) -> list[WriteArchiveResponse]:
     """
     Write multiple archives to disk and return their responses with multiprocessing.
     """
@@ -71,7 +70,7 @@ def write_archives_to_disk(write_requests: List[WriteArchiveRequest]) -> List[Wr
         responses = pool.starmap(write_archive_to_disk, [(request,) for request in write_requests])
     return responses
 
-def create_comic(output: Union[str, Path], comic_id: str, width: int, height: int, num_pages: int, archival_strategy: ArchivalStrategyEnum=ArchivalStrategyEnum.ZIP) -> WriteArchiveResponse:
+def create_comic(output: str | Path, comic_id: str, width: int, height: int, num_pages: int, archival_strategy: ArchivalStrategyEnum=ArchivalStrategyEnum.ZIP) -> WriteArchiveResponse:
     """
     Create comic pages in a specified output directory with given metadata,
     and returns the list of paths of the images.

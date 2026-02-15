@@ -7,7 +7,6 @@ import logging
 from pathlib import Path
 import sys
 import tempfile
-from typing import List, Tuple
 import numpy as np
 import pytest
 
@@ -151,7 +150,7 @@ async def test_archive_upload(lrr_client: LRRClient, semaphore: asyncio.Semaphor
     tasks = []
     for archive in arcs_delete_async:
         tasks.append(asyncio.create_task(delete_archive(lrr_client, archive.arcid, semaphore)))
-    gathered: List[Tuple[DeleteArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+    gathered: list[tuple[DeleteArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
     for response, error in gathered:
         assert not error, f"Delete archive failed (status {error.status}): {error.error}"
     response, error = await lrr_client.archive_api.get_all_archives()
@@ -242,7 +241,7 @@ async def test_archive_read(lrr_client: LRRClient, semaphore: asyncio.Semaphore,
     tasks.append(asyncio.create_task(retry_on_lock(lambda: lrr_client.archive_api.update_reading_progression(UpdateReadingProgressionRequest(arcid=first_archive_id, page=1)))))
     tasks.append(asyncio.create_task(retry_on_lock(lambda: lrr_client.archive_api.get_archive_thumbnail(GetArchiveThumbnailRequest(arcid=first_archive_id)))))
 
-    results: List[Tuple[LanraragiResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+    results: list[tuple[LanraragiResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
     for response, error in results:
         assert not error, f"Failed to complete task (status {error.status}): {error.error}"
     # <<<<< SIMULATE READ ARCHIVE STAGE <<<<<
@@ -349,7 +348,7 @@ async def test_archive_category_interaction(lrr_client: LRRClient, semaphore: as
         add_archive_tasks.append(asyncio.create_task(
             add_archive_to_category(lrr_client, bookmark_cat_id, arcid, semaphore)
         ))
-    gathered: List[Tuple[AddArchiveToCategoryResponse, LanraragiErrorResponse]] = await asyncio.gather(*add_archive_tasks)
+    gathered: list[tuple[AddArchiveToCategoryResponse, LanraragiErrorResponse]] = await asyncio.gather(*add_archive_tasks)
     for response, error in gathered:
         assert not error, f"Failed to add archive to category (status {error.status}): {error.error}"
         del response, error
@@ -386,7 +385,7 @@ async def test_archive_category_interaction(lrr_client: LRRClient, semaphore: as
         remove_archive_tasks.append(asyncio.create_task(
             remove_archive_from_category(lrr_client, bookmark_cat_id, arcid, semaphore)
         ))
-    gathered: List[Tuple[LanraragiResponse, LanraragiErrorResponse]] = await asyncio.gather(*remove_archive_tasks)
+    gathered: list[tuple[LanraragiResponse, LanraragiErrorResponse]] = await asyncio.gather(*remove_archive_tasks)
     for response, error in gathered:
         assert not error, f"Failed to remove archive from category (status {error.status}): {error.error}"
         del response, error

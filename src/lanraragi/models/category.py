@@ -1,41 +1,40 @@
-from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
 class GetAllCategoriesResponseRecord(BaseModel):
-    archives: List[str] = Field(...)
-    category_id: str = Field(...)
+    archives: list[str] = Field(...)
+    category_id: str = Field(..., validation_alias="id")
     name: str = Field(...)
     pinned: bool = Field(...)
     search: str = Field(...)
 
 class GetAllCategoriesResponse(LanraragiResponse):
-    data: List[GetAllCategoriesResponseRecord] = Field(...)
+    data: list[GetAllCategoriesResponseRecord] = Field(...)
 
 class GetCategoryRequest(LanraragiRequest):
     category_id: str = Field(...)
 
 class GetCategoryResponse(LanraragiResponse):
-    archives: List[str] = Field(...)
-    category_id: str = Field(...)
+    archives: list[str] = Field(...)
+    category_id: str = Field(..., validation_alias="id")
     name: str = Field(...)
     pinned: bool = Field(...)
     search: str = Field(...)
 
 class CreateCategoryRequest(LanraragiRequest):
     name: str = Field(...)
-    pinned: Optional[bool] = Field(None)
-    search: Optional[str] = Field(None)
+    pinned: bool | None = Field(None)
+    search: str | None = Field(None)
 
 class CreateCategoryResponse(LanraragiResponse):
     category_id: str = Field(...)
 
 class UpdateCategoryRequest(LanraragiRequest):
     category_id: str = Field(...)
-    pinned: Optional[bool] = Field(None)
-    name: Optional[str] = Field(None)
-    search: Optional[str] = Field(None)
+    pinned: bool | None = Field(None)
+    name: str | None = Field(None)
+    search: str | None = Field(None)
 
 class UpdateCategoryResponse(LanraragiResponse):
     category_id: str = Field(...)
@@ -45,7 +44,7 @@ class DeleteCategoryRequest(LanraragiRequest):
 
 class GetBookmarkLinkResponse(LanraragiResponse):
     # may not be present if bookmark link is disabled
-    category_id: Optional[str] = Field(None)
+    category_id: str | None = Field(None)
 
 class UpdateBookmarkLinkRequest(LanraragiRequest):
     category_id: str = Field(...)

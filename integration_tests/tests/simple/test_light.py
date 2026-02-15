@@ -8,7 +8,6 @@ import logging
 from pathlib import Path
 import sys
 import tempfile
-from typing import List
 import numpy as np
 import pytest
 import playwright.async_api
@@ -310,8 +309,8 @@ async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semap
             page = await browser.new_page()
 
             # capture all network and console traffic
-            responses: List[playwright.async_api._generated.Response] = []
-            console_evts: List[playwright.async_api._generated.ConsoleMessage] = []
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
             page.on("console", lambda console: console_evts.append(console))
 

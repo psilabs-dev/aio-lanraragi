@@ -2,7 +2,6 @@ import enum
 from pathlib import Path
 from PIL import Image
 from pydantic import BaseModel, ConfigDict
-from typing import List, Optional, Tuple, Union
 
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
 
@@ -22,8 +21,8 @@ class Page(BaseModel):
     lower_boundary: int
     margin: int
     font_size: int
-    image: Optional[Image.Image] = None
-    first_n_bytes: Optional[int] = None
+    image: Image.Image | None = None
+    first_n_bytes: int | None = None
     image_format: str
     text: str
     filename: str
@@ -39,18 +38,18 @@ class CreatePageRequest(BaseModel):
     width: int
     height: int
     filename: str
-    background_color: Union[str, Tuple[int, int, int]] = LIGHT_GRAY
-    first_n_bytes: Optional[int] = None
+    background_color: str | tuple[int, int, int] = LIGHT_GRAY
+    first_n_bytes: int | None = None
     image_format: str = 'PNG'
-    text: Optional[str] = None
+    text: str | None = None
 
 class CreatePageResponse(BaseModel):
     """
     Response from passing a CreatePageRequest object to create_page.
     """
-    page: Optional[Page] = None
+    page: Page | None = None
     status: CreatePageResponseStatus
-    error: Optional[str] = None
+    error: str | None = None
 
 class WriteArchiveRequest(BaseModel):
     """
@@ -58,7 +57,7 @@ class WriteArchiveRequest(BaseModel):
     page requests.
     """
 
-    create_page_requests: List[CreatePageRequest]
+    create_page_requests: list[CreatePageRequest]
     save_path: Path
     archival_strategy: ArchivalStrategyEnum
 
@@ -68,7 +67,7 @@ class WriteArchiveResponseStatus(enum.Enum):
 
 class WriteArchiveResponse(BaseModel):
     status: WriteArchiveResponseStatus
-    error: Optional[str] = None
+    error: str | None = None
     save_path: Path
 
 class TagGenerator:

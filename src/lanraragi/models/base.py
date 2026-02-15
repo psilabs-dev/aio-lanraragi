@@ -1,4 +1,3 @@
-from typing import Optional
 from pydantic import BaseModel, Field
 
 class LanraragiRequest(BaseModel):
@@ -11,7 +10,7 @@ class LanraragiResponse(BaseModel):
     """
     Base model for all LANraragi API client non-error responses.
     """
-    message: Optional[str] = Field(None, description="Message returned by the server.")
+    message: str | None = Field(None, description="Message returned by the server.")
 
 class LanraragiErrorResponse(LanraragiResponse):
     """

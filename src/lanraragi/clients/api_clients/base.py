@@ -1,5 +1,4 @@
 import abc
-from typing import Dict
 
 from lanraragi.clients.api_context import ApiContextManager
 
@@ -10,7 +9,7 @@ class _ApiClient(abc.ABC):
     """
 
     @property
-    def headers(self) -> Dict[str, str]:
+    def headers(self) -> dict[str, str]:
         """
         LRR request headers. Is either an empty dict or contains authentication.
         """

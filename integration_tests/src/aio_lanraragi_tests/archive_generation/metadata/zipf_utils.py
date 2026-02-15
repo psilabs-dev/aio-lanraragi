@@ -6,7 +6,7 @@ zipf's law: https://en.wikipedia.org/wiki/Zipf%27s_law
 import collections
 import sys
 import numpy as np
-from typing import Counter, Dict, List, Literal, Set
+from typing import Literal
 
 # tests v0.1.15
 def get_archive_idx_to_tag_idxs_map(
@@ -18,10 +18,10 @@ def get_archive_idx_to_tag_idxs_map(
     poisson_lam: float = 7.0,
     tag_zipf_exp: float = 1.1,
     generation_method: Literal['zipf', 'zipf-fast'] = 'zipf-fast',
-) -> Dict[int, List[int]]:
+) -> dict[int, list[int]]:
     if generator is None:
         generator = np.random.default_rng()
-    archive_idx_to_tag_idx: Dict[int, List[int]] = {}
+    archive_idx_to_tag_idx: dict[int, list[int]] = {}
 
     match generation_method:
         case 'zipf-fast':
@@ -31,7 +31,7 @@ def get_archive_idx_to_tag_idxs_map(
                 lower = min(min_tags_per_archive, upper)
                 k = min(max(k, lower), upper)
 
-                chosen: Set[int] = set()
+                chosen: set[int] = set()
                 while len(chosen) < k:
                     for r in generator.zipf(tag_zipf_exp, size=k * 2):
                         idx = int(r - 1)
@@ -93,7 +93,7 @@ if __name__ == "__main__":
             generation_method='zipf-fast'
         )
 
-        tag_freq: Counter[int] = collections.Counter()
+        tag_freq: collections.Counter[int] = collections.Counter()
         for tag_idxs in archive_idx_to_tag_idxs.values():
             tag_freq.update(tag_idxs)
 

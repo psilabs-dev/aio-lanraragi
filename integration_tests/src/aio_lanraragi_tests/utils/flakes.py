@@ -3,7 +3,6 @@ import logging
 import numpy as np
 from pathlib import Path
 import tempfile
-from typing import Optional
 
 from lanraragi.clients.client import LRRClient
 
@@ -22,7 +21,7 @@ async def xfail_catch_flakes_inner(
     semaphore: asyncio.Semaphore,
     environment: AbstractLRRDeploymentContext,
     num_archives: int = 10,
-    npgenerator: Optional[np.random.Generator] = None,
+    npgenerator: np.random.Generator | None = None,
 ) -> None:
     """
     Inner implementation for xfail flake-catching test cases.

@@ -3,7 +3,7 @@ from pathlib import Path
 import platform
 import psutil
 import time
-from typing import Any, Dict, List
+from typing import Any
 import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
@@ -87,7 +87,7 @@ def pytest_configure(config: pytest.Config):
         "failing: Tests that are known to fail will be skipped by default."
     )
 
-def pytest_collection_modifyitems(config: pytest.Config, items: List[pytest.Item]):
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]):
     if not config.getoption("--playwright"):
         skip_playwright = pytest.mark.skip(reason="need --playwright option enabled")
         for item in items:
@@ -144,7 +144,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
             LOGGER.error(f"Test failed: dumping logs... ({item.nodeid})")
         try:
             if hasattr(item.session, 'lrr_environments') and item.session.lrr_environments:
-                environments_by_prefix: Dict[str, AbstractLRRDeploymentContext] = item.session.lrr_environments
+                environments_by_prefix: dict[str, AbstractLRRDeploymentContext] = item.session.lrr_environments
                 for prefix, environment in environments_by_prefix.items():
                     LOGGER.error(f">>>>> LRR LOGS (prefix: \"{prefix}\") >>>>>")
                     lrr_logs = environment.read_lrr_logs()

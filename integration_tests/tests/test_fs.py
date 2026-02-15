@@ -10,7 +10,7 @@ import numpy as np
 from pathlib import Path
 import shutil
 import sys
-from typing import AsyncGenerator, Dict, Generator, List, Tuple
+from typing import AsyncGenerator, Generator
 import pytest
 import pytest_asyncio
 
@@ -44,7 +44,7 @@ def environment(request: pytest.FixtureRequest, resource_prefix: str, port_offse
     environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
 
     # configure environments to session
-    environments: Dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
+    environments: dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
     request.session.lrr_environments = environments
 
     yield environment
@@ -187,7 +187,7 @@ async def test_archive_upload_to_symlinked_dir(
     tasks = []
     for archive in arcs_delete_async:
         tasks.append(asyncio.create_task(delete_archive(lrr_client, archive.arcid, semaphore)))
-    gathered: List[Tuple[DeleteArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+    gathered: list[tuple[DeleteArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
     for response, error in gathered:
         assert not error, f"Delete archive failed (status {error.status}): {error.error}"
     response, error = await lrr_client.archive_api.get_all_archives()

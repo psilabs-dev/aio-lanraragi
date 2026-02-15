@@ -3,7 +3,6 @@ import logging
 from pathlib import Path
 import shutil
 import time
-from typing import Dict, Optional
 import aiohttp
 import redis
 import requests
@@ -79,7 +78,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
         return self._lrr_base_url
 
     @property
-    def lrr_api_key(self) -> Optional[str]:
+    def lrr_api_key(self) -> str | None:
         """
         Unencoded API key for this instance.
         Can be None, which represents a server without an API key.
@@ -89,7 +88,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
         return self._lrr_api_key
 
     @lrr_api_key.setter
-    def lrr_api_key(self, lrr_api_key: Optional[str]):
+    def lrr_api_key(self, lrr_api_key: str | None):
         self._lrr_api_key = lrr_api_key
 
     @property
@@ -182,7 +181,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
     @abc.abstractmethod
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
-        environment: Dict[str, str]={},
+        environment: dict[str, str]={},
         test_connection_max_retries: int=4
     ):
         """
@@ -305,7 +304,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
         shutil.copy2(backup_dir, self.redis_dir)
         self.logger.debug(f"Restore from backup {backup_id} OK")
 
-    def update_api_key(self, api_key: Optional[str]):
+    def update_api_key(self, api_key: str | None):
         """
         Insert/update LRR API key (or remove if None is passed).
         """
@@ -475,8 +474,8 @@ class AbstractLRRDeploymentContext(abc.ABC):
 
     def lrr_client(
         self, ssl: bool=True, 
-        client_session: Optional[aiohttp.ClientSession]=None, connector: Optional[aiohttp.BaseConnector]=None, 
-        logger: Optional[logging.Logger]=None
+        client_session: aiohttp.ClientSession | None=None, connector: aiohttp.BaseConnector | None=None, 
+        logger: logging.Logger | None=None
     ) -> LRRClient:
         """
         Returns a LRRClient object configured to connect to this server.

@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools", "setuptools_scm"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.9.25,<0.10.0"]
+build-backend = "uv_build"
 
 [project]
 name = "aio-lanraragi"
-version = "0.1.15"
+version = "0.1.16"
 authors = [
     {name="psilabs-dev"}
 ]
@@ -17,15 +17,11 @@ dependencies = [
     "pydantic>=2.0.0"
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
-    "build",
     "pytest                 >=8.0.0",
     "pytest-asyncio         >=0.25.0",
     "ruff",
-    "setuptools",
-    "tox",
-    "twine",
 ]
 
 [project.urls]
@@ -52,6 +48,8 @@ target-version = "py312"
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["lanraragi*"]
+[tool.uv.workspace]
+members = ["integration_tests"]
+
+[tool.uv.build-backend]
+module-name = "lanraragi"

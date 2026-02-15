@@ -7,7 +7,6 @@ import logging
 import os
 from pathlib import Path
 import sys
-from typing import Optional
 import docker
 
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
@@ -117,7 +116,7 @@ def console():
     try:
         match args.command:
             case "up":
-                docker_api: Optional[docker.APIClient] = None
+                docker_api: docker.APIClient | None = None
                 if args.docker_api:
                     docker_api = docker.APIClient(base_url="unix://var/run/docker.sock")
                 up(

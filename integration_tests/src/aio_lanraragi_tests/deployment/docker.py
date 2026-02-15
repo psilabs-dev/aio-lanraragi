@@ -9,7 +9,7 @@ from pathlib import Path
 import tempfile
 import shutil
 import time
-from typing import List, Optional, override, Dict
+from typing import override
 import docker
 import docker.errors
 import docker.models
@@ -43,7 +43,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self.resource_prefix + "redis_service"
 
     @property
-    def redis_container(self) -> Optional[docker.models.containers.Container]:
+    def redis_container(self) -> docker.models.containers.Container | None:
         """
         Returns the redis container from attribute if it exists.
         Otherwise, falls back to finding the redis container with the
@@ -66,7 +66,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self.resource_prefix + "lanraragi_service"
 
     @property
-    def lrr_container(self) -> Optional[docker.models.containers.Container]:
+    def lrr_container(self) -> docker.models.containers.Container | None:
         """
         Returns the LANraragi container from attribute if it exists.
         Otherwise, falls back to finding the LRR container with the
@@ -89,7 +89,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self.resource_prefix + "network"
 
     @property
-    def network(self) -> Optional[docker.models.networks.Network]:
+    def network(self) -> docker.models.networks.Network | None:
         """
         Returns the LANraragi network from attribute if it exists.
         Otherwise, falls back to finding the LRR network with the
@@ -151,7 +151,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self._docker_client
 
     @property
-    def docker_api(self) -> Optional[docker.APIClient]:
+    def docker_api(self) -> docker.APIClient | None:
         """
         Returns API client if docker image build logs streaming is configured, else None.
         """
@@ -185,7 +185,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def __init__(
             self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient, staging_dir: str,
             resource_prefix: str, port_offset: int,
-            docker_api: docker.APIClient=None, logger: Optional[logging.Logger]=None,
+            docker_api: docker.APIClient=None, logger: logging.Logger | None=None,
             global_run_id: int=None, is_allow_uploads: bool=True, is_force_build: bool=False
     ):
 
@@ -271,7 +271,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
-        environment: Dict[str, str]={},
+        environment: dict[str, str]={},
         test_connection_max_retries: int=4
     ):
         """
@@ -423,7 +423,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             needs_recreate_lrr = self.lrr_container.image.id != self.docker_client.images.get(image_id).id
             # If environment differs from desired, recreate to apply env
             self.lrr_container.reload()
-            current_env_list: List[str] = self.lrr_container.attrs["Config"]["Env"]
+            current_env_list: list[str] = self.lrr_container.attrs["Config"]["Env"]
             if not needs_recreate_lrr and set(current_env_list) != set(lrr_environment):
                 self.logger.debug("LRR environment differs from desired; removing existing container for recreation.")
                 needs_recreate_lrr = True
@@ -552,7 +552,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self._docker_client.close()
         self.logger.info("Cleanup complete.")
 
-    def _get_container_by_name(self, container_name: str) -> Optional[docker.models.containers.Container]:
+    def _get_container_by_name(self, container_name: str) -> docker.models.containers.Container | None:
         """
         Tries to return a container DTO by its name if exists. Otherwise, returnes None.
         """
@@ -561,7 +561,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             return container
         return None
     
-    def _get_volume_by_name(self, volume_name: str) -> Optional[docker.models.volumes.Volume]:
+    def _get_volume_by_name(self, volume_name: str) -> docker.models.volumes.Volume | None:
         """
         Tries to return a volume DTO by its name if exists. Otherwise, returnes None.
         """
@@ -570,7 +570,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             return container
         return None
     
-    def _get_network_by_name(self, network_name: str) -> Optional[docker.models.networks.Network]:
+    def _get_network_by_name(self, network_name: str) -> docker.models.networks.Network | None:
         """
         Tries to return a network DTO by its name if exists. Otherwise, returnes None.
         """

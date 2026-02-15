@@ -1,5 +1,6 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["uv_build>=0.9.25,<0.10.0"]
+build-backend = "uv_build"
 
 [project]
 name = "aio-lanraragi-integration-tests"
@@ -7,6 +8,7 @@ version = "0.1.17-dev"
 description = "Integration tests for aio-lanraragi"
 requires-python = ">=3.12, <=3.14"
 dependencies = [
+    "aio-lanraragi",
     "aiofiles",
     "docker",
     "git-python",
@@ -55,5 +57,9 @@ target-version = "py312"
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 
-[tool.setuptools.package-data]
-aio_lanraragi_tests = ["resources/**/*.ttf", "resources/**/*.txt"]
+[tool.uv.sources]
+aio-lanraragi = { workspace = true }
+
+[tool.uv.build-backend]
+module-name = "aio_lanraragi_tests"
+source-include = ["src/aio_lanraragi_tests/resources/**"]

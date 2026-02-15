@@ -1,4 +1,3 @@
-from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
@@ -12,7 +11,7 @@ class GetDatabaseStatsResponseTag(BaseModel):
     weight: int = Field(...)
 
 class GetDatabaseStatsResponse(LanraragiResponse):
-    data: List[GetDatabaseStatsResponseTag] = Field(...)
+    data: list[GetDatabaseStatsResponseTag] = Field(...)
 
 class CleanDatabaseResponse(LanraragiResponse):
     deleted: int = Field(...)
@@ -20,27 +19,27 @@ class CleanDatabaseResponse(LanraragiResponse):
 
 class GetDatabaseBackupArchiveRecord(BaseModel):
     arcid: str = Field(..., min_length=40, max_length=40)
-    title: Optional[str] = Field(None)
-    tags: Optional[str] = Field(None)
-    summary: Optional[str] = Field(None)
-    thumbhash: Optional[str] = Field(None)
-    filename: Optional[str] = Field(None)
+    title: str | None = Field(None)
+    tags: str | None = Field(None)
+    summary: str | None = Field(None)
+    thumbhash: str | None = Field(None)
+    filename: str | None = Field(None)
 
 class GetDatabaseBackupCategoryRecord(BaseModel):
-    archives: List[str] = Field(...)
-    category_id: str = Field(...)
+    archives: list[str] = Field(...)
+    category_id: str = Field(..., validation_alias="catid")
     name: str = Field(...)
     search: str = Field(...)
 
 class GetDatabaseBackupTankoubonRecord(BaseModel):
     tankid: str = Field(...)
     name: str = Field(...)
-    archives: List[str] = Field(...)
+    archives: list[str] = Field(...)
 
 class GetDatabaseBackupResponse(LanraragiResponse):
-    archives: List[GetDatabaseBackupArchiveRecord] = Field(...)
-    categories: List[GetDatabaseBackupCategoryRecord] = Field(...)
-    tankoubons: List[GetDatabaseBackupTankoubonRecord] = Field(...)
+    archives: list[GetDatabaseBackupArchiveRecord] = Field(default_factory=list)
+    categories: list[GetDatabaseBackupCategoryRecord] = Field(default_factory=list)
+    tankoubons: list[GetDatabaseBackupTankoubonRecord] = Field(default_factory=list)
 
 __all__ = [
     "GetDatabaseStatsRequest",

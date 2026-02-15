@@ -1,6 +1,6 @@
 import asyncio
 import sys
-from typing import Awaitable, Callable, Tuple, TypeVar
+from typing import Awaitable, Callable, TypeVar
 
 from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
 
@@ -17,9 +17,9 @@ def get_bounded_sem(on_unix: int=8, on_windows: int=2) -> asyncio.Semaphore:
             return asyncio.BoundedSemaphore(value=on_unix)
 
 async def retry_on_lock(
-    operation_func: Callable[[], Awaitable[Tuple[ResponseT, LanraragiErrorResponse]]],
+    operation_func: Callable[[], Awaitable[tuple[ResponseT, LanraragiErrorResponse]]],
     max_retries: int = 10
-) -> Tuple[ResponseT, LanraragiErrorResponse]:
+) -> tuple[ResponseT, LanraragiErrorResponse]:
     """
     Wrapper function that retries an operation if it encounters a 423 locked resource error.
     """

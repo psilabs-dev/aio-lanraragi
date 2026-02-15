@@ -1,7 +1,7 @@
 import io
 import logging
 from pathlib import Path
-from typing import Union, overload
+from typing import overload
 from PIL import Image, ImageDraw, ImageFont
 
 from aio_lanraragi_tests.archive_generation.models import LIGHT_GRAY, CreatePageRequest, CreatePageResponse, CreatePageResponseStatus, Page
@@ -64,7 +64,7 @@ def save_page_to_dir(page: Page, save_dir: Path, close: bool=True):
 def save_page_to_dir(request: CreatePageRequest, save_dir: Path, close: bool=True):
     ...
 
-def save_page_to_dir(page: Union[Page, CreatePageRequest], save_dir: Path, close: bool=True):
+def save_page_to_dir(page: Page | CreatePageRequest, save_dir: Path, close: bool=True):
     """
     Saves a page to a directory by combining the page filename with the save_dir parameter.
     If page is a request, creates the page first.
