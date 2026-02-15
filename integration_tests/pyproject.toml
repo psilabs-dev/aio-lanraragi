@@ -8,6 +8,7 @@ version = "0.1.17-dev"
 description = "Integration tests for aio-lanraragi"
 requires-python = ">=3.12, <=3.14"
 dependencies = [
+    "aio-lanraragi",
     "aiofiles",
     "docker",
     "git-python",
@@ -55,6 +56,9 @@ target-version = "py312"
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+
+[tool.uv.sources]
+aio-lanraragi = { workspace = true }
 
 [tool.uv.build-backend]
 module-name = "aio_lanraragi_tests"

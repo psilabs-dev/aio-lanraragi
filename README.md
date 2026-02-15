@@ -4,23 +4,24 @@ An asynchronous Python API client for [LANraragi](https://github.com/Difegue/LAN
 
 ## Installation
 
-A Python interpreter is required. I recommend `uv`, specifically:
+A Python interpreter is required. I recommend `uv` — install it from the [installation guides](https://docs.astral.sh/uv/getting-started/installation/), then install a Python interpreter with `uv python install`.
 
-- Installing `uv` from [installation guides](https://docs.astral.sh/uv/getting-started/installation/),
-- Installing an interpreter with `uv python install` (see [installing python](https://docs.astral.sh/uv/guides/install-python/)),
-- Creating a virtual environment with `uv venv` (see [pip interface](https://docs.astral.sh/uv/pip/))
-- Installing deps in this virtual environment with `uv pip install`.
+Installation with `uv`:
 
-Installation with pip:
+```sh
+uv add aio-lanraragi
+```
+
+Or with pip:
 
 ```sh
 pip install aio-lanraragi
 ```
 
-Or, to install a nightly version:
+To install a nightly version:
 
 ```sh
-pip install git+https://github.com/psilabs-dev/aio-lanraragi.git@$branch_name
+uv add "aio-lanraragi @ git+https://github.com/psilabs-dev/aio-lanraragi.git@$branch_name"
 ```
 
 For development documentation, see [development](/docs/development.md). For integration testing documentation, see [integration tests README](/integration_tests/README.md).

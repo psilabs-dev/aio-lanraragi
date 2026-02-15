@@ -59,22 +59,17 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Install main package (aio-lanraragi)
+      - name: Install workspace packages
         working-directory: aio-lanraragi
         run: |
-          uv pip install --system ".[dev]"
+          uv sync --all-packages
+          uv run playwright install
 
       - name: Run unit tests
         working-directory: aio-lanraragi
         run: |
-          pytest tests --log-cli-level=INFO \
+          uv run pytest tests --log-cli-level=INFO \
             tests/
-
-      - name: Install integration test library
-        working-directory: aio-lanraragi/integration_tests
-        run: |
-          uv pip install --system .
-          playwright install
 
       - name: Create staging directory
         run: |
@@ -86,7 +81,7 @@ jobs:
         run: |
           export CI=true
           export DOCKER_BUILDKIT=1
-          pytest tests --log-cli-level=INFO \
+          uv run pytest tests --log-cli-level=INFO \
             --build "$GITHUB_WORKSPACE/lanraragi" \
             --staging "$GITHUB_WORKSPACE/staging" \
             --playwright \
@@ -122,15 +117,16 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Install main package (aio-lanraragi)
+      - name: Install workspace packages
         working-directory: aio-lanraragi
         run: |
-          uv pip install --system ".[dev]"
+          uv sync --all-packages
+          uv run playwright install
 
       - name: Run unit tests
         working-directory: aio-lanraragi
         run: |
-          pytest tests --log-cli-level=INFO `
+          uv run pytest tests --log-cli-level=INFO `
             tests\
 
       - name: Get windist cache key
@@ -215,12 +211,6 @@ jobs:
           path: ${{ github.workspace }}\windist\win-dist.zip
           key: ${{ env.WINDIST_KEY }}
 
-      - name: Install test library
-        working-directory: aio-lanraragi/integration_tests
-        run: |
-          uv pip install --system .
-          playwright install
-
       - name: Create staging directory
         run: |
           New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE\staging" -Force | Out-Null
@@ -230,7 +220,7 @@ jobs:
         timeout-minutes: 100
         run: |
           $env:CI='true'
-          pytest tests `
+          uv run pytest tests `
           --log-cli-level=INFO `
           --windist "$env:GITHUB_WORKSPACE\LANraragi\win-dist" `
           --staging "$env:GITHUB_WORKSPACE\staging" `

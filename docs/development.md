@@ -44,10 +44,9 @@ pytest tests/                   # run unit tests
 ```
 
 ### With uv
-Install in a virtual environment with `uv`:
+The project is a uv workspace. Install all packages (main library, integration tests, and dev extras) in one step:
 ```sh
-uv venv                         # create virtual environment at ".venv"
-uv pip install -e ".[dev]"
+uv sync --all-packages
 uv run pytest tests/            # run unit tests
 ```
 
@@ -87,18 +86,9 @@ Resources should be carefully managed, and unclosed client sessions are a hard e
 
 ## Integration Testing
 
-Integration testing is an important part of this client library, and it has its own supporting library. To install dependencies, go to `integraion_tests` and install them (to your environment):
+Integration testing is an important part of this client library, and it has its own supporting library (`integration_tests`), which is a workspace member. After running `uv sync --all-packages` at the project root, no additional install step is needed:
 
 ```sh
-cd integration_tests
-pip install -e .
-pytest tests
-```
-
-or if you are using `uv`, run:
-
-```sh
-uv pip install -e ./integration_tests   # IMPORTANT: include "./"
 uv run pytest integration_tests/tests
 ```
 
