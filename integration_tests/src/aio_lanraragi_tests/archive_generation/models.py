@@ -1,5 +1,6 @@
 import enum
 from pathlib import Path
+
 from PIL import Image
 from pydantic import BaseModel, ConfigDict
 
@@ -89,6 +90,6 @@ class TagGenerator:
         self.tag_name = tag_name
         self.assign_probability = assign_probability
         pass
-    
+
     def __repr__(self):
         return str(self.__dict__)

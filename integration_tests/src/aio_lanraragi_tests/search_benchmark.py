@@ -17,26 +17,36 @@ import asyncio
 import json
 import logging
 import math
-from pathlib import Path
+import shutil
+import sys
 import time
+from pathlib import Path
+
 import aiofiles
 import docker
 import numpy as np
-import shutil
-import sys
+from lanraragi.clients.client import LRRClient
+from lanraragi.models.archive import (
+    GetArchiveMetadataRequest,
+    UpdateArchiveMetadataRequest,
+    UploadArchiveResponse,
+)
+from lanraragi.models.base import LanraragiErrorResponse
 
-from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
-from aio_lanraragi_tests.archive_generation.metadata.zipf_utils import get_archive_idx_to_tag_idxs_map
-from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest, WriteArchiveResponse
+from aio_lanraragi_tests.archive_generation.metadata.zipf_utils import (
+    get_archive_idx_to_tag_idxs_map,
+)
+from aio_lanraragi_tests.archive_generation.models import (
+    CreatePageRequest,
+    WriteArchiveRequest,
+    WriteArchiveResponse,
+)
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, compute_archive_id
+from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
-
 from aio_lanraragi_tests.utils.api_wrappers import trigger_stat_rebuild, upload_archive
-from lanraragi.clients.client import LRRClient
-from lanraragi.models.archive import GetArchiveMetadataRequest, UpdateArchiveMetadataRequest, UploadArchiveResponse
-from lanraragi.models.base import LanraragiErrorResponse
 
 LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -110,12 +120,12 @@ def require_generate(staging_dir: str=None) -> bool:
     if not archives_dir.exists():
         LOGGER.warning(f"No synthetic archives directory: {archives_dir}")
         return False
-    
+
     if not generate_result_path.exists():
         LOGGER.warning(f"No generated data manifest: {generate_result_path}")
         return False
-    
-    with open(generate_result_path, 'r') as f:
+
+    with open(generate_result_path) as f:
         data = json.load(f)
 
     has_archive_with_no_series = False
@@ -131,11 +141,11 @@ def require_generate(staging_dir: str=None) -> bool:
                 has_series_info = True
         if not has_series_info:
             has_archive_with_no_series = True
-    
+
     if not has_archive_with_no_series:
         LOGGER.error("Generation scheme yielded no archives with no series.")
         return False
-    
+
     return True
 
 def generate(staging_dir: str=None, num_archives: int=None, num_tags: int=None, num_artists: int=None):
@@ -179,7 +189,7 @@ def generate(staging_dir: str=None, num_archives: int=None, num_tags: int=None, 
             create_page_request = CreatePageRequest(
                 width=144, height=144, filename=page_filename, image_format='PNG', text=page_text
             )
-            create_page_requests.append(create_page_request)        
+            create_page_requests.append(create_page_request)
         requests.append(WriteArchiveRequest(create_page_requests=create_page_requests, save_path=save_path, archival_strategy=ArchivalStrategyEnum.ZIP))
     responses = write_archives_to_disk(requests)
 
@@ -277,7 +287,7 @@ async def require_upload(lrr_client: LRRClient, archives) -> bool:
     if num_archives_in_lrr != num_archives:
         LOGGER.error(f"Number of archives in LRR {num_archives_in_lrr} does not match {num_archives}.")
         return False
-    
+
     for archive in response.data:
         if archive.arcid not in arcid_to_archive_local:
             LOGGER.error(f"Archive {archive.arcid} not found locally.")
@@ -291,7 +301,7 @@ async def require_upload(lrr_client: LRRClient, archives) -> bool:
         if not set(archive.tags.split(',')).issuperset(set(tag_list)):
             LOGGER.error(f"Local archive includes tags not in LRR: {','.join(tag_list)} (remote: {archive.tags})")
             return False
-    
+
     return True
 
 async def upload(staging_dir: str):
@@ -307,7 +317,7 @@ async def upload(staging_dir: str):
     lrr_client = d.lrr_client() # default creds are used so we don't need to care about configuration
     lrr_client.update_api_key(DEFAULT_API_KEY)
     generate_result_path = __get_synthetic_data_dir(staging_dir) / "generated_data.json"
-    async with aiofiles.open(generate_result_path, 'r') as f:
+    async with aiofiles.open(generate_result_path) as f:
         data = json.loads(await f.read())
 
     archives = data["archives"]
@@ -326,7 +336,7 @@ async def upload(staging_dir: str):
         for batch_idx, i in enumerate(range(0, len(archives), batch_size), start=1):
             batch_start_time = time.time()
             batch = archives[i:i + batch_size]
-            
+
             batch_arcid_to_archives = {archive["arcid"]: archive for archive in archives}
 
             tasks = []
@@ -427,7 +437,7 @@ def down(staging_dir: str=None):
 
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest='command')
 
@@ -448,13 +458,13 @@ if __name__ == "__main__":
     generate_sp.add_argument('--archives', type=int, default=DEFAULT_NUM_ARCHIVES, help=f'Number of total archives to generate (default {DEFAULT_NUM_ARCHIVES})')
     generate_sp.add_argument('--tags', type=int, default=DEFAULT_NUM_TAGS, help=f'Number of total tags to generate (default {DEFAULT_NUM_TAGS})')
     generate_sp.add_argument('--artists', type=int, default=DEFAULT_ARTISTS, help=f'Number of total artists to generate (default {DEFAULT_ARTISTS})')
-    
+
     upload_sp = subparsers.add_parser('upload', help='Upload archives to benchmarked instance.')
     upload_sp.add_argument('--staging', default=DEFAULT_STAGING_DIR, help='Path to staging directory.')
-    
+
     benchmark_sp = subparsers.add_parser('bench', help='Run the benchmark.')
     benchmark_sp.add_argument('--staging', default=DEFAULT_STAGING_DIR, help='Path to staging directory.')
-    
+
     teardown_sp = subparsers.add_parser('down', help='Clean everything up.')
     teardown_sp.add_argument('--staging', default=DEFAULT_STAGING_DIR, help='Path to staging directory.')
     args = parser.parse_args()

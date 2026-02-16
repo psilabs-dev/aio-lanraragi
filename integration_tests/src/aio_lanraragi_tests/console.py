@@ -5,8 +5,9 @@
 import argparse
 import logging
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
+
 import docker
 
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext

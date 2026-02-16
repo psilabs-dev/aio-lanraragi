@@ -1,7 +1,7 @@
 import logging
 from urllib.parse import urlparse
-import playwright.async_api._generated
 
+import playwright.async_api._generated
 from lanraragi.clients.client import LRRClient
 
 LOGGER = logging.getLogger(__name__)

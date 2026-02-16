@@ -1,6 +1,6 @@
 import hashlib
-import socket
 import io
+import socket
 from pathlib import Path
 from typing import overload
 
@@ -101,7 +101,7 @@ def compute_archive_id(file_path: Path | str | None) -> str:
     if isinstance(file_path, (Path, str)):
         with open(file_path, 'rb') as fb:
             data = fb.read(512000)
-        
+
         sha1 = hashlib.sha1()
         sha1.update(data)
         digest = sha1.hexdigest()

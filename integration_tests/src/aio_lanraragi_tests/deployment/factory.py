@@ -1,5 +1,6 @@
 import logging
 import sys
+
 import docker
 import pytest
 
@@ -7,6 +8,7 @@ from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
+
 
 def generate_deployment(
     request: pytest.FixtureRequest, resource_prefix: str, port_offset: int,

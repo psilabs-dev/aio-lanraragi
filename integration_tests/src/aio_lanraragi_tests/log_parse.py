@@ -1,7 +1,9 @@
-from typing import Literal
-from datetime import datetime, timezone
 import re
+from datetime import UTC, datetime
+from typing import Literal
+
 from pydantic import BaseModel
+
 
 class LogEvent(BaseModel):
 
@@ -11,7 +13,7 @@ class LogEvent(BaseModel):
     message: str
 
     def __str__(self) -> str:
-        ts = datetime.fromtimestamp(self.log_time, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        ts = datetime.fromtimestamp(self.log_time, tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
         return f"[{ts}] [{self.namespace}] [{self.severity_level}] {self.message}"
 
 def parse_lrr_logs(log_content: str, after: int | None=None, before: int | None=None) -> list[LogEvent]:
@@ -29,7 +31,7 @@ def parse_lrr_logs(log_content: str, after: int | None=None, before: int | None=
     for line in log_content.splitlines():
         match = line_re.match(line)
         if match:
-            log_time = int(datetime.strptime(match.group("ts"), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp())
+            log_time = int(datetime.strptime(match.group("ts"), "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC).timestamp())
 
             if after and log_time < after:
                 continue

@@ -6,12 +6,13 @@ import contextlib
 import io
 import logging
 import os
-from pathlib import Path
+import shutil
 import tarfile
 import tempfile
-import shutil
 import time
+from pathlib import Path
 from typing import override
+
 import docker
 import docker.errors
 import docker.models
@@ -20,9 +21,9 @@ import docker.models.networks
 import docker.models.volumes
 from git import Repo
 
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_REDIS_PORT
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
-from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_REDIS_PORT
 
 DEFAULT_REDIS_DOCKER_TAG = "redis:7.2.4"
 DEFAULT_LANRARAGI_DOCKER_TAG = "difegue/lanraragi"
@@ -35,7 +36,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     Set up a containerized LANraragi environment with Docker.
     This can be used in a pytest function and provided as a fixture.
     """
-    
+
     @property
     def lrr_image_name(self) -> str:
         return "lanraragi:" + str(self.global_run_id)
@@ -58,7 +59,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             container = self._get_container_by_name(self.redis_container_name)
         self._redis_container = container
         return container
-    
+
     @redis_container.setter
     def redis_container(self, container: docker.models.containers.Container):
         self._redis_container = container
@@ -85,7 +86,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     @lrr_container.setter
     def lrr_container(self, container: docker.models.containers.Container):
         self._lrr_container = container
-    
+
     @property
     def network_name(self) -> str:
         return self.resource_prefix + "network"
@@ -104,11 +105,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             network = self._get_network_by_name(self.network_name)
         self._network = network
         return network
-    
+
     @network.setter
     def network(self, network: docker.models.networks.Network):
         self._network = network
-    
+
     @override
     @property
     def staging_dir(self) -> Path:
@@ -197,7 +198,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if not hasattr(self, "_lrr_uid"):
             self._lrr_uid = os.getuid()
         return self._lrr_uid
-    
+
     @property
     def lrr_gid(self) -> bool:
         """
@@ -265,7 +266,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def start_lrr(self):
         return self.lrr_container.start()
-    
+
     @override
     def start_redis(self):
         resp = self.redis_container.start()
@@ -277,7 +278,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Stop the LRR container (timeout in s)
         """
         return self.lrr_container.stop(timeout=timeout)
-    
+
     @override
     def stop_redis(self, timeout: int=10):
         """
@@ -543,7 +544,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def start(self, test_connection_max_retries: int=4):
-        # this can't really be replaced with setup stage, because during setup we do some work after redis startup 
+        # this can't really be replaced with setup stage, because during setup we do some work after redis startup
         # and before LRR startup.
         self.logger.debug(f"Starting container: {self.redis_container_name}")
         self.redis_container.start()
@@ -625,7 +626,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             container = self.docker_client.containers.get(container_name)
             return container
         return None
-    
+
     def _get_volume_by_name(self, volume_name: str) -> docker.models.volumes.Volume | None:
         """
         Tries to return a volume DTO by its name if exists. Otherwise, returnes None.
@@ -634,7 +635,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             container = self.docker_client.volumes.get(volume_name)
             return container
         return None
-    
+
     def _get_network_by_name(self, network_name: str) -> docker.models.networks.Network | None:
         """
         Tries to return a network DTO by its name if exists. Otherwise, returnes None.
@@ -798,7 +799,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             image: The name of the image to pull.
             force: Whether to force the pull (e.g. even if the image already exists).
         """
-        
+
         if force:
             self.docker_client.images.pull(image)
             return

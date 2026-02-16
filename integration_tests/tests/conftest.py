@@ -1,9 +1,10 @@
 import logging
-from pathlib import Path
 import platform
-import psutil
 import time
+from pathlib import Path
 from typing import Any
+
+import psutil
 import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext

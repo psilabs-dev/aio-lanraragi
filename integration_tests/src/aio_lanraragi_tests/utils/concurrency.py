@@ -1,6 +1,7 @@
 import asyncio
 import sys
-from typing import Awaitable, Callable, TypeVar
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
 
 from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
 
