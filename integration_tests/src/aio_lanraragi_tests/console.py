@@ -10,6 +10,7 @@ import sys
 import docker
 
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
+from aio_lanraragi_tests.exceptions import DeploymentException
 from aio_lanraragi_tests.utils.version import get_version
 
 STAGING_RESOURCE_PREFIX = "staging_"
@@ -19,7 +20,8 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_STAGING_DIR = str(Path.cwd() / ".staging")
 
 def get_deployment(
-    build_path: str=None, image: str=None, git_url: str=None, git_branch: str=None, docker_api: docker.APIClient=None, staging_dir: str=None
+    build_path: str=None, image: str=None, git_url: str=None, git_branch: str=None, dockerfile: str=None,
+    docker_api: docker.APIClient=None, staging_dir: str=None
 ) -> DockerLRRDeploymentContext:
     """
     Get docker deployment context.
@@ -30,19 +32,23 @@ def get_deployment(
 
     Naturally, docker installation is required.
     """
-
+    if dockerfile and git_url:
+        raise DeploymentException("--dockerfile cannot be combined with --git-url.")
+    if dockerfile and image:
+        raise DeploymentException("--dockerfile cannot be combined with --image.")
     docker_client = docker.from_env()
     environment = DockerLRRDeploymentContext(
-        build_path, image, git_url, git_branch, docker_client, staging_dir, STAGING_RESOURCE_PREFIX, STAGING_PORT_OFFSET, docker_api=docker_api,
+        build_path, image, git_url, git_branch, docker_client, staging_dir, STAGING_RESOURCE_PREFIX, STAGING_PORT_OFFSET,
+        dockerfile=dockerfile, docker_api=docker_api,
         global_run_id=0, is_allow_uploads=True, is_force_build=True
     )
     return environment
 
 def up(
-    image: str=None, git_url: str=None, git_branch: str=None, build: str=None, docker_api: docker.APIClient=None, staging_dir: str=None,
-    with_nofunmode: bool=False
+    image: str=None, git_url: str=None, git_branch: str=None, build: str=None, dockerfile: str=None,
+    docker_api: docker.APIClient=None, staging_dir: str=None, with_nofunmode: bool=False
 ):
-    d = get_deployment(build_path=build, image=image, git_url=git_url, git_branch=git_branch, docker_api=docker_api, staging_dir=staging_dir)
+    d = get_deployment(build_path=build, image=image, git_url=git_url, git_branch=git_branch, dockerfile=dockerfile, docker_api=docker_api, staging_dir=staging_dir)
     d.setup(with_api_key=True, with_nofunmode=with_nofunmode)
     print("LRR staging environment setup complete.")
     sys.exit(0)
@@ -80,6 +86,7 @@ def console():
     up_parser.add_argument("--git-url", help="Git URL to use")
     up_parser.add_argument("--git-branch", help="Git branch to use")
     up_parser.add_argument("--build", help="Build path to use")
+    up_parser.add_argument("--dockerfile", help="Path to a custom Dockerfile. If relative, resolved relative to --build. Cannot be combined with --git-url or --image.")
     up_parser.add_argument("--docker-api", action='store_true', help="Stream docker build logs")
     up_parser.add_argument("--nofunmode", action="store_true", help="Start LRR with nofunmode (default false).")
     up_parser.add_argument("--staging", default=DEFAULT_STAGING_DIR, help="Path to staging directory.")
@@ -120,7 +127,8 @@ def console():
                 if args.docker_api:
                     docker_api = docker.APIClient(base_url="unix://var/run/docker.sock")
                 up(
-                    image=args.image, git_url=args.git_url, git_branch=args.git_branch, build=args.build, docker_api=docker_api, staging_dir=args.staging,
+                    image=args.image, git_url=args.git_url, git_branch=args.git_branch, build=args.build,
+                    dockerfile=args.dockerfile, docker_api=docker_api, staging_dir=args.staging,
                     with_nofunmode=args.nofunmode
                 )
             case "down":
@@ -134,6 +142,9 @@ def console():
             case "version":
                 print(get_version())
                 sys.exit(0)
+    except DeploymentException as e:
+        print(f"A deployment error has occurred: {e}")
+        sys.exit(1)
     except KeyboardInterrupt:
         print("\nExiting...")
         sys.exit(130)
