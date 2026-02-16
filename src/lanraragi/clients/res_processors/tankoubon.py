@@ -1,12 +1,13 @@
 import json
+
 from pydantic import TypeAdapter
 
 from lanraragi.models.tankoubon import (
+    GetAllTankoubonsResponse,
     GetTankoubonResponse,
     TankoubonArchiveRecord,
+    TankoubonFullDataRecord,
     TankoubonRecord,
-    GetAllTankoubonsResponse,
-    TankoubonFullDataRecord
 )
 
 _all_tankoubons_adapter = TypeAdapter(GetAllTankoubonsResponse)
@@ -53,7 +54,7 @@ def _handle_get_tankoubon_response(content: str, is_full_data: bool) -> GetTanko
             tags=record.get("tags"),
             title=record.get("title")
         ))
-    
+
     response = GetTankoubonResponse(
         filtered=filtered,
         total=total,

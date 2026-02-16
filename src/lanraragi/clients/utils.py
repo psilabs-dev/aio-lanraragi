@@ -1,8 +1,10 @@
+import base64
 import html
 import json
-import base64
 import re
+
 from lanraragi.models.base import LanraragiErrorResponse
+
 
 def _parse_500_error_message(content: str) -> str | None:
     if content.startswith("<!DOCTYPE html>") and (match := re.search(r'<p>(.*?)</p>', content, re.DOTALL)):

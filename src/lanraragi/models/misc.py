@@ -1,7 +1,9 @@
 from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
+
 
 class GetServerInfoResponse(LanraragiResponse):
     archives_per_page: int = Field(...)

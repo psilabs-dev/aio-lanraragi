@@ -1,21 +1,22 @@
 import http
 
 from lanraragi.clients.api_clients.base import _ApiClient
-from lanraragi.clients.utils import _build_err_response
-from lanraragi.models.generics import _LRRClientResponse
 from lanraragi.clients.res_processors.search import (
     _process_get_random_archives_response,
-    _process_search_archive_index_response
+    _process_search_archive_index_response,
 )
+from lanraragi.clients.utils import _build_err_response
 from lanraragi.models.base import (
     LanraragiResponse,
 )
+from lanraragi.models.generics import _LRRClientResponse
 from lanraragi.models.search import (
-    GetRandomArchivesRequest, 
-    GetRandomArchivesResponse, 
-    SearchArchiveIndexRequest, 
-    SearchArchiveIndexResponse, 
+    GetRandomArchivesRequest,
+    GetRandomArchivesResponse,
+    SearchArchiveIndexRequest,
+    SearchArchiveIndexResponse,
 )
+
 
 class _SearchApiClient(_ApiClient):
 

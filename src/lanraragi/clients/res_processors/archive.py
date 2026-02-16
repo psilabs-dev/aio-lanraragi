@@ -1,4 +1,5 @@
 import json
+
 from pydantic import TypeAdapter
 
 from lanraragi.models.archive import (
@@ -7,7 +8,7 @@ from lanraragi.models.archive import (
     GetArchiveCategoriesCatRecord,
     GetArchiveCategoriesResponse,
     GetArchiveMetadataResponse,
-    GetArchiveThumbnailResponse
+    GetArchiveThumbnailResponse,
 )
 
 _all_archives_adapter = TypeAdapter(list[GetAllArchivesResponseRecord])
