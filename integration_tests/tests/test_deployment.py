@@ -90,31 +90,3 @@ async def test_two_deployment_basic_api(request: pytest.FixtureRequest):
     finally:
         env_1.teardown(remove_data=True)
         env_2.teardown(remove_data=True)
-
-# # TODO: remove when docker deployment usage of redis.conf is confirmed/stable.
-# # this test exists as reference to ensure that Docker redis instance uses LRR redis.conf file.
-# def test_redis_conf_applied(request: pytest.FixtureRequest):
-#     """
-#     Smoke test: verifies that the Redis container applies LRR's redis.conf
-#     settings (appendonly, save thresholds) for all Docker deployment scenarios
-#     (--build, --git-url, --image).
-#     """
-#     env = generate_deployment(request, "test_redis_conf_", 10, logger=LOGGER)
-
-#     if not isinstance(env, DockerLRRDeploymentContext):
-#         pytest.skip("Redis conf smoke test only applies to Docker deployments.")
-
-#     request.session.lrr_environments = {"test_redis_conf_": env}
-
-#     try:
-#         env.setup()
-
-#         appendonly = env.redis_client.config_get('appendonly')
-#         assert appendonly.get('appendonly') == 'yes', \
-#             f"Expected appendonly=yes per LRR redis.conf, got: {appendonly}"
-
-#         save = env.redis_client.config_get('save')
-#         assert save.get('save') == '900 1 60 500', \
-#             f"Expected save=900 1 60 500 per LRR redis.conf, got: {save}"
-#     finally:
-#         env.teardown(remove_data=True)
