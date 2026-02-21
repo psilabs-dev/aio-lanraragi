@@ -2,24 +2,24 @@
 Windows LRR deployment module.
 """
 
-from contextlib import AbstractContextManager
+import ctypes
 import logging
 import os
-from pathlib import Path
-import ctypes
-import redis
 import shutil
-import subprocess
-import time
 import stat
-from typing import override
+import subprocess
 import threading
+import time
 from collections import deque
+from contextlib import AbstractContextManager
+from pathlib import Path
+from typing import override
 
+import redis
+
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, is_port_available
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.common import is_port_available
 from aio_lanraragi_tests.exceptions import DeploymentException
-from aio_lanraragi_tests.common import DEFAULT_API_KEY
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,11 +42,11 @@ class _WindowsConsole(AbstractContextManager):
         PID (if any) whose console we plan to attach to.
         """
         return self._attach_to_pid
-    
+
     @attach_to_pid.setter
     def attach_to_pid(self, pid: int):
         self._attach_to_pid = pid
-    
+
     @property
     def had_console(self) -> bool:
         """
@@ -58,7 +58,7 @@ class _WindowsConsole(AbstractContextManager):
     @had_console.setter
     def had_console(self, value: bool):
         self._had_console = value
-    
+
     @property
     def detached_parent(self) -> bool:
         """
@@ -70,7 +70,7 @@ class _WindowsConsole(AbstractContextManager):
     @detached_parent.setter
     def detached_parent(self, value: bool):
         self._detached_parent = value
-    
+
     @property
     def allocated_console(self) -> bool:
         """
@@ -156,7 +156,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def logs_dir(self) -> Path:
         logs_dir = self.resource_prefix + "log"
         return self.staging_dir / logs_dir
-    
+
     @property
     def pid_dir(self) -> Path:
         pid_dir = self.resource_prefix + "pid"
@@ -170,11 +170,11 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     @property
     def lrr_log_path(self) -> Path:
         return self.logs_dir / "lanraragi.log"
-    
+
     @property
     def redis_log_path(self) -> Path:
         return self.logs_dir / "redis.log"
-    
+
     @property
     def redis_server_exe_path(self) -> Path:
         return self.windist_dir / "runtime" / "redis" / "redis-server.exe"
@@ -209,7 +209,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     @property
     def original_windist_dir(self) -> Path:
         return self._original_windist_dir
-    
+
     @original_windist_dir.setter
     def original_windist_dir(self, dir: Path):
         self._original_windist_dir = dir.absolute()
@@ -222,7 +222,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         if not hasattr(self, "_redis_client") or not self._redis_client:
             self._redis_client = redis.Redis(host="127.0.0.1", port=self.redis_port, decode_responses=True)
         return self._redis_client
-    
+
     @redis_client.setter
     def redis_client(self, client: redis.Redis):
         self._redis_client = client
@@ -233,7 +233,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         PID for the LRR process. If not cached, tries to get it via the expected port.
         """
         return _get_port_owner_pid(self.lrr_port)
-    
+
     @property
     def redis_pid(self) -> int | None:
         """
@@ -251,15 +251,15 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     @property
     def runtime_bin_dir(self) -> Path:
         return self.windist_dir / "runtime" / "bin"
-    
+
     @property
     def runtime_redis_dir(self) -> Path:
         return self.windist_dir / "runtime" / "redis"
-    
+
     @property
     def lrr_launcherpl_path(self) -> Path:
         return self.windist_dir / "script" / "launcher.pl"
-    
+
     @property
     def lrr_lanraragi_path(self) -> Path:
         return self.windist_dir / "script" / "lanraragi"
@@ -313,7 +313,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         original_windist_dir = self.original_windist_dir
         if not original_windist_dir.exists():
             raise FileNotFoundError(f"win-dist path {original_windist_dir} not found.")
-        
+
         # create the staging directory.
         staging_dir = self.staging_dir
         if not staging_dir.exists():
@@ -745,7 +745,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.error("LRR logs not found; falling back to console.")
             lines = list(self._lrr_output)
             return b''.join(lines[-tail:])
-        
+
         self.logger.error("No LRR logs are available!")
         return b"No LRR logs available."
 

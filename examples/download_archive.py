@@ -5,8 +5,10 @@ File path is determined by filename and extension, obtained by calling the metad
 
 import argparse
 import asyncio
+
 from lanraragi import LRRClient
 from lanraragi.models.archive import DownloadArchiveRequest, GetArchiveMetadataRequest
+
 
 async def main():
 

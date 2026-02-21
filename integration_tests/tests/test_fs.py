@@ -4,23 +4,27 @@ Filesystem-related integration tests.
 
 import asyncio
 import logging
-import tempfile
-import aiohttp
-import numpy as np
-from pathlib import Path
 import shutil
 import sys
-from typing import AsyncGenerator, Generator
+import tempfile
+from collections.abc import AsyncGenerator, Generator
+from pathlib import Path
+
+import aiohttp
+import numpy as np
 import pytest
 import pytest_asyncio
-
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import DeleteArchiveRequest, DeleteArchiveResponse
 from lanraragi.models.base import LanraragiErrorResponse
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
-from aio_lanraragi_tests.utils.api_wrappers import delete_archive, save_archives, upload_archives
+from aio_lanraragi_tests.utils.api_wrappers import (
+    delete_archive,
+    save_archives,
+    upload_archives,
+)
 from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
 from aio_lanraragi_tests.utils.flakes import xfail_catch_flakes_inner
 

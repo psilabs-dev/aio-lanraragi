@@ -5,8 +5,10 @@ zipf's law: https://en.wikipedia.org/wiki/Zipf%27s_law
 
 import collections
 import sys
-import numpy as np
 from typing import Literal
+
+import numpy as np
+
 
 # tests v0.1.15
 def get_archive_idx_to_tag_idxs_map(
@@ -66,6 +68,7 @@ if __name__ == "__main__":
     Evaluate the shape of a zipfian distribution.
     """
     import argparse
+
     import matplotlib.pyplot as plt
 
     parser = argparse.ArgumentParser()

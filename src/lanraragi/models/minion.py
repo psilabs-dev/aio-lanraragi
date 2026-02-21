@@ -1,4 +1,5 @@
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse

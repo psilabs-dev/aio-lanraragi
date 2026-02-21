@@ -1,15 +1,14 @@
 import asyncio
 import logging
-from typing import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Generator
 
 import numpy as np
 import pytest
 import pytest_asyncio
-
 from lanraragi.clients.client import LRRClient
 
-from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
 
 LOGGER = logging.getLogger(__name__)

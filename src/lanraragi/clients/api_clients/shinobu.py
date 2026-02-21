@@ -3,8 +3,8 @@ import json
 
 from lanraragi.clients.api_clients.base import _ApiClient
 from lanraragi.clients.utils import _build_err_response
-from lanraragi.models.generics import _LRRClientResponse
 from lanraragi.models.base import LanraragiResponse
+from lanraragi.models.generics import _LRRClientResponse
 from lanraragi.models.shinobu import GetShinobuStatusResponse, RestartShinobuResponse
 
 
@@ -47,7 +47,7 @@ class _ShinobuApiClient(_ApiClient):
             new_pid = response_j["new_pid"]
             return (RestartShinobuResponse(new_pid=new_pid), None)
         return (None, _build_err_response(content, status))
-    
+
 __all__ = [
     "_ShinobuApiClient"
 ]

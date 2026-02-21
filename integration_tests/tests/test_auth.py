@@ -1,25 +1,36 @@
 import asyncio
 import logging
-from pathlib import Path
 import tempfile
+from collections.abc import AsyncGenerator, Generator
+from pathlib import Path
+
 import aiohttp
 import numpy as np
-from typing import AsyncGenerator, Generator
 import playwright.async_api
 import playwright.async_api._generated
-from pydantic import BaseModel, Field
 import pytest
 import pytest_asyncio
-
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import UpdateReadingProgressionRequest
+from pydantic import BaseModel, Field
 
-from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE, LRR_LOGIN_TITLE
+from aio_lanraragi_tests.common import (
+    DEFAULT_API_KEY,
+    DEFAULT_LRR_PASSWORD,
+    LRR_INDEX_TITLE,
+    LRR_LOGIN_TITLE,
+)
+from aio_lanraragi_tests.deployment.base import (
+    AbstractLRRDeploymentContext,
+    expect_no_error_logs,
+)
 from aio_lanraragi_tests.deployment.factory import generate_deployment
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext, expect_no_error_logs
 from aio_lanraragi_tests.utils.api_wrappers import save_archives, upload_archives
 from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
-from aio_lanraragi_tests.utils.playwright import assert_browser_responses_ok, assert_console_logs_ok
+from aio_lanraragi_tests.utils.playwright import (
+    assert_browser_responses_ok,
+    assert_console_logs_ok,
+)
 
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False # for debugging.
@@ -138,7 +149,7 @@ async def sample_test_api_auth_matrix(
     ]:
         response, error = await method()
         method_name = method.__name__
-        
+
         if endpoint_permission_granted(endpoint_is_public):
             assert not error, f"API call failed for method {method_name} (status {error.status}): {error.error}"
         else:

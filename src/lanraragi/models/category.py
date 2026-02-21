@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
+
 class GetAllCategoriesResponseRecord(BaseModel):
     archives: list[str] = Field(...)
     category_id: str = Field(..., validation_alias="id")

@@ -1,7 +1,8 @@
 from lanraragi.models.search import (
     GetRandomArchivesResponse,
-    SearchArchiveIndexResponse
+    SearchArchiveIndexResponse,
 )
+
 
 def _process_search_archive_index_response(content: str) -> SearchArchiveIndexResponse:
     return SearchArchiveIndexResponse.model_validate_json(content)

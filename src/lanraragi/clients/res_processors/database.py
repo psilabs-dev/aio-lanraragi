@@ -3,7 +3,7 @@ from pydantic import TypeAdapter
 from lanraragi.models.database import (
     GetDatabaseBackupResponse,
     GetDatabaseStatsResponse,
-    GetDatabaseStatsResponseTag
+    GetDatabaseStatsResponseTag,
 )
 
 _database_stats_adapter = TypeAdapter(list[GetDatabaseStatsResponseTag])

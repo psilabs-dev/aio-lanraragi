@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
+
 class TankoubonRecord(BaseModel):
     archives: list[str] = Field(...)
     tank_id: str = Field(..., validation_alias="id")
@@ -48,7 +49,7 @@ class CreateTankoubonResponse(LanraragiResponse):
 
 class TankoubonMetadata(BaseModel):
     name: str | None = Field(None, description="The name of the tankoubon")
-    summary: str | None = Field(None, description="The summary of the tankoubon") 
+    summary: str | None = Field(None, description="The summary of the tankoubon")
     tags: str | None = Field(None, description="The tags of the tankoubon")
 
 class UpdateTankoubonRequest(LanraragiRequest):

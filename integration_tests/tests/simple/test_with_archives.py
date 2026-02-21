@@ -4,12 +4,12 @@ Any integration test which does involve concurrent uploads.
 
 import asyncio
 import logging
-from pathlib import Path
 import sys
 import tempfile
+from pathlib import Path
+
 import numpy as np
 import pytest
-
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import (
     ClearNewArchiveFlagRequest,
@@ -21,23 +21,17 @@ from lanraragi.models.archive import (
     UpdateArchiveThumbnailRequest,
     UpdateReadingProgressionRequest,
 )
-from lanraragi.models.base import (
-    LanraragiErrorResponse,
-    LanraragiResponse
-)
+from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
 from lanraragi.models.category import (
     AddArchiveToCategoryResponse,
     GetCategoryRequest,
 )
 from lanraragi.models.database import GetDatabaseStatsRequest
-from lanraragi.models.minion import (
-    GetMinionJobDetailRequest,
-    GetMinionJobStatusRequest
-)
+from lanraragi.models.minion import GetMinionJobDetailRequest, GetMinionJobStatusRequest
 from lanraragi.models.misc import (
     GetAvailablePluginsRequest,
     GetOpdsCatalogRequest,
-    RegenerateThumbnailRequest
+    RegenerateThumbnailRequest,
 )
 from lanraragi.models.tankoubon import (
     AddArchiveToTankoubonRequest,
@@ -49,7 +43,10 @@ from lanraragi.models.tankoubon import (
     UpdateTankoubonRequest,
 )
 
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext, expect_no_error_logs
+from aio_lanraragi_tests.deployment.base import (
+    AbstractLRRDeploymentContext,
+    expect_no_error_logs,
+)
 from aio_lanraragi_tests.utils.api_wrappers import (
     add_archive_to_category,
     delete_archive,
@@ -57,7 +54,7 @@ from aio_lanraragi_tests.utils.api_wrappers import (
     load_pages_from_archive,
     remove_archive_from_category,
     save_archives,
-    upload_archives
+    upload_archives,
 )
 from aio_lanraragi_tests.utils.concurrency import retry_on_lock
 from aio_lanraragi_tests.utils.flakes import xfail_catch_flakes_inner
@@ -424,7 +421,7 @@ async def test_database_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore,
     LOGGER.debug("Established connection with test LRR server.")
     assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
     # <<<<< TEST CONNECTION STAGE <<<<<
-    
+
     # >>>>> UPLOAD STAGE >>>>>
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -466,7 +463,7 @@ async def test_tankoubon_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore
     LOGGER.debug("Established connection with test LRR server.")
     assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
     # <<<<< TEST CONNECTION STAGE <<<<<
-    
+
     # >>>>> UPLOAD STAGE >>>>>
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -561,7 +558,7 @@ async def test_misc_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npg
     LOGGER.debug("Established connection with test LRR server.")
     assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
     # <<<<< TEST CONNECTION STAGE <<<<<
-    
+
     # >>>>> UPLOAD STAGE >>>>>
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -622,7 +619,7 @@ async def test_minion_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, n
     LOGGER.debug("Established connection with test LRR server.")
     assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
     # <<<<< TEST CONNECTION STAGE <<<<<
-    
+
     # >>>>> UPLOAD STAGE >>>>>
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -634,7 +631,7 @@ async def test_minion_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, n
         LOGGER.debug("Uploading archives to server.")
         await upload_archives(write_responses, npgenerator, semaphore, lrr_client, force_sync=ENABLE_SYNC_FALLBACK)
     # <<<<< UPLOAD STAGE <<<<<
-    
+
     # >>>>> REGENERATE THUMBNAILS STAGE >>>>>
     # to get a job id
     response, error = await lrr_client.misc_api.regenerate_thumbnails(RegenerateThumbnailRequest())

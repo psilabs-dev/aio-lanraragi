@@ -4,6 +4,7 @@ import pytest
 from lanraragi.clients.api_context import ApiContextManager
 from lanraragi.clients.utils import _build_auth_header
 
+
 @pytest.fixture
 def lrr_address() -> str:
     return "http://127.0.0.1:3000"

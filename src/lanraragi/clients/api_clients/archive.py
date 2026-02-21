@@ -1,19 +1,17 @@
 import http
 import json
+
 import aiohttp
 
 from lanraragi.clients.api_clients.base import _ApiClient
-from lanraragi.clients.utils import _build_err_response
-from lanraragi.models.generics import _LRRClientResponse
 from lanraragi.clients.res_processors.archive import (
     _process_get_all_archives_response,
     _process_get_archive_categories_response,
     _process_get_archive_metadata_response,
-    _process_get_archive_thumbnail_response
+    _process_get_archive_thumbnail_response,
 )
+from lanraragi.clients.utils import _build_err_response
 from lanraragi.models.archive import (
-    GetArchiveMetadataResponse,
-    GetArchiveTankoubonsRequest,
     ClearNewArchiveFlagRequest,
     ClearNewArchiveFlagResponse,
     DeleteArchiveRequest,
@@ -26,6 +24,8 @@ from lanraragi.models.archive import (
     GetArchiveCategoriesRequest,
     GetArchiveCategoriesResponse,
     GetArchiveMetadataRequest,
+    GetArchiveMetadataResponse,
+    GetArchiveTankoubonsRequest,
     GetArchiveTankoubonsResponse,
     GetArchiveThumbnailRequest,
     GetArchiveThumbnailResponse,
@@ -38,9 +38,11 @@ from lanraragi.models.archive import (
     UpdateReadingProgressionRequest,
     UpdateReadingProgressionResponse,
     UploadArchiveRequest,
-    UploadArchiveResponse
+    UploadArchiveResponse,
 )
 from lanraragi.models.base import LanraragiResponse
+from lanraragi.models.generics import _LRRClientResponse
+
 
 class _ArchiveApiClient(_ApiClient):
 
@@ -53,7 +55,7 @@ class _ArchiveApiClient(_ApiClient):
         if status == 200:
             return (_process_get_all_archives_response(content), None)
         return (None, _build_err_response(content, status))
-    
+
     async def get_untagged_archives(self) -> _LRRClientResponse[GetUntaggedArchivesResponse]:
         """
         GET /api/archives/untagged
@@ -63,7 +65,7 @@ class _ArchiveApiClient(_ApiClient):
         if status == 200:
             return (GetUntaggedArchivesResponse(data=json.loads(content)), None) # the content data should just be a list of string.
         return (None, _build_err_response(content, status))
-    
+
     async def get_archive_metadata(self, request: GetArchiveMetadataRequest) -> _LRRClientResponse[GetArchiveMetadataResponse]:
         """
         GET /api/archives/:id/metadata
@@ -83,7 +85,7 @@ class _ArchiveApiClient(_ApiClient):
         if status == 200:
             return (_process_get_archive_categories_response(content), None)
         return (None, _build_err_response(content, status))
-    
+
     async def get_archive_tankoubons(self, request: GetArchiveTankoubonsRequest) -> _LRRClientResponse[GetArchiveTankoubonsResponse]:
         """
         GET /api/archives/:id/tankoubons
@@ -95,7 +97,7 @@ class _ArchiveApiClient(_ApiClient):
             tankoubons: list[str] = response_j.get("tankoubons")
             return (GetArchiveTankoubonsResponse(tankoubons=tankoubons), None)
         return (None, _build_err_response(content, status))
-    
+
     async def get_archive_thumbnail(self, request: GetArchiveThumbnailRequest) -> _LRRClientResponse[GetArchiveThumbnailResponse]:
         """
         GET /api/archives/:id/thumbnail
@@ -110,7 +112,7 @@ class _ArchiveApiClient(_ApiClient):
         if status in [200, 202]:
             return (_process_get_archive_thumbnail_response(data, status), None)
         return (None, _build_err_response(data, status))
-    
+
     async def queue_archive_thumbnail_extraction(self, request: QueueArchiveThumbnailExtractionRequest) -> _LRRClientResponse[QueueArchiveThumbnailExtractionResponse]:
         """
         POST /api/archives/:id/files/thumbnails
@@ -136,7 +138,7 @@ class _ArchiveApiClient(_ApiClient):
         if status == 200:
             return (DownloadArchiveResponse(data=data), None)
         return (None, _build_err_response(data, status))
-    
+
     async def extract_archive(self, request: ExtractArchiveRequest) -> _LRRClientResponse[ExtractArchiveResponse]:
         """
         GET /api/archives/:id/files
@@ -152,7 +154,7 @@ class _ArchiveApiClient(_ApiClient):
             pages = response_j.get("pages") if 'pages' in response_j else []
             return (ExtractArchiveResponse(job=job, pages=pages), None)
         return (None, _build_err_response(data, status))
-    
+
     async def clear_new_archive_flag(self, request: ClearNewArchiveFlagRequest) -> _LRRClientResponse[ClearNewArchiveFlagResponse]:
         """
         DELETE /api/archives/:id/isnew
@@ -162,7 +164,7 @@ class _ArchiveApiClient(_ApiClient):
         if status == 200:
             return (ClearNewArchiveFlagResponse(arcid=request.arcid), None)
         return (None, _build_err_response(content, status))
-    
+
     async def update_reading_progression(self, request: UpdateReadingProgressionRequest) -> _LRRClientResponse[UpdateReadingProgressionResponse]:
         """
         PUT /api/archives/:id/progress/:page
@@ -176,7 +178,7 @@ class _ArchiveApiClient(_ApiClient):
             lastreadtime = response_j.get("lastreadtime")
             return (UpdateReadingProgressionResponse(arcid=arcid, page=page, lastreadtime=lastreadtime), None)
         return (None, _build_err_response(content, status))
-    
+
     async def upload_archive(self, request: UploadArchiveRequest) -> _LRRClientResponse[UploadArchiveResponse]:
         """
         PUT /api/archives/upload
@@ -226,7 +228,7 @@ class _ArchiveApiClient(_ApiClient):
             new_thumbnail = response_j.get("new_thumbnail")
             return (UpdateArchiveThumbnailResponse(new_thumbnail=new_thumbnail), None)
         return (None, _build_err_response(content, status))
-    
+
     async def update_archive_metadata(self, request: UpdateArchiveMetadataRequest) -> _LRRClientResponse[LanraragiResponse]:
         """
         PUT /api/archives/:id/metadata
@@ -243,7 +245,7 @@ class _ArchiveApiClient(_ApiClient):
         if status == 200:
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))
-    
+
     async def delete_archive(self, request: DeleteArchiveRequest) -> _LRRClientResponse[DeleteArchiveResponse]:
         """
         DELETE /api/archives/:id

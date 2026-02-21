@@ -1,17 +1,20 @@
 import asyncio
 import logging
-import numpy as np
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
+import numpy as np
 from lanraragi.clients.client import LRRClient
 
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext, expect_no_error_logs
+from aio_lanraragi_tests.deployment.base import (
+    AbstractLRRDeploymentContext,
+    expect_no_error_logs,
+)
 from aio_lanraragi_tests.utils.api_wrappers import (
     create_archive_file,
     save_archives,
     upload_archive,
-    upload_archives
+    upload_archives,
 )
 
 LOGGER = logging.getLogger(__name__)

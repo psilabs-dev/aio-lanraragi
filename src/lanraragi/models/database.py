@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
+
 class GetDatabaseStatsRequest(LanraragiRequest):
     minweight: int = Field(1)
 

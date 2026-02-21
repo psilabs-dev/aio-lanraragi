@@ -2,6 +2,7 @@ import abc
 
 from lanraragi.clients.api_context import ApiContextManager
 
+
 class _ApiClient(abc.ABC):
     """
     A private abstract base class that represents an organized collection of APIs on a client. (Search, Archive, Database, etc.)

@@ -67,7 +67,8 @@ async with LRRClient("http://localhost:3000", lrr_api_key="lanraragi") as lrr:
 
 Since aiohttp is used under the hood, you may install optional libraries (namely, aiodns and brotli) for more optimization:
 ```sh
-pip install "aiohttp[speedups]"
+# automatically installs aiohttp[speedups]
+pip install "aio-lanraragi[speedups]"
 ```
 
 Only [officially documented APIs](https://sugoi.gitbook.io/lanraragi/api-documentation) will be supported. Undocumented API calls may be invoked at the `ApiContextManager` layer by library users. Under-development APIs shall be decorated with an `@experimental` tag in library and during testing. Deprecated APIs shall be decorated with a `@deprecated` tag.

@@ -1,11 +1,14 @@
 import json
 
-from lanraragi.models.minion import GetMinionJobDetailResponse, GetMinionJobDetailResponseResult
+from lanraragi.models.minion import (
+    GetMinionJobDetailResponse,
+    GetMinionJobDetailResponseResult,
+)
 
 
 def _process_get_minion_job_detail_response(content: str) -> GetMinionJobDetailResponse:
     response_j = json.loads(content)
-    id = response_j.get("id")
+    _id = response_j.get("id")
     args = response_j.get("args")
     attempts = response_j.get("attempts")
     children = response_j.get("children")
@@ -39,7 +42,7 @@ def _process_get_minion_job_detail_response(content: str) -> GetMinionJobDetailR
         errors=result_j.get("errors")
     ) if result_j else None
     return GetMinionJobDetailResponse(
-        id=id,
+        id=_id,
         args=args,
         attempts=attempts,
         children=children,

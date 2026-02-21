@@ -3,7 +3,7 @@ from pydantic import TypeAdapter
 from lanraragi.models.category import (
     GetAllCategoriesResponse,
     GetAllCategoriesResponseRecord,
-    GetCategoryResponse
+    GetCategoryResponse,
 )
 
 _all_categories_adapter = TypeAdapter(list[GetAllCategoriesResponseRecord])

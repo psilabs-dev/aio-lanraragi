@@ -3,13 +3,16 @@ Python module for setting up and tearing down docker environments for LANraragi.
 """
 
 import contextlib
+import io
 import logging
 import os
-from pathlib import Path
-import tempfile
 import shutil
+import tarfile
+import tempfile
 import time
+from pathlib import Path
 from typing import override
+
 import docker
 import docker.errors
 import docker.models
@@ -18,9 +21,9 @@ import docker.models.networks
 import docker.models.volumes
 from git import Repo
 
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_REDIS_PORT
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
-from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_REDIS_PORT
 
 DEFAULT_REDIS_DOCKER_TAG = "redis:7.2.4"
 DEFAULT_LANRARAGI_DOCKER_TAG = "difegue/lanraragi"
@@ -33,7 +36,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     Set up a containerized LANraragi environment with Docker.
     This can be used in a pytest function and provided as a fixture.
     """
-    
+
     @property
     def lrr_image_name(self) -> str:
         return "lanraragi:" + str(self.global_run_id)
@@ -56,7 +59,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             container = self._get_container_by_name(self.redis_container_name)
         self._redis_container = container
         return container
-    
+
     @redis_container.setter
     def redis_container(self, container: docker.models.containers.Container):
         self._redis_container = container
@@ -83,7 +86,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     @lrr_container.setter
     def lrr_container(self, container: docker.models.containers.Container):
         self._lrr_container = container
-    
+
     @property
     def network_name(self) -> str:
         return self.resource_prefix + "network"
@@ -102,11 +105,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             network = self._get_network_by_name(self.network_name)
         self._network = network
         return network
-    
+
     @network.setter
     def network(self, network: docker.models.networks.Network):
         self._network = network
-    
+
     @override
     @property
     def staging_dir(self) -> Path:
@@ -165,6 +168,29 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self._is_force_build
 
     @property
+    def dockerfile_path(self) -> Path | None:
+        """
+        Customizable path to dockerfile. Defaults to `tools/build/docker/Dockerfile`.
+        """
+        if self._dockerfile_path is not None:
+            return self._dockerfile_path
+        return Path(self.build_path) / "tools" / "build" / "docker" / "Dockerfile"
+
+    @property
+    def redis_container_conf_path(self) -> str:
+        """
+        Canonical path inside the Redis container where redis.conf is stored.
+        """
+        return "/home/koyomi/lanraragi/tools/build/docker/redis.conf"
+
+    @property
+    def redis_container_data_path(self) -> str:
+        """
+        Canonical path inside the Redis container where Redis data is stored.
+        """
+        return "/home/koyomi/lanraragi/database"
+
+    @property
     def lrr_uid(self) -> bool:
         """
         LRR user UID
@@ -172,7 +198,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if not hasattr(self, "_lrr_uid"):
             self._lrr_uid = os.getuid()
         return self._lrr_uid
-    
+
     @property
     def lrr_gid(self) -> bool:
         """
@@ -185,7 +211,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def __init__(
             self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient, staging_dir: str,
             resource_prefix: str, port_offset: int,
-            docker_api: docker.APIClient=None, logger: logging.Logger | None=None,
+            dockerfile: str=None, docker_api: docker.APIClient=None, logger: logging.Logger | None=None,
             global_run_id: int=None, is_allow_uploads: bool=True, is_force_build: bool=False
     ):
 
@@ -205,6 +231,19 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger = logger
         self.is_allow_uploads = is_allow_uploads
         self._is_force_build = is_force_build
+
+        if dockerfile is not None:
+            dockerfile_path = Path(dockerfile)
+            if not dockerfile_path.is_absolute():
+                if not build:
+                    raise DeploymentException("--dockerfile is a relative path but --build was not provided.")
+                dockerfile_path = Path(build) / dockerfile_path
+            dockerfile_path = dockerfile_path.resolve()
+            if not dockerfile_path.exists():
+                raise DeploymentException(f"Dockerfile does not exist: {dockerfile_path}")
+            self._dockerfile_path = dockerfile_path
+        else:
+            self._dockerfile_path = None
 
     def allow_writable_thumb(self):
         """
@@ -227,7 +266,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def start_lrr(self):
         return self.lrr_container.start()
-    
+
     @override
     def start_redis(self):
         resp = self.redis_container.start()
@@ -239,7 +278,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Stop the LRR container (timeout in s)
         """
         return self.lrr_container.stop(timeout=timeout)
-    
+
     @override
     def stop_redis(self, timeout: int=10):
         """
@@ -330,9 +369,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         # >>>>> IMAGE PREPARATION >>>>>
         image_id = self.lrr_image_name
-        if self.build_path:
-            self.logger.info(f"Building LRR image {image_id} from build path {self.build_path}.")
-            self._build_docker_image(self.build_path, force=self.is_force_build)
+        redis_conf_src: Path | None = None
+        if build_path := self.build_path:
+            self.logger.info(f"Building LRR image {image_id} from build path {build_path}.")
+            self._build_docker_image(build_path, force=self.is_force_build)
+            redis_conf_src = Path(build_path) / "tools" / "build" / "docker" / "redis.conf"
         elif self.git_url:
             # When building by git URL, we always clone the repository and rebuild.
             self.logger.info(f"Building LRR image {image_id} from git URL {self.git_url}.")
@@ -343,6 +384,12 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 if self.git_branch: # throws git.exc.GitCommandError if branch does not exist.
                     repo.git.checkout(self.git_branch)
                 self._build_docker_image(repo.working_dir, force=True)
+                conf_in_repo = Path(repo.working_dir) / "tools" / "build" / "docker" / "redis.conf"
+                if conf_in_repo.exists():
+                    redis_conf_src = self.staging_dir / (self.resource_prefix + "redis.conf")
+                    shutil.copy2(conf_in_repo, redis_conf_src)
+                else:
+                    self.logger.warning(f"Redis conf not found in cloned repo: {conf_in_repo}")
         else:
             image = DEFAULT_LANRARAGI_DOCKER_TAG
             if self.image:
@@ -350,6 +397,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.info(f"Pulling LRR image from Docker Hub: {image}.")
             self._pull_docker_image_if_not_exists(image, force=False)
             self.docker_client.images.get(image).tag(image_id)
+            redis_conf_src = self._extract_redis_conf_from_image(image_id)
+
+        self._applied_redis_conf_src = redis_conf_src
 
         # pull redis
         self._pull_docker_image_if_not_exists(DEFAULT_REDIS_DOCKER_TAG, force=False)
@@ -373,6 +423,23 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         redis_ports = {
             "6379/tcp": redis_port
         }
+        redis_command = (
+            [
+                "redis-server", self.redis_container_conf_path,
+                "--bind", "0.0.0.0",
+                "--logfile", "",
+                "--pidfile", "/home/koyomi/lanraragi/database/redis.pid",
+                "--protected-mode", "no",
+            ]
+            if redis_conf_src
+            else None
+        )
+        redis_volumes = {str(redis_dir): {"bind": self.redis_container_data_path, "mode": "rw"}}
+        if redis_conf_src:
+            redis_volumes[str(redis_conf_src)] = {
+                "bind": self.redis_container_conf_path,
+                "mode": "ro",
+            }
         if self.redis_container:
             self.logger.debug(f"Redis container exists: {self.redis_container_name}.")
             # if such a container exists, assume it is already configured with the correct volumes and networks
@@ -383,15 +450,14 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.redis_container = self.docker_client.containers.create(
                 DEFAULT_REDIS_DOCKER_TAG,
                 name=redis_container_name,
+                command=redis_command,
                 user=f"{self.lrr_uid}:{self.lrr_gid}",  # unix UID:GID
                 hostname=redis_container_name,
                 detach=True,
                 network=network_name,
                 ports=redis_ports,
                 healthcheck=redis_healthcheck,
-                volumes={
-                    str(redis_dir): {"bind": "/data", "mode": "rw"}
-                }
+                volumes=redis_volumes,
             )
 
         # then prepare the LRR container.
@@ -478,7 +544,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     @override
     def start(self, test_connection_max_retries: int=4):
-        # this can't really be replaced with setup stage, because during setup we do some work after redis startup 
+        # this can't really be replaced with setup stage, because during setup we do some work after redis startup
         # and before LRR startup.
         self.logger.debug(f"Starting container: {self.redis_container_name}")
         self.redis_container.start()
@@ -560,7 +626,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             container = self.docker_client.containers.get(container_name)
             return container
         return None
-    
+
     def _get_volume_by_name(self, volume_name: str) -> docker.models.volumes.Volume | None:
         """
         Tries to return a volume DTO by its name if exists. Otherwise, returnes None.
@@ -569,7 +635,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             container = self.docker_client.volumes.get(volume_name)
             return container
         return None
-    
+
     def _get_network_by_name(self, network_name: str) -> docker.models.networks.Network | None:
         """
         Tries to return a network DTO by its name if exists. Otherwise, returnes None.
@@ -587,6 +653,29 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if container is None:
             raise DeploymentException("No redis container found!")
         return container.exec_run(["bash", "-c", f'redis-cli <<EOF\n{command}\nEOF'])
+
+    def _extract_redis_conf_from_image(self, image_id: str) -> Path:
+        """
+        Create an ephemeral container from the LRR image and extract
+        tools/build/docker/redis.conf into the staging directory.
+
+        Throws deployment exception if redis.conf is not found.
+        """
+        container = self.docker_client.containers.create(image_id)
+        try:
+            # get the canonical path to redis.conf from the docker image.
+            tar_stream, _ = container.get_archive(self.redis_container_conf_path)
+            dest = self.staging_dir / (self.resource_prefix + "redis.conf")
+            with tarfile.open(fileobj=io.BytesIO(b"".join(tar_stream))) as tf:
+                member = tf.getmember("redis.conf")
+                dest.write_bytes(tf.extractfile(member).read())
+            return dest
+        except docker.errors.NotFound:
+            # self.logger.warning("redis.conf not found in LRR image.")
+            # return None
+            raise DeploymentException(f"redis.conf not found in docker image: {image_id}")
+        finally:
+            container.remove()
 
     def _reset_docker_test_env(self, remove_data: bool=False):
         """
@@ -619,7 +708,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.debug(f"Removed container: {self.lrr_container_name}")
 
         if remove_data and self.redis_container and self.redis_container.status == 'running':
-            self.redis_container.exec_run(["bash", "-c", "rm -rf /data/*"], user='redis')
+            self.redis_container.exec_run(["bash", "-c", f"rm -rf {self.redis_container_data_path}/*"], user='redis')
         if self.redis_container:
             self.redis_container.stop(timeout=1)
             self.logger.debug(f"Stopped container: {self.redis_container_name}")
@@ -640,6 +729,10 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if self.logs_dir.exists():
                 shutil.rmtree(self.logs_dir)
                 self.logger.debug(f"Removed logs directory: {self.logs_dir}")
+            redis_conf_staging = self.staging_dir / (self.resource_prefix + "redis.conf")
+            if redis_conf_staging.exists():
+                redis_conf_staging.unlink()
+                self.logger.debug(f"Removed staged redis conf: {redis_conf_staging}")
 
         if hasattr(self, 'network') and self.network:
             self.network.remove()
@@ -673,7 +766,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if not Path(build_path).exists():
             raise FileNotFoundError(f"Build path {build_path} does not exist!")
 
-        dockerfile_path = Path(build_path) / "tools" / "build" / "docker" / "Dockerfile"
+        dockerfile_path = self._dockerfile_path or (Path(build_path) / "tools" / "build" / "docker" / "Dockerfile")
         if not dockerfile_path.exists():
             raise FileNotFoundError(f"Dockerfile {dockerfile_path} does not exist!")
 
@@ -706,7 +799,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             image: The name of the image to pull.
             force: Whether to force the pull (e.g. even if the image already exists).
         """
-        
+
         if force:
             self.docker_client.images.pull(image)
             return

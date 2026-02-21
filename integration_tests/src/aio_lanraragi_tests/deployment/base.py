@@ -1,18 +1,19 @@
 import abc
+import gzip
 import logging
-from pathlib import Path
 import shutil
 import time
+from pathlib import Path
+
 import aiohttp
 import redis
 import requests
-import gzip
-
 from lanraragi.clients.client import LRRClient
 
-from aio_lanraragi_tests.log_parse import parse_lrr_logs
 from aio_lanraragi_tests.common import DEFAULT_LRR_PORT, DEFAULT_REDIS_PORT
 from aio_lanraragi_tests.exceptions import DeploymentException
+from aio_lanraragi_tests.log_parse import parse_lrr_logs
+
 
 class AbstractLRRDeploymentContext(abc.ABC):
 
@@ -22,7 +23,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Logger implementation assigned to a deployment.
         """
         return self._logger
-    
+
     @logger.setter
     def logger(self, logger: logging.Logger):
         self._logger = logger
@@ -47,7 +48,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
         This number SHOULD be between 10-20 (inclusive).
         """
         return self._port_offset
-    
+
     @port_offset.setter
     def port_offset(self, new_port_offset: int):
         self._port_offset = new_port_offset
@@ -58,14 +59,14 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Port exposed for the given LRR application.
         """
         return DEFAULT_LRR_PORT + self.port_offset
-    
+
     @property
     def redis_port(self) -> int:
         """
         Port exposed for the given Redis database.
         """
         return DEFAULT_REDIS_PORT + self.port_offset
-    
+
     @property
     def lrr_base_url(self) -> str:
         """
@@ -138,7 +139,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
             |- ...
         ```
         """
-    
+
     @property
     @abc.abstractmethod
     def archives_dir(self) -> Path:
@@ -200,7 +201,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
             `environment`: additional environment variables map to pass through to LRR during startup time
             `test_connection_max_retries`: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
-    
+
     @abc.abstractmethod
     def start(self, test_connection_max_retries: int=4):
         """
@@ -234,13 +235,13 @@ class AbstractLRRDeploymentContext(abc.ABC):
         """
         Start the LRR server.
         """
-    
+
     @abc.abstractmethod
     def start_redis(self):
         """
         Start the Redis server.
         """
-    
+
     @abc.abstractmethod
     def stop_lrr(self, timeout: int=10):
         """
@@ -249,7 +250,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Args:
             `timeout`: timeout in seconds.
         """
-    
+
     @abc.abstractmethod
     def stop_redis(self, timeout: int=10):
         """
@@ -449,7 +450,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
         """
         parts: list[str] = []
         if self.lanraragi_logs_path.exists():
-            with open(self.lanraragi_logs_path, 'r') as f:
+            with open(self.lanraragi_logs_path) as f:
                 parts.append(f.read())
 
         rotated_logs = list(self.logs_dir.glob("lanraragi.log.*.gz"))
@@ -469,26 +470,26 @@ class AbstractLRRDeploymentContext(abc.ABC):
         """
         Read a log file from logs directory.
         """
-        with open(log_file, 'r') as f:
+        with open(log_file) as f:
             return f.read()
 
     def lrr_client(
-        self, ssl: bool=True, 
-        client_session: aiohttp.ClientSession | None=None, connector: aiohttp.BaseConnector | None=None, 
+        self, ssl: bool=True,
+        client_session: aiohttp.ClientSession | None=None, connector: aiohttp.BaseConnector | None=None,
         logger: logging.Logger | None=None
     ) -> LRRClient:
         """
         Returns a LRRClient object configured to connect to this server.
         """
         return LRRClient(self.lrr_base_url, self.lrr_api_key, ssl=ssl, client_session=client_session, connector=connector, logger=logger)
-    
+
 def expect_no_error_logs(environment: AbstractLRRDeploymentContext, logger: logging.Logger):
     """
     Assert no logs with error level severity in LRR and Shinobu.
     """
     for event in parse_lrr_logs(environment.read_lrr_logs()):
         assert event.severity_level != 'error', "LANraragi process emitted error logs."
-    
+
     if environment.shinobu_logs_path.exists():
         for event in parse_lrr_logs(environment.read_log(environment.shinobu_logs_path)):
             assert event.severity_level != 'error', "Shinobu process emitted error logs."
