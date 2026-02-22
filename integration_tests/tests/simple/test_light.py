@@ -5,28 +5,34 @@ Any integration test which doesn't involve concurrent archive uploads.
 import asyncio
 import http
 import logging
-from pathlib import Path
 import sys
 import tempfile
+from pathlib import Path
+
+import aiohttp
 import numpy as np
-import pytest
 import playwright.async_api
 import playwright.async_api._generated
-import aiohttp
-
+import pytest
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.category import (
     CreateCategoryRequest,
     DeleteCategoryRequest,
     GetCategoryRequest,
     UpdateBookmarkLinkRequest,
-    UpdateCategoryRequest
+    UpdateCategoryRequest,
 )
 
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext, expect_no_error_logs
 from aio_lanraragi_tests.common import LRR_INDEX_TITLE
+from aio_lanraragi_tests.deployment.base import (
+    AbstractLRRDeploymentContext,
+    expect_no_error_logs,
+)
 from aio_lanraragi_tests.utils.api_wrappers import save_archives, upload_archive
-from aio_lanraragi_tests.utils.playwright import assert_browser_responses_ok, assert_console_logs_ok
+from aio_lanraragi_tests.utils.playwright import (
+    assert_browser_responses_ok,
+    assert_console_logs_ok,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -141,7 +147,7 @@ async def test_shinobu_api(lrr_client: LRRClient, environment: AbstractLRRDeploy
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
     LOGGER.debug("Established connection with test LRR server.")
     # <<<<< TEST CONNECTION STAGE <<<<<
-    
+
     # >>>>> GET SHINOBU STATUS STAGE >>>>>
     response, error = await lrr_client.shinobu_api.get_shinobu_status()
     assert not error, f"Failed to get shinobu status (status {error.status}): {error.error}"
@@ -212,7 +218,7 @@ async def test_drop_database(lrr_client: LRRClient, environment: AbstractLRRDepl
     assert not error, f"Failed to drop database (status {error.status}): {error.error}"
     del response, error
     # <<<<< DROP DATABASE STAGE <<<<<
-    
+
     # >>>>> TEST CONNECTION STAGE >>>>>
     response, error = await lrr_client.shinobu_api.get_shinobu_status()
     assert error and error.status == 401, f"Expected no permissions, got status {error.status}."
@@ -281,7 +287,7 @@ async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semap
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
     LOGGER.debug("Established connection with test LRR server.")
     # <<<<< TEST CONNECTION STAGE <<<<<
-    
+
     # >>>>> UPLOAD STAGE >>>>>
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)

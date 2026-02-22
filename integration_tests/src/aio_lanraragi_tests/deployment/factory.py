@@ -1,11 +1,14 @@
 import logging
 import sys
+
 import docker
 import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
 from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
+from aio_lanraragi_tests.exceptions import DeploymentException
+
 
 def generate_deployment(
     request: pytest.FixtureRequest, resource_prefix: str, port_offset: int,
@@ -36,12 +39,18 @@ def generate_deployment(
             image: str = request.config.getoption("--image")
             git_url: str = request.config.getoption("--git-url")
             git_branch: str = request.config.getoption("--git-branch")
+            dockerfile: str = request.config.getoption("--dockerfile")
             use_docker_api: bool = request.config.getoption("--docker-api")
             staging_dir: str = request.config.getoption("--staging")
+            if dockerfile and git_url:
+                raise DeploymentException("--dockerfile cannot be combined with --git-url.")
+            if dockerfile and image:
+                raise DeploymentException("--dockerfile cannot be combined with --image.")
             docker_client = docker.from_env()
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
             environment = DockerLRRDeploymentContext(
-                build_path, image, git_url, git_branch, docker_client, staging_dir, resource_prefix, port_offset, docker_api=docker_api,
+                build_path, image, git_url, git_branch, docker_client, staging_dir, resource_prefix, port_offset,
+                dockerfile=dockerfile, docker_api=docker_api,
                 global_run_id=global_run_id, is_allow_uploads=True,
                 logger=logger
             )

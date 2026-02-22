@@ -66,11 +66,11 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         - `"https://website.com/lanraragi"`
         """
         return self._lrr_base_url
-    
+
     @lrr_base_url.setter
     def lrr_base_url(self, lrr_base_url: str):
         self._lrr_base_url = lrr_base_url
-    
+
     @property
     def lrr_api_key(self) -> str | None:
         """
@@ -96,7 +96,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         If owned, the resource must be closed on context exit.
         """
         return self._owns_client_session
-    
+
     @property
     def owns_connector(self) -> bool:
         """
@@ -143,7 +143,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
             self.client_session = None
             self._owns_client_session = True
 
-            # if connector is configured, overrides SSL preference, 
+            # if connector is configured, overrides SSL preference,
             # and connector will NOT be cleaned on context exit.
             # Otherwise, we will create the connector during session create.
             # A connector will NEVER be created in isolation.
@@ -190,7 +190,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
 
         if self.client_session:
             return self.client_session
-        
+
         # only one session can be created and owned by the context manager at any given time.
         async with self._session_lock:
             if self.client_session:
@@ -244,7 +244,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
     async def __aenter__(self: _ApiContextManagerLike) -> _ApiContextManagerLike:
         await self._get_session()
         return self
-    
+
     @override
     async def __aexit__(self, exc_type, exc_value, traceback):
         if exc_type:
@@ -253,7 +253,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
         return None
 
     async def handle_request(
-            self, request_type: http.HTTPMethod, url: str, 
+            self, request_type: http.HTTPMethod, url: str,
             headers: dict[str, str], params: Query=None, data: Any=None, json_data: Any=None,
             max_retries: int=0
     ) -> tuple[int, str]:
@@ -305,7 +305,7 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
                 self.logger.warning(f"[{request_type.name}][{url}] encountered connection error ({aiohttp_error}); retrying in {2 ** retry_count} seconds...")
                 await asyncio.sleep(2 ** retry_count)
                 continue
-    
+
     async def download_thumbnail(
             self, url: str, headers: dict[str, str], params: Query=None, max_retries: int=0
     ) -> tuple[int, bytes | str]:

@@ -4,7 +4,7 @@ from lanraragi.models.misc import (
     GetAvailablePluginsResponse,
     GetAvailablePluginsResponsePlugin,
     GetServerInfoResponse,
-    UsePluginResponse
+    UsePluginResponse,
 )
 
 _available_plugins_adapter = TypeAdapter(list[GetAvailablePluginsResponsePlugin])

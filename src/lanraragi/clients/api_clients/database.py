@@ -2,15 +2,23 @@ import http
 import json
 
 from lanraragi.clients.api_clients.base import _ApiClient
+from lanraragi.clients.res_processors.database import (
+    _process_get_database_backup_response,
+    _process_get_database_stats_response,
+)
 from lanraragi.clients.utils import _build_err_response
-from lanraragi.models.generics import _LRRClientResponse
-from lanraragi.clients.res_processors.database import _process_get_database_backup_response, _process_get_database_stats_response
 from lanraragi.models.base import LanraragiResponse
-from lanraragi.models.database import CleanDatabaseResponse, GetDatabaseBackupResponse, GetDatabaseStatsRequest, GetDatabaseStatsResponse
+from lanraragi.models.database import (
+    CleanDatabaseResponse,
+    GetDatabaseBackupResponse,
+    GetDatabaseStatsRequest,
+    GetDatabaseStatsResponse,
+)
+from lanraragi.models.generics import _LRRClientResponse
 
 
 class _DatabaseApiClient(_ApiClient):
-    
+
     async def get_database_stats(self, request: GetDatabaseStatsRequest) -> _LRRClientResponse[GetDatabaseStatsResponse]:
         """
         GET /api/database/stats

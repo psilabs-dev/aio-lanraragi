@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
+
 class GetAllArchivesResponseRecord(BaseModel):
     arcid: str = Field(..., min_length=40, max_length=40)
     isnew: bool = Field(...)

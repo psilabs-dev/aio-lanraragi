@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
+
 class SearchArchiveIndexRequest(LanraragiRequest):
     category: str | None = Field(None)
     search_filter: str | None = Field(None)

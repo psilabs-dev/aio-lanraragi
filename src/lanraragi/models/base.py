@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 
+
 class LanraragiRequest(BaseModel):
     """
     Base model for all LANraragi API client requests.

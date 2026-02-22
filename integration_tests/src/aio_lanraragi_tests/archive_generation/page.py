@@ -2,9 +2,16 @@ import io
 import logging
 from pathlib import Path
 from typing import overload
+
 from PIL import Image, ImageDraw, ImageFont
 
-from aio_lanraragi_tests.archive_generation.models import LIGHT_GRAY, CreatePageRequest, CreatePageResponse, CreatePageResponseStatus, Page
+from aio_lanraragi_tests.archive_generation.models import (
+    LIGHT_GRAY,
+    CreatePageRequest,
+    CreatePageResponse,
+    CreatePageResponseStatus,
+    Page,
+)
 from aio_lanraragi_tests.archive_generation.utils import get_roberta_regular_font
 
 LOGGER = logging.getLogger(__name__)
@@ -95,8 +102,8 @@ def save_page_to_dir(page: Page | CreatePageRequest, save_dir: Path, close: bool
     data = byte_array.read(page.first_n_bytes)
     with open(save_path, 'wb') as writer:
         writer.write(data)
-    
-    if close: 
+
+    if close:
         close_page(page)
     return
 

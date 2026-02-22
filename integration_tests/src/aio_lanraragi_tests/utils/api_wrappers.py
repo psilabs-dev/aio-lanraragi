@@ -1,20 +1,18 @@
-from http import HTTPMethod
-import json
-import time
-import aiofiles
-import aiohttp.client_exceptions
 import asyncio
 import errno
+import json
 import logging
-import numpy as np
+import time
+from http import HTTPMethod
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
+import aiofiles
 import aiohttp
-
+import aiohttp.client_exceptions
+import numpy as np
 from lanraragi.clients.client import LRRClient
 from lanraragi.clients.utils import _build_err_response
-from lanraragi.models.minion import GetMinionJobStatusRequest
 from lanraragi.models.archive import (
     DeleteArchiveRequest,
     DeleteArchiveResponse,
@@ -30,11 +28,18 @@ from lanraragi.models.category import (
     GetCategoryResponse,
     RemoveArchiveFromCategoryRequest,
 )
+from lanraragi.models.minion import GetMinionJobStatusRequest
 
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
-from aio_lanraragi_tests.archive_generation.metadata.zipf_utils import get_archive_idx_to_tag_idxs_map
-from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest, WriteArchiveResponse
+from aio_lanraragi_tests.archive_generation.metadata.zipf_utils import (
+    get_archive_idx_to_tag_idxs_map,
+)
+from aio_lanraragi_tests.archive_generation.models import (
+    CreatePageRequest,
+    WriteArchiveRequest,
+    WriteArchiveResponse,
+)
 from aio_lanraragi_tests.common import compute_upload_checksum
 from aio_lanraragi_tests.utils.concurrency import retry_on_lock
 
@@ -106,7 +111,7 @@ async def upload_archive(
 
                 LOGGER.debug(f"[upload_archive][{response.arcid}][{filename}]")
                 return response, None
-            except asyncio.TimeoutError as timeout_error:
+            except TimeoutError as timeout_error:
                 # if LRR handles files synchronously then our concurrent uploads may put too much pressure.
                 # employ retry with exponential backoff here as well. This is not considered a server-side
                 # problem.
@@ -199,7 +204,7 @@ async def upload_archives(
             assert not error, f"Upload failed (status {error.status}): {error.error}"
             responses.append(response)
         return responses
-    else: 
+    else:
         tasks = []
         for i, _response in enumerate(write_responses):
             title = f"Archive {i}"
@@ -351,7 +356,7 @@ async def load_pages_from_archive(client: LRRClient, arcid: str, semaphore: asyn
             url = url.split("?")[0]
             try:
                 status, content = await client.download_file(url, client.headers, params=params)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 timeout_msg = f"Request timed out after {client.client_session.timeout.total}s"
                 LOGGER.error(f"Failed to get page {page_api} (timeout): {timeout_msg}")
                 return (None, _build_err_response(timeout_msg, 500))

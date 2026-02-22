@@ -4,23 +4,20 @@ Any integration test which tests the correctness of the search API.
 
 import asyncio
 import logging
-from pathlib import Path
 import sys
 import tempfile
+from pathlib import Path
+
 import numpy as np
 import pytest
-
 from lanraragi.clients.client import LRRClient
-from lanraragi.models.search import (
-    GetRandomArchivesRequest,
-    SearchArchiveIndexRequest
-)
+from lanraragi.models.search import GetRandomArchivesRequest, SearchArchiveIndexRequest
 
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext, expect_no_error_logs
-from aio_lanraragi_tests.utils.api_wrappers import (
-    save_archives,
-    upload_archives
+from aio_lanraragi_tests.deployment.base import (
+    AbstractLRRDeploymentContext,
+    expect_no_error_logs,
 )
+from aio_lanraragi_tests.utils.api_wrappers import save_archives, upload_archives
 from aio_lanraragi_tests.utils.flakes import xfail_catch_flakes_inner
 
 LOGGER = logging.getLogger(__name__)

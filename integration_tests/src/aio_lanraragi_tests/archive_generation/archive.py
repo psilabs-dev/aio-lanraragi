@@ -1,12 +1,17 @@
 import logging
 import multiprocessing
-from pathlib import Path
 import tarfile
 import tempfile
 import zipfile
+from pathlib import Path
 
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
-from aio_lanraragi_tests.archive_generation.models import CreatePageRequest, WriteArchiveRequest, WriteArchiveResponse, WriteArchiveResponseStatus
+from aio_lanraragi_tests.archive_generation.models import (
+    CreatePageRequest,
+    WriteArchiveRequest,
+    WriteArchiveResponse,
+    WriteArchiveResponseStatus,
+)
 from aio_lanraragi_tests.archive_generation.page import save_page_to_dir
 
 LOGGER = logging.getLogger(__name__)
@@ -77,7 +82,7 @@ def create_comic(output: str | Path, comic_id: str, width: int, height: int, num
     """
     if isinstance(output, str):
         output = Path(output)
-    
+
     create_page_requests = []
     for page_id in range(num_pages):
         page_name = f"pg-{str(page_id+1).zfill(len(str(num_pages)))}"

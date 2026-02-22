@@ -2,9 +2,11 @@ import http
 import json
 
 from lanraragi.clients.api_clients.base import _ApiClient
+from lanraragi.clients.res_processors.minion import (
+    _process_get_minion_job_detail_response,
+)
 from lanraragi.clients.utils import _build_err_response
 from lanraragi.models.generics import _LRRClientResponse
-from lanraragi.clients.res_processors.minion import _process_get_minion_job_detail_response
 from lanraragi.models.minion import (
     GetMinionJobDetailRequest,
     GetMinionJobDetailResponse,

@@ -1,13 +1,33 @@
 import http
 import json
+
 import aiohttp
 
 from lanraragi.clients.api_clients.base import _ApiClient
+from lanraragi.clients.res_processors.category import (
+    _process_get_all_categories_response,
+    _process_get_category_response,
+)
 from lanraragi.clients.utils import _build_err_response
-from lanraragi.models.generics import _LRRClientResponse
-from lanraragi.clients.res_processors.category import _process_get_all_categories_response, _process_get_category_response
 from lanraragi.models.base import LanraragiResponse
-from lanraragi.models.category import AddArchiveToCategoryRequest, AddArchiveToCategoryResponse, CreateCategoryRequest, CreateCategoryResponse, DeleteCategoryRequest, DisableBookmarkLinkResponse, GetAllCategoriesResponse, GetBookmarkLinkResponse, GetCategoryRequest, GetCategoryResponse, RemoveArchiveFromCategoryRequest, UpdateBookmarkLinkRequest, UpdateBookmarkLinkResponse, UpdateCategoryRequest, UpdateCategoryResponse
+from lanraragi.models.category import (
+    AddArchiveToCategoryRequest,
+    AddArchiveToCategoryResponse,
+    CreateCategoryRequest,
+    CreateCategoryResponse,
+    DeleteCategoryRequest,
+    DisableBookmarkLinkResponse,
+    GetAllCategoriesResponse,
+    GetBookmarkLinkResponse,
+    GetCategoryRequest,
+    GetCategoryResponse,
+    RemoveArchiveFromCategoryRequest,
+    UpdateBookmarkLinkRequest,
+    UpdateBookmarkLinkResponse,
+    UpdateCategoryRequest,
+    UpdateCategoryResponse,
+)
+from lanraragi.models.generics import _LRRClientResponse
 
 
 class _CategoryApiClient(_ApiClient):

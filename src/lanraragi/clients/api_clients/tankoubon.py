@@ -1,9 +1,13 @@
 import http
 import json
+
 import aiohttp
 
 from lanraragi.clients.api_clients.base import _ApiClient
-from lanraragi.clients.res_processors.tankoubon import _handle_get_all_tankoubons_response, _handle_get_tankoubon_response
+from lanraragi.clients.res_processors.tankoubon import (
+    _handle_get_all_tankoubons_response,
+    _handle_get_tankoubon_response,
+)
 from lanraragi.clients.utils import _build_err_response
 from lanraragi.models.generics import _LRRClientResponse
 from lanraragi.models.tankoubon import (
@@ -20,8 +24,9 @@ from lanraragi.models.tankoubon import (
     RemoveArchiveFromTankoubonRequest,
     RemoveArchiveFromTankoubonResponse,
     UpdateTankoubonRequest,
-    UpdateTankoubonResponse
+    UpdateTankoubonResponse,
 )
+
 
 class _TankoubonApiClient(_ApiClient):
 
@@ -77,9 +82,9 @@ class _TankoubonApiClient(_ApiClient):
         if request.metadata:
             payload["metadata"] = request.metadata.model_dump(exclude_none=True)
         status, content = await self.api_context.handle_request(
-            http.HTTPMethod.PUT, 
-            url, 
-            self.headers, 
+            http.HTTPMethod.PUT,
+            url,
+            self.headers,
             json_data=payload
         )
         if status == 200:
