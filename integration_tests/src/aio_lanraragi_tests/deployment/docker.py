@@ -766,7 +766,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if not Path(build_path).exists():
             raise FileNotFoundError(f"Build path {build_path} does not exist!")
 
-        dockerfile_path = self._dockerfile_path or (Path(build_path) / "tools" / "build" / "docker" / "Dockerfile")
+        dockerfile_path = self.dockerfile_path
         if not dockerfile_path.exists():
             raise FileNotFoundError(f"Dockerfile {dockerfile_path} does not exist!")
 
