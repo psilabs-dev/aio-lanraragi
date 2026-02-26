@@ -218,7 +218,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.resource_prefix = resource_prefix
         self.port_offset = port_offset
 
-        self.build_path = build
+        self.build_path: str | None = str(Path(build).resolve()) if build else None
         self.image = image
         self.global_run_id = global_run_id
         self.git_url = git_url
