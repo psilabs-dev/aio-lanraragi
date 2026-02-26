@@ -608,6 +608,7 @@ async def test_local_progress_disabled(
     response, error = await lrr_client.misc_api.get_server_info()
     assert not error, f"Failed to get server info (status {error.status}): {error.error}"
     assert response.server_tracks_progress is False, "Expected server_tracks_progress=False when localprogress is enabled."
+    assert response.authenticated_progress is False, "Expected authenticated_progress=False when authprogress is disabled."
 
     # authenticated client should be rejected with 400.
     response, error = await lrr_client.archive_api.update_reading_progression(
@@ -653,6 +654,11 @@ async def test_local_progress_with_auth_progress(
     environment.enable_local_progress()
     environment.enable_auth_progress()
     environment.restart()
+
+    # verify server reports auth progress as enabled.
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to get server info (status {error.status}): {error.error}"
+    assert response.authenticated_progress is True, "Expected authenticated_progress=True when authprogress is enabled."
 
     # authenticated client should succeed with 200.
     lrr_client.update_api_key(DEFAULT_API_KEY)

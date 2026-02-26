@@ -15,6 +15,7 @@ class GetServerInfoResponse(LanraragiResponse):
     nofun_mode: bool = Field(...)
     server_resizes_images: bool = Field(...)
     server_tracks_progress: bool = Field(...)
+    authenticated_progress: bool = Field(...)
     total_archives: int = Field(...)
     total_pages_read: int = Field(...)
     version: str = Field(...)
