@@ -567,11 +567,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         WARNING: stopping container does NOT necessarily make the corresponding ports available.
         It is possible that the docker daemon still reserves the port, and may not free it until
         the underlying network configurations are updated, which can take up to a minute. See:
-        
+
         - https://docs.docker.com/engine/network/packet-filtering-firewalls
         - https://stackoverflow.com/questions/63467759/close-docker-port-when-container-is-stopped
 
-        All this is to say, do not use port availability as an indicator that a container is 
+        All this is to say, do not use port availability as an indicator that a container is
         successfully stopped.
         """
         if self.lrr_container:
@@ -685,7 +685,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         To handle potential FS stale cache issues, a forceful removal will be attempted within containers,
         before they are shut down and an external bind mount source removal is invoked.
-        
+
         If something goes wrong during setup, the environment will be reset and the data should be removed.
         """
         if remove_data and self.lrr_container:
@@ -745,7 +745,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Args:
             build_path: The path to the build directory.
             force: Whether to force the build (e.g. even if the image already exists).
-        
+
         Raises:
             FileNotFoundError: docker image or build path not found
             DeploymentException: if docker image build fails with log stream output

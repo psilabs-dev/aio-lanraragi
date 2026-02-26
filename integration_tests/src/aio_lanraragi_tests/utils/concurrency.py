@@ -1,11 +1,9 @@
 import asyncio
 import sys
 from collections.abc import Awaitable, Callable
-from typing import TypeVar
 
 from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
 
-ResponseT = TypeVar('ResponseT', bound=LanraragiResponse)
 
 def get_bounded_sem(on_unix: int=8, on_windows: int=2) -> asyncio.Semaphore:
     """
@@ -17,7 +15,7 @@ def get_bounded_sem(on_unix: int=8, on_windows: int=2) -> asyncio.Semaphore:
         case _:
             return asyncio.BoundedSemaphore(value=on_unix)
 
-async def retry_on_lock(
+async def retry_on_lock[ResponseT: LanraragiResponse](
     operation_func: Callable[[], Awaitable[tuple[ResponseT, LanraragiErrorResponse]]],
     max_retries: int = 10
 ) -> tuple[ResponseT, LanraragiErrorResponse]:

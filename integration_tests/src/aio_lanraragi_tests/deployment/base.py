@@ -101,7 +101,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Staging directory handles all the files that belong to this deployment.
         This directory is supplied by the user, which should represent an isolated deployment environment.
         The reason we need a staging directory, is that we want to reproduce the docker effect of an isolated
-        workspace, where each directory within this parent is a volume which can be cleaned up, giving us a 
+        workspace, where each directory within this parent is a volume which can be cleaned up, giving us a
         volume inventory when running tests.
 
         Staging dir will have the following structure. When tearing down and removing everything, will
@@ -187,10 +187,10 @@ class AbstractLRRDeploymentContext(abc.ABC):
     ):
         """
         Main entrypoint to setting up a LRR environment.
-        
+
         Performs all setup logic for a requirement, including creating directories and files, volumes, networks,
         and other resources required for a working LRR environment.
-        
+
         Does not, and will not perform any cleanup function. Use teardown or another API for that logic.
 
         Args:
@@ -246,7 +246,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
     def stop_lrr(self, timeout: int=10):
         """
         Stop the LRR server
-        
+
         Args:
             `timeout`: timeout in seconds.
         """

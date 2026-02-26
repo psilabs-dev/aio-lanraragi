@@ -33,7 +33,7 @@ def pytest_addoption(parser: pytest.Parser):
         Docker image tag to use for LANraragi image. Defaults to "difegue/lanraragi".
 
     docker-api : `bool = False`
-        Use Docker API client. Requires privileged access to the Docker daemon, 
+        Use Docker API client. Requires privileged access to the Docker daemon,
         but allows you to see build outputs.
 
     dockerfile : `str`
@@ -166,5 +166,5 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
                     LOGGER.error(f"<<<<< SHINOBU LOGS (prefix: \"{prefix}\") <<<<<")
             else:
                 LOGGER.info("No environment available.")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — best-effort log dump
             LOGGER.error(f"Failed to dump failure info: {e}")

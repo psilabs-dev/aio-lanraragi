@@ -32,7 +32,7 @@ class _WindowsConsole(AbstractContextManager):
     - an attachment to a requested (or new) Windows console
     - immunity to CTRL events
     - ability to send CTRL signals to a target PID
-    
+
     Should obviously not be run on non-Windows systems, and since this is private we will not be checking.
     """
 
@@ -211,8 +211,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self._original_windist_dir
 
     @original_windist_dir.setter
-    def original_windist_dir(self, dir: Path):
-        self._original_windist_dir = dir.absolute()
+    def original_windist_dir(self, directory: Path):
+        self._original_windist_dir = directory.absolute()
 
     @property
     def redis_client(self) -> redis.Redis:
@@ -611,7 +611,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Stop the LRR server.
 
-        This will try to kill the LRR server by PID, then by port owner PID, 
+        This will try to kill the LRR server by PID, then by port owner PID,
         then by perl.exe processes started from our win-dist runtime.
 
         lrr_pid being None only means PID probe didn't find a listening owner
@@ -787,12 +787,12 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             else:
                 raise DeploymentException(f"Failed to stop perl LRR process ({output.returncode}): STDERR={output.stderr}")
 
-    def _remove_ro(self, dir: Path):
+    def _remove_ro(self, directory: Path):
         """
         Recursively clear Windows Read-only attributes so directories can be removed.
         """
-        dir.chmod(dir.stat().st_mode | stat.S_IWRITE)
-        for root, dirs, files in os.walk(dir, topdown=False):
+        directory.chmod(directory.stat().st_mode | stat.S_IWRITE)
+        for root, dirs, files in os.walk(directory, topdown=False):
             root_path = Path(root)
             for name in files:
                 p = root_path / name

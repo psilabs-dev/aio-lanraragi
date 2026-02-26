@@ -127,7 +127,7 @@ async def sample_test_api_auth_matrix(
 
     def endpoint_permission_granted(endpoint_is_public: bool) -> bool:
         """
-        Returns True if the permission is granted for an API call given a set of configurations, 
+        Returns True if the permission is granted for an API call given a set of configurations,
         and False otherwise.
 
         There are probably a dozen other ways to express this function.
