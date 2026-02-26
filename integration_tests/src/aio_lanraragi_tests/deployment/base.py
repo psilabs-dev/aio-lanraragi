@@ -372,6 +372,20 @@ class AbstractLRRDeploymentContext(abc.ABC):
         self.redis_client.select(2)
         self.redis_client.hset("LRR_CONFIG", "authprogress", "0")
 
+    def enable_local_progress(self):
+        """
+        Enable local (client-side) progress tracking, disabling server-side progress tracking.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "localprogress", "1")
+
+    def disable_local_progress(self):
+        """
+        Disable local (client-side) progress tracking, re-enabling server-side progress tracking.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "localprogress", "0")
+
     def test_lrr_connection(self, port: int, test_connection_max_retries: int=4):
         """
         Test the LRR connection with retry and exponential backoff.

@@ -25,7 +25,12 @@ from aio_lanraragi_tests.deployment.base import (
     expect_no_error_logs,
 )
 from aio_lanraragi_tests.deployment.factory import generate_deployment
-from aio_lanraragi_tests.utils.api_wrappers import save_archives, upload_archives
+from aio_lanraragi_tests.utils.api_wrappers import (
+    create_archive_file,
+    save_archives,
+    upload_archive,
+    upload_archives,
+)
 from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
@@ -567,6 +572,95 @@ async def test_enable_cors_preflight(environment: AbstractLRRDeploymentContext, 
         expected_allowed_origin = "*"
         actual_allowed_origin = headers["Access-Control-Allow-Origin"].strip()
         assert actual_allowed_origin == expected_allowed_origin, "CORS allowed origin does not match."
+
+    # check logs for errors
+    expect_no_error_logs(environment, LOGGER)
+
+@pytest.mark.asyncio
+async def test_local_progress_disabled(
+    environment: AbstractLRRDeploymentContext, lrr_client: LRRClient,
+    semaphore: asyncio.Semaphore, is_lrr_debug_mode: bool
+):
+    """
+    Test that the progress endpoint rejects all requests when local progress is enabled
+    and auth progress is disabled (localprogress=1, authprogress=0).
+
+    In this configuration, server-side progress tracking is fully disabled;
+    the frontend stores progress in localStorage instead.
+    """
+    environment.setup(with_api_key=True, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
+    lrr_client.update_api_key(DEFAULT_API_KEY)
+
+    # upload a single archive.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        save_path = create_archive_file(tmpdir, "local_progress_test", num_pages=10)
+        response, error = await upload_archive(lrr_client, save_path, save_path.name, semaphore)
+        assert not error, f"Upload failed (status {error.status}): {error.error}"
+        arcid = response.arcid
+
+    # enable local progress, disable auth progress, restart.
+    environment.enable_local_progress()
+    environment.disable_auth_progress()
+    environment.restart()
+
+    # verify server reports progress tracking as disabled.
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to get server info (status {error.status}): {error.error}"
+    assert response.server_tracks_progress is False, "Expected server_tracks_progress=False when localprogress is enabled."
+
+    # authenticated client should be rejected with 400.
+    response, error = await lrr_client.archive_api.update_reading_progression(
+        UpdateReadingProgressionRequest(arcid=arcid, page=1)
+    )
+    assert not response, "Expected no response payload when server-side progress is disabled."
+    assert error.status == 400, f"Expected status 400, got: {error.status}."
+
+    # unauthenticated client should also be rejected with 400.
+    lrr_client.update_api_key(None)
+    response, error = await lrr_client.archive_api.update_reading_progression(
+        UpdateReadingProgressionRequest(arcid=arcid, page=1)
+    )
+    assert not response, "Expected no response payload when server-side progress is disabled."
+    assert error.status == 400, f"Expected status 400, got: {error.status}."
+
+    # check logs for errors
+    expect_no_error_logs(environment, LOGGER)
+
+@pytest.mark.asyncio
+async def test_local_progress_with_auth_progress(
+    environment: AbstractLRRDeploymentContext, lrr_client: LRRClient,
+    semaphore: asyncio.Semaphore, is_lrr_debug_mode: bool
+):
+    """
+    Test that auth progress overrides local progress (localprogress=1, authprogress=1).
+
+    When both are enabled, authenticated users can still update server-side progress,
+    while unauthenticated users are expected to use localStorage on the frontend.
+    """
+    environment.setup(with_api_key=True, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
+    lrr_client.update_api_key(DEFAULT_API_KEY)
+
+    # upload a single archive.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        save_path = create_archive_file(tmpdir, "local_auth_progress_test", num_pages=10)
+        response, error = await upload_archive(lrr_client, save_path, save_path.name, semaphore)
+        assert not error, f"Upload failed (status {error.status}): {error.error}"
+        arcid = response.arcid
+
+    # enable both local progress and auth progress, restart.
+    environment.enable_local_progress()
+    environment.enable_auth_progress()
+    environment.restart()
+
+    # authenticated client should succeed with 200.
+    lrr_client.update_api_key(DEFAULT_API_KEY)
+    response, error = await lrr_client.archive_api.update_reading_progression(
+        UpdateReadingProgressionRequest(arcid=arcid, page=1)
+    )
+    assert not error, f"Progress update failed (status {error.status}): {error.error}"
+    assert response.page == 1, f"Expected page=1, got: {response.page}."
 
     # check logs for errors
     expect_no_error_logs(environment, LOGGER)
