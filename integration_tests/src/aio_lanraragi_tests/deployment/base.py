@@ -381,6 +381,20 @@ class AbstractLRRDeploymentContext(abc.ABC):
         self.redis_client.select(2)
         self.redis_client.hset("LRR_CONFIG", "authprogress", "0")
 
+    def enable_openapi_bypass(self):
+        """
+        Disable OpenAPI request/response validation (bypass mode).
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "disableopenapi", "1")
+
+    def disable_openapi_bypass(self):
+        """
+        Enable OpenAPI request/response validation (normal mode).
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "disableopenapi", "0")
+
     def enable_local_progress(self):
         """
         Enable local (client-side) progress tracking, disabling server-side progress tracking.
