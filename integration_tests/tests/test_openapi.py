@@ -10,7 +10,9 @@ import asyncio
 import http
 import json
 import logging
+import tempfile
 from collections.abc import AsyncGenerator, Generator
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -129,11 +131,12 @@ async def test_bypass_response_validation(lrr_client: LRRClient, environment: Ab
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
 
     # Upload an archive
-    archive_path = create_archive_file(environment.archives_dir, "test_bypass_response", num_pages=1)
-    response, error = await upload_archive(
-        lrr_client, archive_path, archive_path.name, asyncio.Semaphore(1),
-        title="Test Bypass Archive", tags="test:bypass",
-    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_path = create_archive_file(Path(tmpdir), "test_bypass_response", num_pages=1)
+        response, error = await upload_archive(
+            lrr_client, archive_path, archive_path.name, asyncio.Semaphore(1),
+            title="Test Bypass Archive", tags="test:bypass",
+        )
     assert not error, f"Upload failed (status {error.status}): {error.error}"
     arcid = response.arcid
 
