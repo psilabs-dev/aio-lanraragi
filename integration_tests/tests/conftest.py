@@ -143,11 +143,11 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
     """
     outcome = yield
     report: pytest.TestReport = outcome.get_result()
-    if report.when == "call" and report.failed:
+    if report.when in ("call", "setup") and report.failed:
         if excinfo := call.excinfo:
-            LOGGER.error(f"Test threw {excinfo.typename} with message \"{excinfo.value}\": dumping logs... ({item.nodeid})")
+            LOGGER.error(f"Test threw {excinfo.typename} with message \"{excinfo.value}\": dumping logs... ({item.nodeid}, phase={report.when})")
         else:
-            LOGGER.error(f"Test failed: dumping logs... ({item.nodeid})")
+            LOGGER.error(f"Test failed: dumping logs... ({item.nodeid}, phase={report.when})")
         try:
             if hasattr(item.session, 'lrr_environments') and item.session.lrr_environments:
                 environments_by_prefix: dict[str, AbstractLRRDeploymentContext] = item.session.lrr_environments
@@ -164,6 +164,9 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
                     for line in lines:
                         LOGGER.error(line)
                     LOGGER.error(f"<<<<< SHINOBU LOGS (prefix: \"{prefix}\") <<<<<")
+                    LOGGER.error(f">>>>> REDIS LOGS (prefix: \"{prefix}\") >>>>>")
+                    environment.display_redis_logs()
+                    LOGGER.error(f"<<<<< REDIS LOGS (prefix: \"{prefix}\") <<<<<")
             else:
                 LOGGER.info("No environment available.")
         except Exception as e:  # noqa: BLE001 — best-effort log dump

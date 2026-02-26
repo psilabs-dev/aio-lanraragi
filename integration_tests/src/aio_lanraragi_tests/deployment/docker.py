@@ -7,6 +7,7 @@ import io
 import logging
 import os
 import shutil
+import sys
 import tarfile
 import tempfile
 import time
@@ -297,6 +298,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.warning("LANraragi container not available for log extraction")
             return b"No LANraragi container available"
 
+    @override
     def get_redis_logs(self, tail: int=100) -> bytes:
         """
         Get the Redis container logs.
@@ -357,6 +359,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         else:
             self.logger.debug(f"Creating Redis dir: {redis_dir}")
             redis_dir.mkdir(parents=True, exist_ok=False)
+
+            # Brief delay for VirtioFS to propagate the
+            # newly created directory before it is used as a bind mount source.
+            if sys.platform == "darwin":
+                time.sleep(1)
 
         # log the setup resource allocations for user to see
         # the docker image is not included, haven't decided how to classify it yet.

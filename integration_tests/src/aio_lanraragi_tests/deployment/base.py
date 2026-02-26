@@ -269,6 +269,15 @@ class AbstractLRRDeploymentContext(abc.ABC):
             `tail`: max number of lines to keep from last line.
         """
 
+    @abc.abstractmethod
+    def get_redis_logs(self, tail: int=100) -> bytes:
+        """
+        Get Redis logs as bytes.
+
+        Args:
+            `tail`: max number of lines to keep from last line.
+        """
+
     def get_redis_backup_dir(self, backup_id: str) -> Path:
         backup_dirname = self.resource_prefix + f"redis_backup_{backup_id}"
         backup_dir = self.staging_dir / backup_dirname
@@ -431,6 +440,8 @@ class AbstractLRRDeploymentContext(abc.ABC):
                 break
             except redis.exceptions.ConnectionError:
                 if retry_count >= max_retries:
+                    self.logger.error("Failed to connect to Redis! Dumping Redis logs...")
+                    self.display_redis_logs()
                     raise
                 time_to_sleep = 2 ** (retry_count + 1)
                 self.logger.warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
@@ -452,6 +463,21 @@ class AbstractLRRDeploymentContext(abc.ABC):
             for line in log_text.split('\n'):
                 if line.strip():
                     self.logger.log(log_level, f"LRR: {line}")
+
+    def display_redis_logs(self, tail: int=100, log_level: int=logging.ERROR):
+        """
+        Display Redis logs to (error) output, used for debugging.
+
+        Args:
+            tail: show up to how many lines from the last output
+            log_level: integer value level of log (see logging module)
+        """
+        redis_logs = self.get_redis_logs(tail=tail)
+        if redis_logs:
+            log_text = redis_logs.decode('utf-8', errors='replace')
+            for line in log_text.split('\n'):
+                if line.strip():
+                    self.logger.log(log_level, f"Redis: {line}")
 
     def read_lrr_logs(self) -> str:
         """
