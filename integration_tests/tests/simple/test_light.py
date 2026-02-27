@@ -233,9 +233,11 @@ async def test_drop_database(lrr_client: LRRClient, environment: AbstractLRRDepl
     expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
-@pytest.mark.dev("openapi") # PR: https://github.com/Difegue/LANraragi/pull/1448
+@pytest.mark.dev("openapi")
 async def test_openapi_invalid_request(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
+    - PR: https://github.com/Difegue/LANraragi/pull/1448
+
     Verify that OpenAPI request validation works.
     """
     # test get archive metadata API.
@@ -379,11 +381,14 @@ async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semap
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.dev("preload") # Issue: https://github.com/Difegue/LANraragi/issues/1433 | PR: https://github.com/Difegue/LANraragi/pull/1459
+@pytest.mark.dev("preload")
 async def test_webkit_reader_preload(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 ):
     """
+    - Issue: https://github.com/Difegue/LANraragi/issues/1433
+    - PR: https://github.com/Difegue/LANraragi/pull/1459
+
     In WebKit, when preloading is enabled and the user moves to the next page,
     the reader should serve the already preloaded image without re-fetching the
     same page image URL over the network.

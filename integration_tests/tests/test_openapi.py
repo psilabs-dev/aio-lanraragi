@@ -1,4 +1,6 @@
 """
+PR: https://github.com/Difegue/LANraragi/pull/1448
+
 Integration tests for OpenAPI validation and validation bypass (LRR_DISABLE_OPENAPI).
 
 These tests verify validation works, and that when OpenAPI validation bypass is enabled
@@ -67,7 +69,7 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerato
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("openapi") # PR: https://github.com/Difegue/LANraragi/pull/1448
+@pytest.mark.dev("openapi")
 async def test_bypass_invalid_request(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     With bypass enabled, a malformed arcid that would normally be rejected by
@@ -96,7 +98,7 @@ async def test_bypass_invalid_request(lrr_client: LRRClient, environment: Abstra
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("openapi") # PR: https://github.com/Difegue/LANraragi/pull/1448
+@pytest.mark.dev("openapi")
 async def test_bypass_normal_request(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     With bypass enabled, normal valid API calls should behave identically
@@ -116,7 +118,7 @@ async def test_bypass_normal_request(lrr_client: LRRClient, environment: Abstrac
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("openapi") # PR: https://github.com/Difegue/LANraragi/pull/1448
+@pytest.mark.dev("openapi")
 async def test_bypass_response_validation(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     With bypass enabled, a response that violates the OpenAPI schema (e.g. a
@@ -159,7 +161,7 @@ async def test_bypass_response_validation(lrr_client: LRRClient, environment: Ab
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("openapi") # PR: https://github.com/Difegue/LANraragi/pull/1448
+@pytest.mark.dev("openapi")
 async def test_bypass_non_ascii_metadata(lrr_client: LRRClient):
     """
     With bypass enabled, ensure non-ASCII metadata is preserved in JSON responses.
@@ -188,7 +190,7 @@ async def test_bypass_non_ascii_metadata(lrr_client: LRRClient):
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("openapi") # PR: https://github.com/Difegue/LANraragi/pull/1448
+@pytest.mark.dev("openapi")
 async def test_bypass_via_redis_config(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int):
     """
     Test that OpenAPI bypass can be enabled via Redis config key "disableopenapi"
