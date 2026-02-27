@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.archive import GetArchiveMetadataRequest
 
 from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
@@ -154,6 +155,35 @@ async def test_bypass_response_validation(lrr_client: LRRClient, environment: Ab
     assert status == 200, f"Expected 200 (bypass should skip response validation), got {status}. Body: {body}"
     assert body["arcid"] == arcid
     assert "errors" not in body, "Response should not contain OpenAPI validation errors"
+
+
+@pytest.mark.asyncio
+@pytest.mark.experimental
+async def test_bypass_non_ascii_metadata(lrr_client: LRRClient):
+    """
+    With bypass enabled, ensure non-ASCII metadata is preserved in JSON responses.
+    This specifically exercises the bypass render handler path.
+    """
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+
+    title = "日本語テスト"
+    tags = "artist:作者名,series:シリーズ"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_path = create_archive_file(Path(tmpdir), "test_bypass_non_ascii", num_pages=1)
+        response, error = await upload_archive(
+            lrr_client, archive_path, archive_path.name, asyncio.Semaphore(1),
+            title=title, tags=tags,
+        )
+    assert not error, f"Upload failed (status {error.status}): {error.error}"
+    arcid = response.arcid
+
+    response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+    assert not error, f"Metadata request failed (status {error.status}): {error.error}"
+    assert response.title == title, f"Title mismatch or mojibake: expected {title!r}, got {response.title!r}"
+    assert "artist:作者名" in response.tags, f"Tags mismatch or mojibake: got {response.tags!r}"
+    assert "series:シリーズ" in response.tags, f"Tags mismatch or mojibake: got {response.tags!r}"
 
 
 @pytest.mark.asyncio
