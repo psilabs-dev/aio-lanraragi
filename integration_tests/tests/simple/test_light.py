@@ -4,6 +4,7 @@ Any integration test which doesn't involve concurrent archive uploads.
 
 import asyncio
 import http
+import json
 import logging
 import sys
 import tempfile
@@ -136,6 +137,27 @@ async def test_category(lrr_client: LRRClient, environment: AbstractLRRDeploymen
     assert not response.category_id, "Deleting a category linked to bookmark should unlink bookmark!"
     del response, error
     # <<<<< UNLINK BOOKMARK <<<<<
+
+    # Regression check: ensure query-encoded PUT payloads (used by LRR frontend)
+    # are accepted when no request body is sent.
+    session = await lrr_client._get_session()
+    async with session.put(
+        lrr_client.build_url("/api/categories?name=test-urlencoded-category&search="),
+        headers=lrr_client.headers,
+        skip_auto_headers={"Content-Type"},
+    ) as response:
+        status = response.status
+        content = await response.text()
+    assert status == 200, f"Failed to create category with query-encoded PUT request (status {status}): {content}"
+    body = json.loads(content)
+    urlencoded_cat_id = body.get("category_id")
+    assert urlencoded_cat_id, f"Missing category_id in response body: {body}"
+
+    request = GetCategoryRequest(category_id=urlencoded_cat_id)
+    response, error = await lrr_client.category_api.get_category(request)
+    assert not error, f"Failed to get urlencoded category (status {error.status}): {error.error}"
+    assert response.name == "test-urlencoded-category", "Urlencoded-created category name mismatch!"
+    del request, response, error
 
     # no error logs
     expect_no_error_logs(environment, LOGGER)
