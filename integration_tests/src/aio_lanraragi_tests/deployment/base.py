@@ -163,6 +163,10 @@ class AbstractLRRDeploymentContext(abc.ABC):
         return self.logs_dir / "shinobu.log"
 
     @property
+    def mojo_logs_path(self) -> Path:
+        return self.logs_dir / "mojo.log"
+
+    @property
     def redis_dir(self) -> Path:
         """
         Path to Redis database directory.
@@ -493,6 +497,36 @@ class AbstractLRRDeploymentContext(abc.ABC):
                 if line.strip():
                     self.logger.log(log_level, f"Redis: {line}")
 
+    def _read_log_with_rotated_gzip(self, base_filename: str) -> str:
+        """
+        Read a log file and all compressed rotated variants in ascending rotation order.
+
+        Order:
+        - <base_filename>
+        - <base_filename>.1.gz
+        - <base_filename>.2.gz
+        - ...
+        """
+        parts: list[str] = []
+        log_path = self.logs_dir / base_filename
+        if log_path.exists():
+            with open(log_path) as f:
+                parts.append(f.read())
+
+        rotated_logs = list(self.logs_dir.glob(f"{base_filename}.*.gz"))
+
+        def parse_index(path: Path) -> int:
+            name = path.name
+            # expected format: <base_filename>.<idx>.gz
+            idx_str = name.split(".")[-2]
+            return int(idx_str)
+
+        for gz_path in sorted(rotated_logs, key=parse_index):
+            with gzip.open(gz_path, mode="rt", encoding="utf-8", errors="replace") as f:
+                parts.append(f.read())
+
+        return "".join(parts)
+
     def read_lrr_logs(self) -> str:
         """
         Read all lanraragi.log logs, including rotated ones, as a single string, in the order:
@@ -502,23 +536,18 @@ class AbstractLRRDeploymentContext(abc.ABC):
         - lanraragi.log.2.gz
         - ...
         """
-        parts: list[str] = []
-        if self.lanraragi_logs_path.exists():
-            with open(self.lanraragi_logs_path) as f:
-                parts.append(f.read())
+        return self._read_log_with_rotated_gzip("lanraragi.log")
 
-        rotated_logs = list(self.logs_dir.glob("lanraragi.log.*.gz"))
-        def parse_index(path: Path) -> int:
-            name = path.name
-            # expected format: lanraragi.log.<idx>.gz
-            idx_str = name.split(".")[-2]
-            return int(idx_str)
+    def read_mojo_logs(self) -> str:
+        """
+        Read all mojo.log logs, including rotated ones, as a single string, in the order:
 
-        for gz_path in sorted(rotated_logs, key=parse_index):
-            with gzip.open(gz_path, mode="rt", encoding="utf-8", errors="replace") as f:
-                parts.append(f.read())
-
-        return "".join(parts)
+        - mojo.log
+        - mojo.log.1.gz
+        - mojo.log.2.gz
+        - ...
+        """
+        return self._read_log_with_rotated_gzip("mojo.log")
 
     def read_log(self, log_file: str) -> str:
         """

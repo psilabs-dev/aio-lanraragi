@@ -24,6 +24,7 @@ from aio_lanraragi_tests.deployment.base import (
     expect_no_error_logs,
 )
 from aio_lanraragi_tests.deployment.factory import generate_deployment
+from aio_lanraragi_tests.log_parse import parse_lrr_logs
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
 
 LOGGER = logging.getLogger(__name__)
@@ -213,6 +214,25 @@ async def test_bypass_via_redis_config(request: pytest.FixtureRequest, resource_
             assert "errors" in body, f"Expected OpenAPI 'errors' array in response, got keys: {list(body.keys())}"
             error_messages = " ".join(e.get("message", "") for e in body["errors"])
             assert "String is too short" in error_messages, f"Expected 'String is too short' in errors, got: {error_messages}"
+            expected_warning_message = 'OpenAPI >>> GET /api/archives/123 [{"message":"String is too short: 3\\/40.","path":"\\/id"}]'
+            found_validation_warning = False
+            lrr_logs = env.read_lrr_logs()
+            mojo_logs = env.read_mojo_logs()
+            for event in parse_lrr_logs(lrr_logs):
+                if event.severity_level == "warn" and event.message == expected_warning_message:
+                    found_validation_warning = True
+                    break
+            if not found_validation_warning:
+                for event in parse_lrr_logs(mojo_logs):
+                    if event.severity_level == "warn" and event.message == expected_warning_message:
+                        found_validation_warning = True
+                        break
+            assert found_validation_warning, (
+                "Expected exact OpenAPI validation warning in lanraragi.log or mojo.log, but it was not found. "
+                f"expected={expected_warning_message!r}\n\n"
+                f"full_lrr_logs:\n{lrr_logs}\n\n"
+                f"full_mojo_logs:\n{mojo_logs}"
+            )
 
             # Enable bypass and restart
             env.enable_openapi_bypass()

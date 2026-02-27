@@ -28,6 +28,7 @@ from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
 )
+from aio_lanraragi_tests.log_parse import parse_lrr_logs
 from aio_lanraragi_tests.utils.api_wrappers import save_archives, upload_archive
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
@@ -240,6 +241,25 @@ async def test_openapi_invalid_request(lrr_client: LRRClient, environment: Abstr
     )
     assert status == 400, f"Expected bad request status from malformed arcid, got {status}"
     assert "String is too short" in content, f"Expected \"String is too short\" in response, got: {content}"
+    expected_warning_message = 'OpenAPI >>> GET /api/archives/123 [{"message":"String is too short: 3\\/40.","path":"\\/id"}]'
+    found_validation_warning = False
+    lrr_logs = environment.read_lrr_logs()
+    mojo_logs = environment.read_mojo_logs()
+    for event in parse_lrr_logs(lrr_logs):
+        if event.severity_level == "warn" and event.message == expected_warning_message:
+            found_validation_warning = True
+            break
+    if not found_validation_warning:
+        for event in parse_lrr_logs(mojo_logs):
+            if event.severity_level == "warn" and event.message == expected_warning_message:
+                found_validation_warning = True
+                break
+    assert found_validation_warning, (
+        "Expected exact OpenAPI validation warning in lanraragi.log or mojo.log, but it was not found. "
+        f"expected={expected_warning_message!r}\n\n"
+        f"full_lrr_logs:\n{lrr_logs}\n\n"
+        f"full_mojo_logs:\n{mojo_logs}"
+    )
 
     # no error logs
     expect_no_error_logs(environment, LOGGER)
