@@ -4,6 +4,7 @@ such as page navigation and viewing, manga mode, slideshow, ToC, etc.
 """
 
 import asyncio
+import logging
 import tempfile
 from pathlib import Path
 
@@ -13,6 +14,8 @@ import pytest
 from lanraragi.clients.client import LRRClient
 
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
+
+LOGGER = logging.getLogger(__name__)
 
 
 @pytest.mark.asyncio
@@ -94,6 +97,104 @@ async def test_webkit_reader_preload(
                 if response.request.method != "GET":
                     continue
                 assert response.url != prefetched_url, f"Detected URL refetch for prefetched page during page turn: {prefetched_url}"
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+async def test_double_page_navigation(
+    lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+):
+    """
+    Verify that forward and backward navigation in double-page mode serves
+    the correct page images at each step.
+
+    Feature regression check:
+    - PR: https://github.com/Difegue/LANraragi/pull/1459
+    """
+    archive_title = "Double Page Navigation Archive"
+    archive_name = "dbl-nav"
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    LOGGER.debug("Established connection with test LRR server.")
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_path = create_archive_file(Path(tmpdir), archive_name, num_pages=6)
+        response, error = await upload_archive(
+            lrr_client,
+            archive_path,
+            archive_path.name,
+            semaphore,
+            title=archive_title,
+            tags="double-page,navigation",
+        )
+        assert not error, f"Upload failed (status {error.status}): {error.error}"
+        arcid = response.arcid
+    del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # Expected query parameter suffix for a given 0-indexed page.
+    # Archive "dbl-nav" with 6 pages produces: dbl-nav-pg-1.png through dbl-nav-pg-6.png
+    def expected_page_path(page_index: int) -> str:
+        return f"path={archive_name}-pg-{page_index + 1}.png"
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await browser.new_page()
+
+            await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}")
+            await page.wait_for_load_state("networkidle")
+
+            LOGGER.info("Enabling double-page mode.")
+            await page.keyboard.press("p")
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(500)
+
+            # Page 0 (single, cover) -> pages 1+2 (double)
+            LOGGER.info("Navigating to pages 1+2.")
+            await page.keyboard.press("ArrowRight")
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(500)
+
+            display_class = await page.locator("#display").get_attribute("class") or ""
+            assert "double-mode" in display_class, f"Expected double-mode class on #display, got class={display_class!r}"
+            img_src = await page.locator("#img").get_attribute("src")
+            assert img_src.endswith(expected_page_path(1)), f"#img expected {expected_page_path(1)}, got src={img_src!r}"
+            img_dp_src = await page.locator("#img_doublepage").get_attribute("src")
+            assert img_dp_src.endswith(expected_page_path(2)), f"#img_doublepage expected {expected_page_path(2)}, got src={img_dp_src!r}"
+
+            # Pages 1+2 -> pages 3+4
+            LOGGER.info("Navigating forward to pages 3+4.")
+            await page.keyboard.press("ArrowRight")
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(500)
+
+            img_src = await page.locator("#img").get_attribute("src")
+            assert img_src.endswith(expected_page_path(3)), f"#img expected {expected_page_path(3)}, got src={img_src!r}"
+            img_dp_src = await page.locator("#img_doublepage").get_attribute("src")
+            assert img_dp_src.endswith(expected_page_path(4)), f"#img_doublepage expected {expected_page_path(4)}, got src={img_dp_src!r}"
+
+            # Pages 3+4 -> pages 1+2 (navigate back)
+            LOGGER.info("Navigating back to pages 1+2.")
+            await page.keyboard.press("ArrowLeft")
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(500)
+
+            img_src = await page.locator("#img").get_attribute("src")
+            assert img_src.endswith(expected_page_path(1)), f"#img expected {expected_page_path(1)}, got src={img_src!r}"
+            img_dp_src = await page.locator("#img_doublepage").get_attribute("src")
+            assert img_dp_src.endswith(expected_page_path(2)), f"#img_doublepage expected {expected_page_path(2)}, got src={img_dp_src!r}"
         finally:
             await bc.close()
             await browser.close()
