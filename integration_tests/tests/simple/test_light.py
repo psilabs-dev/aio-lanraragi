@@ -229,7 +229,7 @@ async def test_drop_database(lrr_client: LRRClient, environment: AbstractLRRDepl
     expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
-@pytest.mark.experimental
+@pytest.mark.dev("openapi") # PR: https://github.com/Difegue/LANraragi/pull/1448
 async def test_openapi_invalid_request(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Verify that OpenAPI request validation works.
@@ -295,7 +295,7 @@ async def test_concurrent_clients(environment: AbstractLRRDeploymentContext):
 # skip: for demonstration purposes only.
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.experimental
+@pytest.mark.dev("demo")
 async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
     Upload two archive, apply search filter, read archive, then go back and check the search filter is still populated.
