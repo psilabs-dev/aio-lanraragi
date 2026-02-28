@@ -116,7 +116,7 @@ async def test_plugin_not_available(lrr_client: LRRClient, environment: Abstract
     """
     Test behavior of plugin when not available.
 
-    According to LRR, 200 status code would always be returned.
+    According to pre-OpenAPI LRR, 200 status code would always be returned.
     """
     environment.setup(with_api_key=True)
 
@@ -140,3 +140,21 @@ async def test_plugin_not_available(lrr_client: LRRClient, environment: Abstract
     assert error is not None, "Expected plugin error for unavailable plugin"
     assert error.status == 200, f"Expected status 200 from LRR plugin API, got {error.status}"
     assert error.error == "Plugin not found on system.", f"Unexpected plugin error message: {error.error!r}"
+
+@pytest.mark.asyncio
+async def test_ignore_invalid_plugin_type(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Plugins with an invalid plugin type are ignored by LRR.
+    """
+    plugin_path = Path(__file__).parent / "resources" / "plugins" / "metadata" / "InvalidPluginType.pm"
+    environment.setup(
+        with_api_key=True,
+        plugin_paths={"Metadata": [str(plugin_path.resolve())]},
+    )
+    assert plugin_path.exists(), f"Test plugin file not found: {plugin_path}"
+
+    # >>>>> CHECK PLUGINS STAGE >>>>>
+    response, error = await lrr_client.misc_api.get_available_plugins(GetAvailablePluginsRequest(type="metadata"))
+    assert not error, f"Failed to get plugins (status {error.status}): {error.error}"
+    assert not response.plugins, f"Plugins is not empty: {response.plugins}"
+    # <<<<< CHECK PLUGINS STAGE <<<<<
