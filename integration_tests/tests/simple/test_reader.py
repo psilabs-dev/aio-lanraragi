@@ -14,6 +14,11 @@ import pytest
 from lanraragi.clients.client import LRRClient
 
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
+from aio_lanraragi_tests.utils.playwright import (
+    assert_browser_responses_ok,
+    assert_console_logs_ok,
+    assert_no_spinner,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -62,10 +67,13 @@ async def test_webkit_reader_preload(
         try:
             page = await browser.new_page()
             responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}")
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
 
             # Give preload requests a chance to complete before turning page
             # responses will be growing so we need to capture responses_before_page_turn now
@@ -75,6 +83,7 @@ async def test_webkit_reader_preload(
             # Trigger one page turn
             await page.keyboard.press("ArrowRight")
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
             await page.wait_for_timeout(1000)
 
             # check that prefetch occurred.
@@ -97,6 +106,9 @@ async def test_webkit_reader_preload(
                 if response.request.method != "GET":
                     continue
                 assert response.url != prefetched_url, f"Detected URL refetch for prefetched page during page turn: {prefetched_url}"
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts)
         finally:
             await bc.close()
             await browser.close()
@@ -152,19 +164,26 @@ async def test_double_page_navigation(
 
         try:
             page = await browser.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}")
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
 
             LOGGER.info("Enabling double-page mode.")
             await page.keyboard.press("p")
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
             await page.wait_for_timeout(500)
 
             # Page 0 (single, cover) -> pages 1+2 (double)
             LOGGER.info("Navigating to pages 1+2.")
             await page.keyboard.press("ArrowRight")
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
             await page.wait_for_timeout(500)
 
             display_class = await page.locator("#display").get_attribute("class") or ""
@@ -178,6 +197,7 @@ async def test_double_page_navigation(
             LOGGER.info("Navigating forward to pages 3+4.")
             await page.keyboard.press("ArrowRight")
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
             await page.wait_for_timeout(500)
 
             img_src = await page.locator("#img").get_attribute("src")
@@ -189,12 +209,16 @@ async def test_double_page_navigation(
             LOGGER.info("Navigating back to pages 1+2.")
             await page.keyboard.press("ArrowLeft")
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
             await page.wait_for_timeout(500)
 
             img_src = await page.locator("#img").get_attribute("src")
             assert img_src.endswith(expected_page_path(1)), f"#img expected {expected_page_path(1)}, got src={img_src!r}"
             img_dp_src = await page.locator("#img_doublepage").get_attribute("src")
             assert img_dp_src.endswith(expected_page_path(2)), f"#img_doublepage expected {expected_page_path(2)}, got src={img_dp_src!r}"
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts)
         finally:
             await bc.close()
             await browser.close()
@@ -249,9 +273,14 @@ async def test_handler_resource_management(
 
         try:
             page = await browser.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}")
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
             await page.wait_for_timeout(500)
 
             # Verify initial state: page 0 displayed
@@ -268,6 +297,7 @@ async def test_handler_resource_management(
                 LOGGER.info(f"Navigation cycle {cycle + 1}/{num_cycles}: forward to page 1.")
                 await page.keyboard.press("ArrowRight")
                 await page.wait_for_load_state("networkidle")
+                await assert_no_spinner(page)
                 await page.wait_for_timeout(300)
 
                 img_src = await page.locator("#img").get_attribute("src")
@@ -278,6 +308,7 @@ async def test_handler_resource_management(
                 LOGGER.info(f"Navigation cycle {cycle + 1}/{num_cycles}: back to page 0.")
                 await page.keyboard.press("ArrowLeft")
                 await page.wait_for_load_state("networkidle")
+                await assert_no_spinner(page)
                 await page.wait_for_timeout(300)
 
                 img_src = await page.locator("#img").get_attribute("src")
@@ -311,6 +342,9 @@ async def test_handler_resource_management(
                 f"Expected 1 load handler on #img after {num_cycles} navigation cycles, "
                 f"found {load_handler_count} (handlers are accumulating on cached Image objects)"
             )
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts)
         finally:
             await bc.close()
             await browser.close()
