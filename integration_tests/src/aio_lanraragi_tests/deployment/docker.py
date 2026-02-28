@@ -406,6 +406,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.docker_client.images.get(image).tag(image_id)
             redis_conf_src = self._extract_redis_conf_from_image(image_id)
 
+        # TODO: why does this exist
         self._applied_redis_conf_src = redis_conf_src
 
         # pull redis
