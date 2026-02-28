@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -51,9 +51,16 @@ class UsePluginRequest(LanraragiRequest):
     arcid: str | None = Field(None, description="ID of the archive to use the plugin on. This is only mandatory for metadata plugins.")
     arg: str | None = Field(None, description="Optional One-Shot argument to use when executing this Plugin.")
 
+class UsePluginRawResponse(LanraragiResponse):
+    operation: str | None = Field(None)
+    success: int = Field(...)
+    error: str | None = Field(None)
+    data: dict[str, Any] | None = Field(None)
+    type: Literal["login", "metadata", "script", "download"] | None = Field(None)
+
 class UsePluginResponse(LanraragiResponse):
-    data: dict[str, str] | None = Field(None)
-    type: Literal["login", "metadata", "script"] = Field(...)
+    data: dict[str, Any] | None = Field(None)
+    type: Literal["login", "metadata", "script", "download"] = Field(...)
 
 class UsePluginAsyncRequest(LanraragiRequest):
     plugin: str = Field(..., description="Namespace of the plugin to use.")
@@ -88,6 +95,7 @@ __all__ = [
     "GetAvailablePluginsResponsePlugin",
     "GetAvailablePluginsResponse",
     "UsePluginRequest",
+    "UsePluginRawResponse",
     "UsePluginResponse",
     "UsePluginAsyncRequest",
     "UsePluginAsyncResponse",

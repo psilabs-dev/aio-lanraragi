@@ -62,9 +62,12 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerato
 
 
 @pytest.mark.asyncio
-async def test_metadata_plugin_prepend_annotated_to_title(
-    lrr_client: LRRClient, environment: AbstractLRRDeploymentContext
-):
+async def test_plugin_functionality(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Basic behavioral test with basic plugins.
+
+    Uploads a real third-party metadata plugin to LRR, asserts availability and activeness.
+    """
     assert TEST_PLUGIN_FILE.exists(), f"Test plugin file not found: {TEST_PLUGIN_FILE}"
 
     response, error = await lrr_client.misc_api.get_available_plugins(GetAvailablePluginsRequest(type="metadata"))
@@ -102,3 +105,32 @@ async def test_metadata_plugin_prepend_annotated_to_title(
     )
 
     expect_no_error_logs(environment, LOGGER)
+
+@pytest.mark.asyncio
+async def test_plugin_not_available(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test behavior of plugin when not available.
+
+    According to LRR, 200 status code would always be returned.
+    """
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_path = create_archive_file(Path(tmpdir), "test_plugin_prepend_title", num_pages=1)
+        upload_response, upload_error = await upload_archive(
+            lrr_client,
+            archive_path,
+            archive_path.name,
+            asyncio.Semaphore(1),
+            title="plugin title",
+            tags="plugin:test",
+        )
+    assert not upload_error, f"Upload failed (status {upload_error.status}): {upload_error.error}"
+
+    arcid = upload_response.arcid
+    response, error = await lrr_client.misc_api.use_plugin(
+        UsePluginRequest(plugin="does-not-exist", arcid=arcid)
+    )
+    assert response is None, "Expected no success response for unavailable plugin"
+    assert error is not None, "Expected plugin error for unavailable plugin"
+    assert error.status == 200, f"Expected status 200 from LRR plugin API, got {error.status}"
+    assert error.error == "Plugin not found on system.", f"Unexpected plugin error message: {error.error!r}"
