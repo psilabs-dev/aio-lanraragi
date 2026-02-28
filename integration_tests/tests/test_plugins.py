@@ -24,8 +24,6 @@ from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
 
 LOGGER = logging.getLogger(__name__)
-TEST_PLUGIN_NAMESPACE = "testannotatetitlemetadata"
-TEST_PLUGIN_FILE = Path(__file__).parent / "resources" / "plugins" / "metadata" / "PrependAnnotatedToTitle.pm"
 
 
 @pytest.fixture
@@ -41,15 +39,9 @@ def port_offset() -> Generator[int, None, None]:
 @pytest.fixture
 def environment(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int):
     env: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
-    try:
-        env.setup(
-            with_api_key=True,
-            plugin_paths={"Metadata": [str(TEST_PLUGIN_FILE.resolve())]},
-        )
-        request.session.lrr_environments = {resource_prefix: env}
-        yield env
-    finally:
-        env.teardown(remove_data=True)
+    request.session.lrr_environments = {resource_prefix: env}
+    yield env
+    env.teardown(remove_data=True)
 
 
 @pytest_asyncio.fixture
@@ -68,13 +60,24 @@ async def test_plugin_functionality(lrr_client: LRRClient, environment: Abstract
 
     Uploads a real third-party metadata plugin to LRR, asserts availability and activeness.
     """
-    assert TEST_PLUGIN_FILE.exists(), f"Test plugin file not found: {TEST_PLUGIN_FILE}"
+    plugin_path = Path(__file__).parent / "resources" / "plugins" / "metadata" / "PrependAnnotatedToTitle.pm"
+    plugin_namespace = "testannotatetitlemetadata"
 
+    environment.setup(
+        with_api_key=True,
+        plugin_paths={"Metadata": [str(plugin_path.resolve())]},
+    )
+
+    assert plugin_path.exists(), f"Test plugin file not found: {plugin_path}"
+
+    # >>>>> CHECK PLUGINS STAGE >>>>>
     response, error = await lrr_client.misc_api.get_available_plugins(GetAvailablePluginsRequest(type="metadata"))
     assert not error, f"Failed to get plugins (status {error.status}): {error.error}"
     plugin_namespaces = {plugin.namespace for plugin in response.plugins}
-    assert TEST_PLUGIN_NAMESPACE in plugin_namespaces, f"Missing test plugin namespace in metadata plugins: {TEST_PLUGIN_NAMESPACE}"
+    assert plugin_namespace in plugin_namespaces, f"Missing test plugin namespace in metadata plugins: {plugin_namespace}"
+    # <<<<< CHECK PLUGINS STAGE <<<<<
 
+    # >>>>> UPLOAD STAGE >>>>>
     with tempfile.TemporaryDirectory() as tmpdir:
         archive_path = create_archive_file(Path(tmpdir), "test_plugin_prepend_title", num_pages=1)
         upload_response, upload_error = await upload_archive(
@@ -86,22 +89,22 @@ async def test_plugin_functionality(lrr_client: LRRClient, environment: Abstract
             tags="plugin:test",
         )
     assert not upload_error, f"Upload failed (status {upload_error.status}): {upload_error.error}"
+    # <<<<< UPLOAD STAGE <<<<<
 
+    # >>>>> METADATA
     arcid = upload_response.arcid
-    assert arcid, "Upload did not return an archive id"
+    response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+    assert not error, f"Failed to get metadata before plugin run (status {error.status}): {error.error}"
+    assert response.title == "plugin title", f"Unexpected pre-plugin title: {response.title!r}"
 
-    pre_response, pre_error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
-    assert not pre_error, f"Failed to get metadata before plugin run (status {pre_error.status}): {pre_error.error}"
-    assert pre_response.title == "plugin title", f"Unexpected pre-plugin title: {pre_response.title!r}"
-
-    plugin_response, plugin_error = await lrr_client.misc_api.use_plugin(
-        UsePluginRequest(plugin=TEST_PLUGIN_NAMESPACE, arcid=arcid)
+    response, error = await lrr_client.misc_api.use_plugin(
+        UsePluginRequest(plugin=plugin_namespace, arcid=arcid)
     )
-    assert not plugin_error, f"Plugin execution failed (status {plugin_error.status}): {plugin_error.error}"
-    assert plugin_response.type == "metadata", f"Unexpected plugin type: {plugin_response.type!r}"
-    assert plugin_response.data is not None, "Plugin response did not include data payload"
-    assert plugin_response.data.get("title") == "annotated plugin title", (
-        f"Unexpected plugin response title: {plugin_response.data.get('title')!r}"
+    assert not error, f"Plugin execution failed (status {error.status}): {error.error}"
+    assert response.type == "metadata", f"Unexpected plugin type: {response.type!r}"
+    assert response.data is not None, "Plugin response did not include data payload"
+    assert response.data.get("title") == "annotated plugin title", (
+        f"Unexpected plugin response title: {response.data.get('title')!r}"
     )
 
     expect_no_error_logs(environment, LOGGER)
@@ -113,6 +116,7 @@ async def test_plugin_not_available(lrr_client: LRRClient, environment: Abstract
 
     According to LRR, 200 status code would always be returned.
     """
+    environment.setup(with_api_key=True)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         archive_path = create_archive_file(Path(tmpdir), "test_plugin_prepend_title", num_pages=1)
