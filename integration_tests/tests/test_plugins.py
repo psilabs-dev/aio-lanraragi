@@ -16,6 +16,7 @@ from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import GetArchiveMetadataRequest
 from lanraragi.models.misc import GetAvailablePluginsRequest, UsePluginRequest
 
+from aio_lanraragi_tests.common import DEFAULT_API_KEY
 from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
@@ -47,6 +48,7 @@ def environment(request: pytest.FixtureRequest, resource_prefix: str, port_offse
 @pytest_asyncio.fixture
 async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerator[LRRClient, None]:
     client = environment.lrr_client()
+    client.update_api_key(DEFAULT_API_KEY)
     try:
         yield client
     finally:
