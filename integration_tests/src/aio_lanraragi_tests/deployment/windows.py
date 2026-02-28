@@ -18,7 +18,10 @@ from typing import override
 import redis
 
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, is_port_available
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.base import (
+    AbstractLRRDeploymentContext,
+    PluginPathsT,
+)
 from aio_lanraragi_tests.exceptions import DeploymentException
 
 LOGGER = logging.getLogger(__name__)
@@ -264,6 +267,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def lrr_lanraragi_path(self) -> Path:
         return self.windist_dir / "script" / "lanraragi"
 
+    @property
+    def lrr_plugin_dir(self) -> Path:
+        return self.windist_dir / "lib" / "LANraragi" / "Plugin"
+
     def __init__(
         self, windist_path: str, staging_directory: str, resource_prefix: str, port_offset: int,
         logger: logging.Logger | None=None
@@ -284,7 +291,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
-        environment: dict[str, str]={},
+        environment: dict[str, str]={}, plugin_paths: PluginPathsT={},
         test_connection_max_retries: int=4
     ):
         """
@@ -326,6 +333,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.debug(f"Copied original windist directory to {windist_dir}.")
         else:
             self.logger.debug(f"Copy of windist directory exists: {windist_dir}")
+        self.plugin_paths = plugin_paths
+        self.apply_plugins()
 
         # log the setup resource allocations for user to see
         self.logger.info(f"Deploying Windows LRR with the following resources: LRR port {lrr_port}, Redis port {redis_port}, content path {self.archives_dir}.")
@@ -404,6 +413,24 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         redis_pid = self.redis_pid
         lrr_pid = self.lrr_pid
         self.logger.info(f"Completed setup of LANraragi. LRR PID = {lrr_pid}; Redis PID = {redis_pid}.")
+
+    @override
+    def apply_plugins(self):
+        root_dir = self.lrr_plugin_dir
+        for plugin_type, plugin_paths in self.plugin_paths.items():
+            if not plugin_paths:
+                continue
+
+            target_testing_dir = root_dir / plugin_type / "Testing"
+            if target_testing_dir.exists():
+                shutil.rmtree(target_testing_dir)
+            target_testing_dir.mkdir(parents=True, exist_ok=False)
+
+            for plugin_path in plugin_paths:
+                source = Path(plugin_path)
+                if not source.exists():
+                    raise FileNotFoundError(f"Plugin path does not exist: {source}")
+                shutil.copy2(source, target_testing_dir / source.name)
 
     @override
     def start(self, test_connection_max_retries: int = 4):

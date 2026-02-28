@@ -23,7 +23,10 @@ import docker.models.volumes
 from git import Repo
 
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_REDIS_PORT
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.base import (
+    AbstractLRRDeploymentContext,
+    PluginPathsT,
+)
 from aio_lanraragi_tests.exceptions import DeploymentException
 
 DEFAULT_REDIS_DOCKER_TAG = "redis:7.2.4"
@@ -148,6 +151,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Bind mount for Redis container:/data.
         """
         dirname = self.resource_prefix + "redis"
+        return self.staging_dir / dirname
+
+    @property
+    def plugins_root_dir(self) -> Path:
+        dirname = self.resource_prefix + "plugins"
         return self.staging_dir / dirname
 
     @property
@@ -310,9 +318,40 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             return b"No Redis container available"
 
     @override
+    def apply_plugins(self):
+        plugins_root_dir = self.plugins_root_dir
+        if plugins_root_dir.exists():
+            shutil.rmtree(plugins_root_dir)
+        plugins_root_dir.mkdir(parents=True, exist_ok=False)
+
+        plugin_volumes: dict[str, dict[str, str]] = {}
+        for plugin_type, plugin_paths in self.plugin_paths.items():
+            if not plugin_paths:
+                continue
+
+            source_type_dir = plugins_root_dir / plugin_type
+            source_type_dir.mkdir(parents=True, exist_ok=False)
+
+            # Keep test plugins in a dedicated namespace to avoid collisions.
+            testing_dir = source_type_dir / "Testing"
+            testing_dir.mkdir(parents=True, exist_ok=False)
+            for plugin_path in plugin_paths:
+                source = Path(plugin_path)
+                if not source.exists():
+                    raise FileNotFoundError(f"Plugin path does not exist: {source}")
+                shutil.copy2(source, testing_dir / source.name)
+
+            plugin_volumes[str(source_type_dir)] = {
+                "bind": f"/home/koyomi/lanraragi/lib/LANraragi/Plugin/{plugin_type}",
+                "mode": "ro",
+            }
+
+        return plugin_volumes
+
+    @override
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
-        environment: dict[str, str]={},
+        environment: dict[str, str]={}, plugin_paths: PluginPathsT={},
         test_connection_max_retries: int=4
     ):
         """
@@ -334,6 +373,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             raise FileNotFoundError("Staging directory not provided. Use --staging to specify a host directory for bind mounts.")
         if not staging_dir.exists():
             raise FileNotFoundError(f"Staging directory {staging_dir} not found.")
+        self.plugin_paths = plugin_paths
+        plugin_volumes: dict[str, dict[str, str]] = self.apply_plugins()
 
         contents_dir = self.archives_dir
         thumb_dir = self.thumb_dir
@@ -501,6 +542,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if not needs_recreate_lrr and set(current_env_list) != set(lrr_environment):
                 self.logger.debug("LRR environment differs from desired; removing existing container for recreation.")
                 needs_recreate_lrr = True
+            if not needs_recreate_lrr and plugin_volumes:
+                self.logger.debug("Test-time plugin mounts are configured; removing existing container for recreation.")
+                needs_recreate_lrr = True
             if needs_recreate_lrr:
                 self.logger.debug("LRR Image hash has been updated: removing existing container.")
                 self.lrr_container.stop(timeout=1)
@@ -512,13 +556,15 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             create_lrr_container = True
         if create_lrr_container:
             self.logger.debug(f"Creating LRR container: {self.lrr_container_name}")
+            lrr_volumes = {
+                str(contents_dir): {"bind": "/home/koyomi/lanraragi/content", "mode": "rw"},
+                str(thumb_dir): {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"},
+                str(logs_dir): {"bind": "/home/koyomi/lanraragi/log", "mode": "rw"},
+            }
+            lrr_volumes.update(plugin_volumes)
             self.lrr_container = self.docker_client.containers.create(
                 image_id, hostname=lrr_container_name, name=lrr_container_name, detach=True, network=network_name, ports=lrr_ports, environment=lrr_environment,
-                volumes={
-                    str(contents_dir): {"bind": "/home/koyomi/lanraragi/content", "mode": "rw"},
-                    str(thumb_dir): {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"},
-                    str(logs_dir): {"bind": "/home/koyomi/lanraragi/log", "mode": "rw"},
-                }
+                volumes=lrr_volumes
             )
             self.logger.debug("LRR container created.")
 
@@ -737,6 +783,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if self.logs_dir.exists():
                 shutil.rmtree(self.logs_dir)
                 self.logger.debug(f"Removed logs directory: {self.logs_dir}")
+            if self.plugins_root_dir.exists():
+                shutil.rmtree(self.plugins_root_dir)
+                self.logger.debug(f"Removed plugins directory: {self.plugins_root_dir}")
             redis_conf_staging = self.staging_dir / (self.resource_prefix + "redis.conf")
             if redis_conf_staging.exists():
                 redis_conf_staging.unlink()

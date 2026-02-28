@@ -76,7 +76,6 @@ class _MiscApiClient(_ApiClient):
         """
         url = self.api_context.build_url("/api/plugins/use")
         form_data = aiohttp.FormData(quote_fields=False)
-        form_data.add_field('key', request.key)
         form_data.add_field('plugin', request.plugin)
         if request.arcid:
             form_data.add_field('id', request.arcid)
@@ -93,7 +92,6 @@ class _MiscApiClient(_ApiClient):
         """
         url = self.api_context.build_url("/api/plugins/queue")
         form_data = aiohttp.FormData(quote_fields=False)
-        form_data.add_field('key', request.key)
         form_data.add_field('plugin', request.plugin)
         if request.arcid:
             form_data.add_field('id', request.arcid)

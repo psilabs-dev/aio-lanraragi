@@ -4,6 +4,7 @@ import logging
 import shutil
 import time
 from pathlib import Path
+from typing import Literal
 
 import aiohttp
 import redis
@@ -13,6 +14,8 @@ from lanraragi.clients.client import LRRClient
 from aio_lanraragi_tests.common import DEFAULT_LRR_PORT, DEFAULT_REDIS_PORT
 from aio_lanraragi_tests.exceptions import DeploymentException
 from aio_lanraragi_tests.log_parse import parse_lrr_logs
+
+PluginPathsT = dict[Literal["Download", "Login", "Metadata", "Scripts"], list[str]]
 
 
 class AbstractLRRDeploymentContext(abc.ABC):
@@ -183,10 +186,23 @@ class AbstractLRRDeploymentContext(abc.ABC):
             self._redis_client = redis.Redis(host="127.0.0.1", port=self.redis_port, decode_responses=True)
         return self._redis_client
 
+    @property
+    def plugin_paths(self) -> PluginPathsT:
+        """
+        Test-time third party plugins
+        """
+        if not hasattr(self, "_plugin_paths"):
+            self._plugin_paths = {}
+        return self._plugin_paths
+
+    @plugin_paths.setter
+    def plugin_paths(self, plugin_paths: PluginPathsT):
+        self._plugin_paths = plugin_paths
+
     @abc.abstractmethod
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
-        environment: dict[str, str]={},
+        environment: dict[str, str]={}, plugin_paths: PluginPathsT={},
         test_connection_max_retries: int=4
     ):
         """
@@ -203,6 +219,8 @@ class AbstractLRRDeploymentContext(abc.ABC):
             `enable_cors`: whether to enable CORS headers for the Client API
             `lrr_debug_mode`: whether to enable debug mode for the LRR application
             `environment`: additional environment variables map to pass through to LRR during startup time
+            `plugin_paths`: a list of (absolute) plugin paths by plugin type.
+                If plugins are provided: copies the assigned plugins over to the target directory.
             `test_connection_max_retries`: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
 
@@ -280,6 +298,12 @@ class AbstractLRRDeploymentContext(abc.ABC):
 
         Args:
             `tail`: max number of lines to keep from last line.
+        """
+
+    @abc.abstractmethod
+    def apply_plugins(self):
+        """
+        Applies plugins to the LRR target plugins directory.
         """
 
     def get_redis_backup_dir(self, backup_id: str) -> Path:
