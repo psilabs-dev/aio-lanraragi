@@ -690,6 +690,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 script,
                 stdout=self._redis_stdout_fh,
                 stderr=self._redis_stderr_fh,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             self.logger.debug(f"Started redis service with PID {self._redis_process.pid}.")
         finally:
@@ -830,7 +831,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         # Port is occupied — send cooperative shutdown.
         self.logger.info(f"Redis port {port} occupied; sending SHUTDOWN command.")
         try:
-            self.redis_client.shutdown(now=True, force=True)
+            self.redis_client.shutdown(nosave=True, now=True, force=True)
         except redis.exceptions.ConnectionError:
             self.logger.info("Redis connection error during SHUTDOWN (may already be terminating).")
 

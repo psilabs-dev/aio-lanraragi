@@ -154,11 +154,13 @@ def is_valid_signature_hex(signature: str, allowed_signatures: list[str]=ALLOWED
 
 def is_port_available(port: int):
     """
-    Checks to see if the port on localhost is available.
+    Checks to see if the port on localhost is available (i.e. no service is listening).
+
+    Uses connect_ex() instead of bind() to avoid false negatives from TIME_WAIT
+    entries on Windows, where bind() without SO_REUSEADDR fails if any TIME_WAIT
+    entries exist on the port — even when no process is actually listening.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        try:
-            s.bind(("127.0.0.1", port))
-            return True
-        except OSError:
-            return False
+        s.settimeout(0.5)
+        result = s.connect_ex(("127.0.0.1", port))
+        return result != 0
