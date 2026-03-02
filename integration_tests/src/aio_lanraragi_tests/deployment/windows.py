@@ -2,6 +2,7 @@
 Windows LRR deployment module.
 """
 
+import contextlib
 import ctypes
 import logging
 import os
@@ -598,6 +599,25 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 f"Redis connect diagnostic ({retry_count+1}/{max_retries}): "
                 f"no process handle, port_available={port_avail}"
             )
+        # Log captured Redis stderr/stdout if available.
+        for label, path_attr in [("stderr", "_redis_stderr_path"), ("stdout", "_redis_stdout_path")]:
+            fpath = getattr(self, path_attr, None)
+            if fpath and Path(fpath).exists():
+                content = Path(fpath).read_text(errors="replace").strip()
+                if content:
+                    self.logger.warning(f"Redis {label}: {content}")
+        # Log TCP state for the port.
+        try:
+            result = subprocess.run(
+                ["netstat", "-ano"],
+                capture_output=True, text=True, timeout=5,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            port_lines = [line.strip() for line in result.stdout.splitlines() if f":{port}" in line]
+            if port_lines:
+                self.logger.warning(f"TCP state for port {port}: {port_lines}")
+        except (OSError, subprocess.TimeoutExpired) as e:
+            self.logger.warning(f"Failed to query netstat: {e}")
 
     @override
     def start_redis(self):
@@ -625,6 +645,31 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.logger.debug(f"Creating redis directory: {redis_dir}")
                 redis_dir.mkdir(parents=True, exist_ok=False)
 
+            # Check for orphaned redis-server.exe processes from previous cycles.
+            try:
+                scan = subprocess.run(
+                    ["tasklist", "/FI", "IMAGENAME eq redis-server.exe", "/FO", "CSV", "/NH"],
+                    capture_output=True, text=True, timeout=5,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                if "redis-server.exe" in scan.stdout:
+                    self.logger.warning(f"Pre-start: existing redis-server.exe detected: {scan.stdout.strip()}")
+            except (OSError, subprocess.TimeoutExpired) as e:
+                self.logger.warning(f"Pre-start: tasklist scan failed: {e}")
+
+            # Log TCP state for the Redis port before starting.
+            try:
+                ns = subprocess.run(
+                    ["netstat", "-ano"],
+                    capture_output=True, text=True, timeout=5,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                port_lines = [line.strip() for line in ns.stdout.splitlines() if f":{self.redis_port}" in line]
+                if port_lines:
+                    self.logger.warning(f"Pre-start TCP state for port {self.redis_port}: {port_lines}")
+            except (OSError, subprocess.TimeoutExpired) as e:
+                self.logger.warning(f"Pre-start: netstat failed: {e}")
+
             script = [
                 str(redis_server_path), str(self.redis_conf),
                 "--pidfile", str(pid_filepath), # maybe we don't need this...?
@@ -633,7 +678,19 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 "--port", str(self.redis_port),
             ]
             self.logger.debug(f"(redis_dir={redis_dir}, redis_logfile_path={redis_logfile_path}) running script {subprocess.list2cmdline(script)}")
-            self._redis_process = subprocess.Popen(script)
+
+            # Capture stdout/stderr to files (Redis may print errors before opening its logfile).
+            # File handles are intentionally kept open for the subprocess lifetime
+            # and closed in stop_redis().
+            self._redis_stdout_path = logs_dir / "redis-stdout.log"
+            self._redis_stderr_path = logs_dir / "redis-stderr.log"
+            self._redis_stdout_fh = open(self._redis_stdout_path, "w")  # noqa: SIM115
+            self._redis_stderr_fh = open(self._redis_stderr_path, "w")  # noqa: SIM115
+            self._redis_process = subprocess.Popen(
+                script,
+                stdout=self._redis_stdout_fh,
+                stderr=self._redis_stderr_fh,
+            )
             self.logger.debug(f"Started redis service with PID {self._redis_process.pid}.")
         finally:
             os.chdir(cwd)
@@ -743,6 +800,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         port = self.redis_port
         proc = getattr(self, "_redis_process", None)
+
+        # Close stdout/stderr file handles so teardown rmtree can delete the files.
+        for attr in ("_redis_stdout_fh", "_redis_stderr_fh"):
+            fh = getattr(self, attr, None)
+            if fh is not None:
+                with contextlib.suppress(OSError):
+                    fh.close()
+                setattr(self, attr, None)
 
         if is_port_available(port):
             # Port is free, but the process may still be alive (started but
