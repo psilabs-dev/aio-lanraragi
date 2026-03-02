@@ -82,7 +82,7 @@ async def test_plugin_functionality(lrr_client: LRRClient, environment: Abstract
     # >>>>> UPLOAD STAGE >>>>>
     with tempfile.TemporaryDirectory() as tmpdir:
         archive_path = create_archive_file(Path(tmpdir), "test_plugin_prepend_title", num_pages=1)
-        upload_response, upload_error = await upload_archive(
+        response, error = await upload_archive(
             lrr_client,
             archive_path,
             archive_path.name,
@@ -90,11 +90,12 @@ async def test_plugin_functionality(lrr_client: LRRClient, environment: Abstract
             title="plugin title",
             tags="plugin:test",
         )
-    assert not upload_error, f"Upload failed (status {upload_error.status}): {upload_error.error}"
+    assert not error, f"Upload failed (status {error.status}): {error.error}"
+    arcid = response.arcid
+    del response, error
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> METADATA
-    arcid = upload_response.arcid
     response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
     assert not error, f"Failed to get metadata before plugin run (status {error.status}): {error.error}"
     assert response.title == "plugin title", f"Unexpected pre-plugin title: {response.title!r}"
