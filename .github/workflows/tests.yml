@@ -225,7 +225,7 @@ jobs:
           --windist "$env:GITHUB_WORKSPACE\LANraragi\win-dist" `
           --staging "$env:GITHUB_WORKSPACE\staging" `
           --playwright `
-          --npseed 42
+          --npseed 42 -x
 
   check:
     if: always()
