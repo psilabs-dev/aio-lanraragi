@@ -324,7 +324,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             shutil.rmtree(plugins_root_dir)
         plugins_root_dir.mkdir(parents=True, exist_ok=False)
 
-        plugin_volumes: dict[str, dict[str, str]] = {}
         for plugin_type, plugin_paths in self.plugin_paths.items():
             if not plugin_paths:
                 continue
@@ -340,13 +339,6 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 if not source.exists():
                     raise FileNotFoundError(f"Plugin path does not exist: {source}")
                 shutil.copy2(source, testing_dir / source.name)
-
-            plugin_volumes[str(source_type_dir)] = {
-                "bind": f"/home/koyomi/lanraragi/lib/LANraragi/Plugin/{plugin_type}",
-                "mode": "ro",
-            }
-
-        return plugin_volumes
 
     @override
     def setup(
@@ -374,7 +366,17 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if not staging_dir.exists():
             raise FileNotFoundError(f"Staging directory {staging_dir} not found.")
         self.plugin_paths = plugin_paths
-        plugin_volumes: dict[str, dict[str, str]] = self.apply_plugins()
+        self.apply_plugins()
+
+        plugin_volumes: dict[str, dict[str, str]] = {}
+        for plugin_type, paths in self.plugin_paths.items():
+            if not paths:
+                continue
+            source_type_dir = self.plugins_root_dir / plugin_type
+            plugin_volumes[str(source_type_dir)] = {
+                "bind": f"/home/koyomi/lanraragi/lib/LANraragi/Plugin/{plugin_type}",
+                "mode": "ro",
+            }
 
         contents_dir = self.archives_dir
         thumb_dir = self.thumb_dir
