@@ -33,7 +33,7 @@ def pytest_addoption(parser: pytest.Parser):
         Docker image tag to use for LANraragi image. Defaults to "difegue/lanraragi".
 
     docker-api : `bool = False`
-        Use Docker API client. Requires privileged access to the Docker daemon, 
+        Use Docker API client. Requires privileged access to the Docker daemon,
         but allows you to see build outputs.
 
     dockerfile : `str`
@@ -52,9 +52,9 @@ def pytest_addoption(parser: pytest.Parser):
     staging : `str`
         Path to the LRR staging directory (where all host-based testing and file RW happens).
 
-    experimental : `bool = False`
-        Run experimental tests. For example, to test a set of LANraragi APIs in
-        active development, but are yet merged upstream.
+    dev : `list[str]`
+        Run dev tests for one or more scopes. Repeat this flag to enable
+        multiple scopes (e.g. ``--dev <scope>``).
 
     playwright : `bool = False`
         Run UI integration tests requiring Playwright.
@@ -74,7 +74,13 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--windist", action="store", default=None, help="Path to the LRR app distribution for Windows.")
     parser.addoption("--staging", action="store", default=Path.cwd() / ".staging", help="Path to the LRR staging directory (defaults to .staging).")
     parser.addoption("--lrr-debug", action="store_true", default=False, help="Enable debug mode for the LRR logs.")
-    parser.addoption("--experimental", action="store_true", default=False, help="Run experimental tests.")
+    parser.addoption(
+        "--dev",
+        action="append",
+        default=[],
+        metavar="SCOPE",
+        help="Run dev tests for one or more scopes. Repeat option to add more scopes.",
+    )
     parser.addoption("--playwright", action="store_true", default=False, help="Run Playwright UI tests. Requires `playwright install`")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
@@ -82,7 +88,7 @@ def pytest_addoption(parser: pytest.Parser):
 def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
         "markers",
-        "experimental: Experimental tests will be skipped by default."
+        "dev(scope): Dev tests with a required scope label."
     )
     config.addinivalue_line(
         "markers",
@@ -99,11 +105,42 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         for item in items:
             if 'playwright' in item.keywords:
                 item.add_marker(skip_playwright)
-    if not config.getoption("--experimental"):
-        skip_experimental = pytest.mark.skip(reason="need --experimental option enabled")
-        for item in items:
-            if 'experimental' in item.keywords:
-                item.add_marker(skip_experimental)
+
+    selected_dev_scopes = set(config.getoption("--dev") or [])
+    for item in items:
+        if 'dev' not in item.keywords:
+            continue
+
+        item_scopes: set[str] = set()
+        for marker in item.iter_markers(name="dev"):
+            if not marker.args:
+                raise pytest.UsageError(
+                    f"{item.nodeid} uses @pytest.mark.dev without a scope. "
+                    "Use @pytest.mark.dev('scope')."
+                )
+            for scope in marker.args:
+                if not isinstance(scope, str) or not scope.strip():
+                    raise pytest.UsageError(
+                        f"{item.nodeid} has invalid dev scope {scope!r}. "
+                        "Scopes must be non-empty strings."
+                    )
+                item_scopes.add(scope.strip())
+
+        if not selected_dev_scopes:
+            item.add_marker(pytest.mark.skip(reason="need --dev <scope> option enabled"))
+            continue
+
+        if not item_scopes.intersection(selected_dev_scopes):
+            requested = ", ".join(sorted(selected_dev_scopes))
+            available = ", ".join(sorted(item_scopes))
+            item.add_marker(
+                pytest.mark.skip(
+                    reason=(
+                        "dev scope not selected "
+                        f"(requested: {requested}; test scopes: {available})"
+                    )
+                )
+            )
     if not config.getoption("--failing"):
         skip_failing = pytest.mark.skip(reason="need --failing option enabled")
         for item in items:
@@ -143,11 +180,11 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
     """
     outcome = yield
     report: pytest.TestReport = outcome.get_result()
-    if report.when == "call" and report.failed:
+    if report.when in ("call", "setup") and report.failed:
         if excinfo := call.excinfo:
-            LOGGER.error(f"Test threw {excinfo.typename} with message \"{excinfo.value}\": dumping logs... ({item.nodeid})")
+            LOGGER.error(f"Test threw {excinfo.typename} with message \"{excinfo.value}\": dumping logs... ({item.nodeid}, phase={report.when})")
         else:
-            LOGGER.error(f"Test failed: dumping logs... ({item.nodeid})")
+            LOGGER.error(f"Test failed: dumping logs... ({item.nodeid}, phase={report.when})")
         try:
             if hasattr(item.session, 'lrr_environments') and item.session.lrr_environments:
                 environments_by_prefix: dict[str, AbstractLRRDeploymentContext] = item.session.lrr_environments
@@ -164,7 +201,10 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
                     for line in lines:
                         LOGGER.error(line)
                     LOGGER.error(f"<<<<< SHINOBU LOGS (prefix: \"{prefix}\") <<<<<")
+                    LOGGER.error(f">>>>> REDIS LOGS (prefix: \"{prefix}\") >>>>>")
+                    environment.display_redis_logs()
+                    LOGGER.error(f"<<<<< REDIS LOGS (prefix: \"{prefix}\") <<<<<")
             else:
                 LOGGER.info("No environment available.")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — best-effort log dump
             LOGGER.error(f"Failed to dump failure info: {e}")

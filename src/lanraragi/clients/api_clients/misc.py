@@ -6,10 +6,10 @@ import aiohttp
 from lanraragi.clients.api_clients.base import _ApiClient
 from lanraragi.clients.res_processors.misc import (
     _handle_get_available_plugins_response,
-    _handle_use_plugin_response,
     _process_get_server_info_response,
 )
 from lanraragi.clients.utils import _build_err_response
+from lanraragi.models.base import LanraragiErrorResponse
 from lanraragi.models.generics import _LRRClientResponse
 from lanraragi.models.misc import (
     CleanTempFolderResponse,
@@ -24,6 +24,7 @@ from lanraragi.models.misc import (
     RegenerateThumbnailResponse,
     UsePluginAsyncRequest,
     UsePluginAsyncResponse,
+    UsePluginRawResponse,
     UsePluginRequest,
     UsePluginResponse,
 )
@@ -76,7 +77,6 @@ class _MiscApiClient(_ApiClient):
         """
         url = self.api_context.build_url("/api/plugins/use")
         form_data = aiohttp.FormData(quote_fields=False)
-        form_data.add_field('key', request.key)
         form_data.add_field('plugin', request.plugin)
         if request.arcid:
             form_data.add_field('id', request.arcid)
@@ -84,7 +84,11 @@ class _MiscApiClient(_ApiClient):
             form_data.add_field('arg', request.arg)
         status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, data=form_data)
         if status == 200:
-            return (_handle_use_plugin_response(content), None)
+            raw = UsePluginRawResponse.model_validate_json(content)
+            if raw.success == 0:
+                error_message = raw.error or (raw.data.get("error") if raw.data else None) or "Plugin execution failed."
+                return (None, LanraragiErrorResponse(error=error_message, status=status))
+            return (UsePluginResponse(type=raw.type, data=raw.data), None)
         return (None, _build_err_response(content, status))
 
     async def use_plugin_async(self, request: UsePluginAsyncRequest) -> _LRRClientResponse[UsePluginAsyncResponse]:
@@ -93,7 +97,6 @@ class _MiscApiClient(_ApiClient):
         """
         url = self.api_context.build_url("/api/plugins/queue")
         form_data = aiohttp.FormData(quote_fields=False)
-        form_data.add_field('key', request.key)
         form_data.add_field('plugin', request.plugin)
         if request.arcid:
             form_data.add_field('id', request.arcid)

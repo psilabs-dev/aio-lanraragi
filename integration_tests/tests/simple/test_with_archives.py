@@ -3,6 +3,7 @@ Any integration test which does involve concurrent uploads.
 """
 
 import asyncio
+import json
 import logging
 import sys
 import tempfile
@@ -540,6 +541,25 @@ async def test_tankoubon_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore
     assert not error, f"Failed to delete tankoubon (status {error.status}): {error.error}"
     del response, error
     # <<<<< DELETE TANKOUBON STAGE <<<<<
+
+    # Regression check: ensure query-encoded PUT payloads are accepted when
+    # no request body is sent.
+    session = await lrr_client._get_session()
+    async with session.put(
+        lrr_client.build_url("/api/tankoubons?name=Test%20Tankoubon"),
+        headers=lrr_client.headers,
+        skip_auto_headers={"Content-Type"},
+    ) as response:
+        status = response.status
+        content = await response.text()
+    assert status == 200, f"Failed to create tankoubon with query-encoded PUT request (status {status}): {content}"
+    body = json.loads(content)
+    url_encoded_tankoubon_id = body.get("tankoubon_id")
+    assert url_encoded_tankoubon_id, f"Missing tankoubon_id in response body: {body}"
+
+    response, error = await lrr_client.tankoubon_api.get_tankoubon(GetTankoubonRequest(tank_id=url_encoded_tankoubon_id))
+    assert not error, f"Failed to get urlencoded tank (status {error.status}): {error.error}"
+    assert response.result.name == "Test Tankoubon", "URL-encoded Tank name mismatch"
 
     # no error logs
     expect_no_error_logs(environment, LOGGER)

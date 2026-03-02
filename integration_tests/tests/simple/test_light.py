@@ -4,6 +4,7 @@ Any integration test which doesn't involve concurrent archive uploads.
 
 import asyncio
 import http
+import json
 import logging
 import sys
 import tempfile
@@ -28,7 +29,11 @@ from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
 )
-from aio_lanraragi_tests.utils.api_wrappers import save_archives, upload_archive
+from aio_lanraragi_tests.log_parse import parse_lrr_logs
+from aio_lanraragi_tests.utils.api_wrappers import (
+    save_archives,
+    upload_archive,
+)
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
@@ -133,6 +138,27 @@ async def test_category(lrr_client: LRRClient, environment: AbstractLRRDeploymen
     del response, error
     # <<<<< UNLINK BOOKMARK <<<<<
 
+    # Regression check: ensure query-encoded PUT payloads (used by LRR frontend)
+    # are accepted when no request body is sent.
+    session = await lrr_client._get_session()
+    async with session.put(
+        lrr_client.build_url("/api/categories?name=test-urlencoded-category&search="),
+        headers=lrr_client.headers,
+        skip_auto_headers={"Content-Type"},
+    ) as response:
+        status = response.status
+        content = await response.text()
+    assert status == 200, f"Failed to create category with query-encoded PUT request (status {status}): {content}"
+    body = json.loads(content)
+    urlencoded_cat_id = body.get("category_id")
+    assert urlencoded_cat_id, f"Missing category_id in response body: {body}"
+
+    request = GetCategoryRequest(category_id=urlencoded_cat_id)
+    response, error = await lrr_client.category_api.get_category(request)
+    assert not error, f"Failed to get urlencoded category (status {error.status}): {error.error}"
+    assert response.name == "test-urlencoded-category", "Urlencoded-created category name mismatch!"
+    del request, response, error
+
     # no error logs
     expect_no_error_logs(environment, LOGGER)
 
@@ -228,9 +254,11 @@ async def test_drop_database(lrr_client: LRRClient, environment: AbstractLRRDepl
     expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
-@pytest.mark.experimental
+@pytest.mark.dev("openapi")
 async def test_openapi_invalid_request(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
+    - PR: https://github.com/Difegue/LANraragi/pull/1448
+
     Verify that OpenAPI request validation works.
     """
     # test get archive metadata API.
@@ -240,6 +268,25 @@ async def test_openapi_invalid_request(lrr_client: LRRClient, environment: Abstr
     )
     assert status == 400, f"Expected bad request status from malformed arcid, got {status}"
     assert "String is too short" in content, f"Expected \"String is too short\" in response, got: {content}"
+    expected_warning_message = 'OpenAPI >>> GET /api/archives/123 [{"message":"String is too short: 3\\/40.","path":"\\/id"}]'
+    found_validation_warning = False
+    lrr_logs = environment.read_lrr_logs()
+    mojo_logs = environment.read_mojo_logs()
+    for event in parse_lrr_logs(lrr_logs):
+        if event.severity_level == "warn" and event.message == expected_warning_message:
+            found_validation_warning = True
+            break
+    if not found_validation_warning:
+        for event in parse_lrr_logs(mojo_logs):
+            if event.severity_level == "warn" and event.message == expected_warning_message:
+                found_validation_warning = True
+                break
+    assert found_validation_warning, (
+        "Expected exact OpenAPI validation warning in lanraragi.log or mojo.log, but it was not found. "
+        f"expected={expected_warning_message!r}\n\n"
+        f"full_lrr_logs:\n{lrr_logs}\n\n"
+        f"full_mojo_logs:\n{mojo_logs}"
+    )
 
     # no error logs
     expect_no_error_logs(environment, LOGGER)
@@ -275,7 +322,7 @@ async def test_concurrent_clients(environment: AbstractLRRDeploymentContext):
 # skip: for demonstration purposes only.
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.experimental
+@pytest.mark.dev("demo")
 async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator):
     """
     Upload two archive, apply search filter, read archive, then go back and check the search filter is still populated.

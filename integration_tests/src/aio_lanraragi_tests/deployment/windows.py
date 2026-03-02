@@ -18,7 +18,10 @@ from typing import override
 import redis
 
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, is_port_available
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.base import (
+    AbstractLRRDeploymentContext,
+    PluginPathsT,
+)
 from aio_lanraragi_tests.exceptions import DeploymentException
 
 LOGGER = logging.getLogger(__name__)
@@ -32,7 +35,7 @@ class _WindowsConsole(AbstractContextManager):
     - an attachment to a requested (or new) Windows console
     - immunity to CTRL events
     - ability to send CTRL signals to a target PID
-    
+
     Should obviously not be run on non-Windows systems, and since this is private we will not be checking.
     """
 
@@ -211,8 +214,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self._original_windist_dir
 
     @original_windist_dir.setter
-    def original_windist_dir(self, dir: Path):
-        self._original_windist_dir = dir.absolute()
+    def original_windist_dir(self, directory: Path):
+        self._original_windist_dir = directory.absolute()
 
     @property
     def redis_client(self) -> redis.Redis:
@@ -264,6 +267,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def lrr_lanraragi_path(self) -> Path:
         return self.windist_dir / "script" / "lanraragi"
 
+    @property
+    def lrr_plugin_dir(self) -> Path:
+        return self.windist_dir / "lib" / "LANraragi" / "Plugin"
+
     def __init__(
         self, windist_path: str, staging_directory: str, resource_prefix: str, port_offset: int,
         logger: logging.Logger | None=None
@@ -284,7 +291,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
-        environment: dict[str, str]={},
+        environment: dict[str, str]={}, plugin_paths: PluginPathsT={},
         test_connection_max_retries: int=4
     ):
         """
@@ -326,6 +333,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.debug(f"Copied original windist directory to {windist_dir}.")
         else:
             self.logger.debug(f"Copy of windist directory exists: {windist_dir}")
+        self.plugin_paths = plugin_paths
+        self.apply_plugins()
 
         # log the setup resource allocations for user to see
         self.logger.info(f"Deploying Windows LRR with the following resources: LRR port {lrr_port}, Redis port {redis_port}, content path {self.archives_dir}.")
@@ -404,6 +413,24 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         redis_pid = self.redis_pid
         lrr_pid = self.lrr_pid
         self.logger.info(f"Completed setup of LANraragi. LRR PID = {lrr_pid}; Redis PID = {redis_pid}.")
+
+    @override
+    def apply_plugins(self):
+        root_dir = self.lrr_plugin_dir
+        for plugin_type, plugin_paths in self.plugin_paths.items():
+            if not plugin_paths:
+                continue
+
+            target_testing_dir = root_dir / plugin_type / "Testing"
+            if target_testing_dir.exists():
+                shutil.rmtree(target_testing_dir)
+            target_testing_dir.mkdir(parents=True, exist_ok=False)
+
+            for plugin_path in plugin_paths:
+                source = Path(plugin_path)
+                if not source.exists():
+                    raise FileNotFoundError(f"Plugin path does not exist: {source}")
+                shutil.copy2(source, target_testing_dir / source.name)
 
     @override
     def start(self, test_connection_max_retries: int = 4):
@@ -611,7 +638,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Stop the LRR server.
 
-        This will try to kill the LRR server by PID, then by port owner PID, 
+        This will try to kill the LRR server by PID, then by port owner PID,
         then by perl.exe processes started from our win-dist runtime.
 
         lrr_pid being None only means PID probe didn't find a listening owner
@@ -749,6 +776,18 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger.error("No LRR logs are available!")
         return b"No LRR logs available."
 
+    @override
+    def get_redis_logs(self, tail: int=100) -> bytes:
+        if self.redis_log_path.exists():
+            with open(self.redis_log_path, 'rb') as rb:
+                lines = rb.readlines()
+                if lines:
+                    normalized_lines = [line.replace(b'\r\n', b'\n') for line in lines]
+                    return b''.join(normalized_lines[-tail:])
+                self.logger.error(f"No lines found in {self.redis_log_path}")
+        self.logger.error("No Redis logs are available!")
+        return b"No Redis logs available."
+
     # TODO: I hope we don't have to use this.
     def _kill_lrr_perl_processes_by_path(self):
         """
@@ -787,12 +826,12 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             else:
                 raise DeploymentException(f"Failed to stop perl LRR process ({output.returncode}): STDERR={output.stderr}")
 
-    def _remove_ro(self, dir: Path):
+    def _remove_ro(self, directory: Path):
         """
         Recursively clear Windows Read-only attributes so directories can be removed.
         """
-        dir.chmod(dir.stat().st_mode | stat.S_IWRITE)
-        for root, dirs, files in os.walk(dir, topdown=False):
+        directory.chmod(directory.stat().st_mode | stat.S_IWRITE)
+        for root, dirs, files in os.walk(directory, topdown=False):
             root_path = Path(root)
             for name in files:
                 p = root_path / name

@@ -67,12 +67,12 @@ def symlink_archive_dir(environment: AbstractLRRDeploymentContext) -> Generator[
 
     try:
         archives_dir.unlink()
-    except Exception as e:
+    except OSError as e:
         LOGGER.error(f"Unhandled exception when removing archives directory {archives_dir}: ", e)
 
     try:
         shutil.rmtree(symlink_dir)
-    except Exception as e:
+    except OSError as e:
         LOGGER.error(f"Unhandled exception when removing symlink directory {symlink_dir}: ", e)
 
 @pytest.fixture

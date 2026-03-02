@@ -29,7 +29,7 @@ def write_archive_to_disk(request: WriteArchiveRequest) -> WriteArchiveResponse:
             for create_page_request in create_page_requests:
                 save_page_to_dir(create_page_request, save_path)
             return WriteArchiveResponse(status=WriteArchiveResponseStatus.SUCCESS, save_path=save_path)
-        except Exception as e:
+        except OSError as e:
             return WriteArchiveResponse(status=WriteArchiveResponseStatus.FAILURE, error=str(e), save_path=save_path)
 
     # All other strategies involve creating a temp directory, creating images in that tempdir,
