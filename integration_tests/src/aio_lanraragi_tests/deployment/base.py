@@ -483,12 +483,18 @@ class AbstractLRRDeploymentContext(abc.ABC):
             except redis.exceptions.ConnectionError:
                 if retry_count >= max_retries:
                     self.logger.error("Failed to connect to Redis! Dumping Redis logs...")
+                    self._log_redis_connect_diagnostics(retry_count, max_retries)
                     self.display_redis_logs()
                     raise
                 time_to_sleep = 2 ** (retry_count + 1)
                 self.logger.warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
+                self._log_redis_connect_diagnostics(retry_count, max_retries)
                 retry_count += 1
                 time.sleep(time_to_sleep)
+
+    def _log_redis_connect_diagnostics(self, retry_count: int, max_retries: int):
+        """Hook for platform-specific Redis connection failure diagnostics. Override in subclass."""
+        pass
 
     def display_lrr_logs(self, tail: int=100, log_level: int=logging.ERROR):
         """

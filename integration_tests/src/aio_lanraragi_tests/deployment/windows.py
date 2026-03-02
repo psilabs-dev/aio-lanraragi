@@ -329,10 +329,12 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         # copy the windist directory.
         windist_dir = self.windist_dir
         if not windist_dir.exists():
+            t0 = time.time()
             shutil.copytree(original_windist_dir, windist_dir)
-            self.logger.debug(f"Copied original windist directory to {windist_dir}.")
+            elapsed = time.time() - t0
+            self.logger.info(f"Copied windist directory ({elapsed:.2f}s): {windist_dir}")
         else:
-            self.logger.debug(f"Copy of windist directory exists: {windist_dir}")
+            self.logger.info(f"Reusing existing windist directory: {windist_dir}")
         self.plugin_paths = plugin_paths
         self.apply_plugins()
 
@@ -496,30 +498,16 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         if hasattr(self, "_redis_client") and self._redis_client is not None:
             self._redis_client.close()
         if remove_data:
-            if contents_dir.exists():
-                self._remove_ro(contents_dir)
-                shutil.rmtree(contents_dir)
-                self.logger.debug(f"Removed contents directory: {contents_dir}")
-            if log_dir.exists():
-                self._remove_ro(log_dir)
-                shutil.rmtree(log_dir)
-                self.logger.debug(f"Removed logs directory: {log_dir}")
-            if pid_dir.exists():
-                self._remove_ro(pid_dir)
-                shutil.rmtree(pid_dir)
-                self.logger.debug(f"Removed PID directory: {pid_dir}")
-            if windist_dir.exists():
-                self._remove_ro(windist_dir)
-                shutil.rmtree(windist_dir)
-                self.logger.debug(f"Removed windist directory: {windist_dir}")
-            if redis_dir.exists():
-                self._remove_ro(redis_dir)
-                shutil.rmtree(redis_dir)
-                self.logger.debug(f"Removed redis directory: {redis_dir}")
-            if temp_dir.exists():
-                self._remove_ro(temp_dir)
-                shutil.rmtree(temp_dir)
-                self.logger.debug(f"Removed temp directory: {temp_dir}")
+            t0 = time.time()
+            for label, d in [
+                ("contents", contents_dir), ("logs", log_dir), ("pid", pid_dir),
+                ("windist", windist_dir), ("redis", redis_dir), ("temp", temp_dir),
+            ]:
+                if d.exists():
+                    self._remove_ro(d)
+                    shutil.rmtree(d)
+            elapsed = time.time() - t0
+            self.logger.info(f"Teardown rmtree completed in {elapsed:.2f}s.")
 
     @override
     def start_lrr(self):
@@ -595,6 +583,23 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             os.chdir(cwd)
 
     @override
+    def _log_redis_connect_diagnostics(self, retry_count: int, max_retries: int):
+        proc = getattr(self, "_redis_process", None)
+        port = self.redis_port
+        port_avail = is_port_available(port)
+        if proc is not None:
+            rc = proc.poll()
+            self.logger.warning(
+                f"Redis connect diagnostic ({retry_count+1}/{max_retries}): "
+                f"process.pid={proc.pid}, process.poll()={rc}, port_available={port_avail}"
+            )
+        else:
+            self.logger.warning(
+                f"Redis connect diagnostic ({retry_count+1}/{max_retries}): "
+                f"no process handle, port_available={port_avail}"
+            )
+
+    @override
     def start_redis(self):
         """
         Executes the Redis portion of tools/build/windows/run.ps1.
@@ -628,8 +633,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 "--port", str(self.redis_port),
             ]
             self.logger.debug(f"(redis_dir={redis_dir}, redis_logfile_path={redis_logfile_path}) running script {subprocess.list2cmdline(script)}")
-            redis_process = subprocess.Popen(script)
-            self.logger.debug(f"Started redis service with PID {redis_process.pid}.")
+            self._redis_process = subprocess.Popen(script)
+            self.logger.debug(f"Started redis service with PID {self._redis_process.pid}.")
         finally:
             os.chdir(cwd)
 
@@ -733,59 +738,102 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         Sends a shutdown command to Redis and waits for the port to become
         available before returning. If cooperative shutdown fails, escalates
-        to forceful kill via taskkill.
+        to forceful kill via taskkill. Also kills orphaned Redis processes
+        that were started but never bound to the port.
         """
         port = self.redis_port
+        proc = getattr(self, "_redis_process", None)
 
-        # If port is already free, Redis is already stopped
         if is_port_available(port):
-            self.logger.debug(f"Redis port {port} is already available.")
+            # Port is free, but the process may still be alive (started but
+            # never listened — the orphan scenario).
+            if proc is not None:
+                rc = proc.poll()
+                if rc is None:
+                    self.logger.warning(
+                        f"Redis port {port} is available but redis process (pid={proc.pid}) is still alive. "
+                        f"Killing orphaned process."
+                    )
+                    self._kill_redis_process(proc)
+                else:
+                    self.logger.info(f"Redis port {port} available; process (pid={proc.pid}) exited with rc={rc}.")
+            else:
+                self.logger.info(f"Redis port {port} is already available (no process handle stored).")
+            self._redis_process = None
             return
 
-        # Send shutdown command to Redis
+        # Port is occupied — send cooperative shutdown.
+        self.logger.info(f"Redis port {port} occupied; sending SHUTDOWN command.")
         try:
             self.redis_client.shutdown(now=True, force=True)
         except redis.exceptions.ConnectionError:
-            # Redis may already be shutting down or dead
-            self.logger.debug("Redis connection error during shutdown (may already be terminating).")
+            self.logger.info("Redis connection error during SHUTDOWN (may already be terminating).")
 
-        # Wait for Redis to actually terminate
+        # Wait for Redis to actually terminate.
         deadline = time.time() + timeout
         while time.time() < deadline:
             if is_port_available(port):
-                self.logger.debug(f"Redis terminated, port {port} is now available.")
+                self.logger.info(f"Redis terminated cooperatively; port {port} is now available.")
+                self._redis_process = None
                 return
             time.sleep(0.5)
 
-        self.logger.warning(f"Redis port {port} still occupied after {timeout}s shutdown wait.")
+        self.logger.warning(f"Redis port {port} still occupied after {timeout}s cooperative shutdown wait.")
 
-        # Escalate: forcefully kill the Redis process via taskkill
-        pid = self.redis_pid
-        if pid:
-            self.logger.info(f"Forcefully killing Redis process (pid={pid})...")
-            output = subprocess.run(
-                ["taskkill", "/PID", str(pid), "/F", "/T"],
-                capture_output=True,
-                text=True,
-                stdin=subprocess.DEVNULL,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            if output.returncode == 0:
-                self.logger.debug(f"Killed Redis process {pid}. Output: {output.stdout}")
-            elif output.returncode == 128:
-                self.logger.debug(f"Redis process {pid} already terminated.")
+        # Escalate: forcefully kill via stored process handle or port-based PID.
+        if proc is not None and proc.poll() is None:
+            self.logger.info(f"Killing Redis via stored process handle (pid={proc.pid}).")
+            self._kill_redis_process(proc)
+        else:
+            pid = self.redis_pid
+            if pid:
+                self.logger.info(f"Killing Redis via port-based PID lookup (pid={pid}).")
+                self._taskkill_pid(pid)
             else:
-                raise DeploymentException(f"Failed to kill Redis process {pid} ({output.returncode}): STDERR={output.stderr}")
+                self.logger.warning(f"Redis port {port} occupied but no PID found via port or handle.")
 
-            # Wait for port to free after forceful kill
-            deadline = time.time() + timeout
-            while time.time() < deadline:
-                if is_port_available(port):
-                    self.logger.debug(f"Redis port {port} available after forceful kill.")
-                    return
-                time.sleep(0.5)
+        # Wait for port to free after forceful kill.
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if is_port_available(port):
+                self.logger.info(f"Redis port {port} available after forceful kill.")
+                self._redis_process = None
+                return
+            time.sleep(0.5)
 
+        self._redis_process = None
         raise DeploymentException(f"Failed to stop Redis and free port {port}!")
+
+    def _kill_redis_process(self, proc: subprocess.Popen):
+        """Kill a Redis process via its Popen handle, then fall back to taskkill."""
+        pid = proc.pid
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+                self.logger.info(f"Redis process {pid} terminated via handle (rc={proc.returncode}).")
+                return
+            except subprocess.TimeoutExpired:
+                self.logger.warning(f"Redis process {pid} did not exit after terminate(); escalating to taskkill.")
+        except OSError as e:
+            self.logger.warning(f"Failed to terminate Redis process {pid} via handle: {e}")
+        self._taskkill_pid(pid)
+
+    def _taskkill_pid(self, pid: int):
+        """Forcefully kill a process by PID using taskkill /F /T."""
+        output = subprocess.run(
+            ["taskkill", "/PID", str(pid), "/F", "/T"],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if output.returncode == 0:
+            self.logger.info(f"taskkill killed process {pid}. Output: {output.stdout.strip()}")
+        elif output.returncode == 128:
+            self.logger.info(f"taskkill: process {pid} already terminated.")
+        else:
+            self.logger.warning(f"taskkill failed for process {pid} (rc={output.returncode}): {output.stderr.strip()}")
 
     @override
     def get_lrr_logs(self, tail: int=100) -> bytes:
