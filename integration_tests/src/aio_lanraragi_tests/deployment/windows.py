@@ -732,8 +732,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         Stop the Redis server and wait for it to terminate.
 
         Sends a shutdown command to Redis and waits for the port to become
-        available before returning. In testing, this ensures complete termination and
-        prevents subsequent tests from connecting to a dying Redis instance.
+        available before returning. If cooperative shutdown fails, escalates
+        to forceful kill via taskkill.
         """
         port = self.redis_port
 
@@ -758,6 +758,34 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             time.sleep(0.5)
 
         self.logger.warning(f"Redis port {port} still occupied after {timeout}s shutdown wait.")
+
+        # Escalate: forcefully kill the Redis process via taskkill
+        pid = self.redis_pid
+        if pid:
+            self.logger.info(f"Forcefully killing Redis process (pid={pid})...")
+            output = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/F", "/T"],
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if output.returncode == 0:
+                self.logger.debug(f"Killed Redis process {pid}. Output: {output.stdout}")
+            elif output.returncode == 128:
+                self.logger.debug(f"Redis process {pid} already terminated.")
+            else:
+                raise DeploymentException(f"Failed to kill Redis process {pid} ({output.returncode}): STDERR={output.stderr}")
+
+            # Wait for port to free after forceful kill
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                if is_port_available(port):
+                    self.logger.debug(f"Redis port {port} available after forceful kill.")
+                    return
+                time.sleep(0.5)
+
+        raise DeploymentException(f"Failed to stop Redis and free port {port}!")
 
     @override
     def get_lrr_logs(self, tail: int=100) -> bytes:
