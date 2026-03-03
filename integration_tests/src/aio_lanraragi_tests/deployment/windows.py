@@ -422,7 +422,12 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         timing_extra = {
             "copytree_seconds": round(self._copytree_elapsed, 3),
             "available_mem_mb": round(mem_before.available / (1024 * 1024), 1),
+            "popen_seconds": round(getattr(self, "_popen_elapsed", 0), 3),
         }
+        first_output_at = getattr(self, "_first_output_at", None)
+        popen_returned_at = getattr(self, "_popen_returned_at", None)
+        if first_output_at and popen_returned_at:
+            timing_extra["first_output_seconds"] = round(first_output_at - popen_returned_at, 3)
         if disk_before and disk_after:
             timing_extra["disk_read_bytes"] = disk_after.read_bytes - disk_before.read_bytes
             timing_extra["disk_read_ops"] = disk_after.read_count - disk_before.read_count
@@ -472,6 +477,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger.debug("Started Redis.")
 
         lrr_port = self.lrr_port
+        self._popen_elapsed = 0
+        self._popen_returned_at = None
+        self._first_output_at = None
         disk_before = psutil.disk_io_counters()
         mem_before = psutil.virtual_memory()
         t0 = time.time()
@@ -485,7 +493,12 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         disk_after = psutil.disk_io_counters()
         timing_extra = {
             "available_mem_mb": round(mem_before.available / (1024 * 1024), 1),
+            "popen_seconds": round(self._popen_elapsed, 3),
         }
+        first_output_at = self._first_output_at
+        popen_returned_at = self._popen_returned_at
+        if first_output_at and popen_returned_at:
+            timing_extra["first_output_seconds"] = round(first_output_at - popen_returned_at, 3)
         if disk_before and disk_after:
             timing_extra["disk_read_bytes"] = disk_after.read_bytes - disk_before.read_bytes
             timing_extra["disk_read_ops"] = disk_after.read_count - disk_before.read_count
@@ -508,6 +521,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def _start_lrr_output_reader(self, pipe):
         def _reader():
             for line in iter(pipe.readline, b''):
+                if self._first_output_at is None:
+                    self._first_output_at = time.time()
                 cleaned = line.replace(b'\r\n', b'\n')
                 self._lrr_output.append(cleaned)
                 if b'[TIMING]' in cleaned:
@@ -605,6 +620,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             # Ensure we have a console so the child inherits it (or gets its own), and create a new
             # process group so we can signal with CTRL_BREAK later.
             CREATE_NEW_PROCESS_GROUP: int = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+            self._first_output_at = None
+            t_popen_start = time.time()
             with _WindowsConsole():
                 lrr_process = subprocess.Popen(
                     script,
@@ -613,6 +630,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                     stderr=subprocess.STDOUT,
                     creationflags=CREATE_NEW_PROCESS_GROUP,
                 )
+            self._popen_returned_at = time.time()
+            self._popen_elapsed = self._popen_returned_at - t_popen_start
             self._lrr_process = lrr_process
             if lrr_process.stdout:
                 self._start_lrr_output_reader(lrr_process.stdout)
