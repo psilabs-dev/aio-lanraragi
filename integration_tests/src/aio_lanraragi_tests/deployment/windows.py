@@ -289,6 +289,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self._lrr_process = None
         self._lrr_output = deque(maxlen=10000)
         self._lrr_reader_thread = None
+        self._reuse_windist = False
 
     @override
     def setup(
@@ -507,7 +508,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def _start_lrr_output_reader(self, pipe):
         def _reader():
             for line in iter(pipe.readline, b''):
-                self._lrr_output.append(line.replace(b'\r\n', b'\n'))
+                cleaned = line.replace(b'\r\n', b'\n')
+                self._lrr_output.append(cleaned)
+                if b'[TIMING]' in cleaned:
+                    self.logger.info(cleaned.decode('utf-8', errors='replace').rstrip())
         t = threading.Thread(target=_reader, daemon=True)
         t.start()
         self._lrr_reader_thread = t
@@ -529,10 +533,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self._redis_client.close()
         if remove_data:
             t0 = time.time()
-            for label, d in [
+            dirs_to_remove = [
                 ("contents", contents_dir), ("logs", log_dir), ("pid", pid_dir),
                 ("windist", windist_dir), ("redis", redis_dir), ("temp", temp_dir),
-            ]:
+            ]
+            if self._reuse_windist:
+                dirs_to_remove = [(label, d) for label, d in dirs_to_remove if label != "windist"]
+                self.logger.info("Reuse windist: skipping windist removal.")
+            for label, d in dirs_to_remove:
                 if d.exists():
                     self._remove_ro(d)
                     shutil.rmtree(d)

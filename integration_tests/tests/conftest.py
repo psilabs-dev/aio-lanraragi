@@ -85,6 +85,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--playwright", action="store_true", default=False, help="Run Playwright UI tests. Requires `playwright install`")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
+    parser.addoption("--reuse-windist", action="store_true", default=False, help="Skip windist removal during teardown (Windows A/B experiment).")
 
 def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
