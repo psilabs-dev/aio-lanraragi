@@ -372,9 +372,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         for plugin_type, paths in self.plugin_paths.items():
             if not paths:
                 continue
-            source_type_dir = self.plugins_root_dir / plugin_type
-            plugin_volumes[str(source_type_dir)] = {
-                "bind": f"/home/koyomi/lanraragi/lib/LANraragi/Plugin/{plugin_type}",
+            source_testing_dir = self.plugins_root_dir / plugin_type / "Testing"
+            plugin_volumes[str(source_testing_dir)] = {
+                "bind": f"/home/koyomi/lanraragi/lib/LANraragi/Plugin/{plugin_type}/Testing",
                 "mode": "ro",
             }
 
