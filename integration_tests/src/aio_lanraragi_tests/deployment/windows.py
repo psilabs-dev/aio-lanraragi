@@ -792,12 +792,16 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def stop_redis(self, timeout: int = 10):
         """
-        Stop the Redis server and wait for it to terminate.
+        Stop the Redis server via direct process kill.
 
-        Sends a shutdown command to Redis and waits for the port to become
-        available before returning. If cooperative shutdown fails, escalates
-        to forceful kill via taskkill. Also kills orphaned Redis processes
-        that were started but never bound to the port.
+        Uses TerminateProcess (proc.terminate) instead of cooperative SHUTDOWN
+        because Redis for Windows takes ~13s to release its listening socket
+        after SHUTDOWN. With CREATE_NO_WINDOW on the Popen call, there is no
+        conhost.exe to orphan, so hard-kill is safe. TerminateProcess causes
+        the kernel to RST all sockets (no TIME_WAIT), so the port is freed
+        immediately.
+
+        Falls back to port-based PID lookup + taskkill if no stored handle.
         """
         port = self.redis_port
         proc = getattr(self, "_redis_process", None)
@@ -810,64 +814,38 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                     fh.close()
                 setattr(self, attr, None)
 
-        if is_port_available(port):
-            # Port is free, but the process may still be alive (started but
-            # never listened — the orphan scenario).
-            if proc is not None:
-                rc = proc.poll()
-                if rc is None:
-                    self.logger.warning(
-                        f"Redis port {port} is available but redis process (pid={proc.pid}) is still alive. "
-                        f"Killing orphaned process."
-                    )
-                    self._kill_redis_process(proc)
-                else:
-                    self.logger.info(f"Redis port {port} available; process (pid={proc.pid}) exited with rc={rc}.")
+        # Kill via stored process handle.
+        if proc is not None:
+            rc = proc.poll()
+            if rc is None:
+                self.logger.info(f"Killing Redis process (pid={proc.pid}) via terminate.")
+                self._kill_redis_process(proc)
             else:
-                self.logger.info(f"Redis port {port} is already available (no process handle stored).")
+                self.logger.info(f"Redis process (pid={proc.pid}) already exited with rc={rc}.")
             self._redis_process = None
+        else:
+            self.logger.info("No stored Redis process handle.")
+
+        # Verify port is free; if not, fall back to port-owner kill.
+        if is_port_available(port):
+            self.logger.info(f"Redis port {port} is available.")
             return
 
-        # Port is occupied — send cooperative shutdown.
-        self.logger.info(f"Redis port {port} occupied; sending SHUTDOWN command.")
-        try:
-            self.redis_client.shutdown(nosave=True, now=True, force=True)
-        except redis.exceptions.ConnectionError:
-            self.logger.info("Redis connection error during SHUTDOWN (may already be terminating).")
-
-        # Wait for Redis to actually terminate.
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if is_port_available(port):
-                self.logger.info(f"Redis terminated cooperatively; port {port} is now available.")
-                self._redis_process = None
-                return
-            time.sleep(0.5)
-
-        self.logger.warning(f"Redis port {port} still occupied after {timeout}s cooperative shutdown wait.")
-
-        # Escalate: forcefully kill via stored process handle or port-based PID.
-        if proc is not None and proc.poll() is None:
-            self.logger.info(f"Killing Redis via stored process handle (pid={proc.pid}).")
-            self._kill_redis_process(proc)
+        # Port still occupied — something else holds it, or process hasn't fully exited.
+        pid = self.redis_pid
+        if pid:
+            self.logger.warning(f"Redis port {port} still occupied by pid={pid}; killing via taskkill.")
+            self._taskkill_pid(pid)
         else:
-            pid = self.redis_pid
-            if pid:
-                self.logger.info(f"Killing Redis via port-based PID lookup (pid={pid}).")
-                self._taskkill_pid(pid)
-            else:
-                self.logger.warning(f"Redis port {port} occupied but no PID found via port or handle.")
+            self.logger.warning(f"Redis port {port} occupied but no owning PID found.")
 
-        # Wait for port to free after forceful kill.
         deadline = time.time() + timeout
         while time.time() < deadline:
             if is_port_available(port):
-                self.logger.info(f"Redis port {port} available after forceful kill.")
-                self._redis_process = None
+                self.logger.info(f"Redis port {port} available after fallback kill.")
                 return
             time.sleep(0.5)
 
-        self._redis_process = None
         raise DeploymentException(f"Failed to stop Redis and free port {port}!")
 
     def _kill_redis_process(self, proc: subprocess.Popen):
