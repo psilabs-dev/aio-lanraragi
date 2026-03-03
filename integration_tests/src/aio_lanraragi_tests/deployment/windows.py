@@ -16,6 +16,7 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import override
 
+import psutil
 import redis
 
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, is_port_available
@@ -332,9 +333,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         if not windist_dir.exists():
             t0 = time.time()
             shutil.copytree(original_windist_dir, windist_dir)
-            elapsed = time.time() - t0
-            self.logger.info(f"Copied windist directory ({elapsed:.2f}s): {windist_dir}")
+            self._copytree_elapsed = time.time() - t0
+            self.logger.info(f"Copied windist directory ({self._copytree_elapsed:.2f}s): {windist_dir}")
         else:
+            self._copytree_elapsed = 0.0
             self.logger.info(f"Reusing existing windist directory: {windist_dir}")
         self.plugin_paths = plugin_paths
         self.apply_plugins()
@@ -403,6 +405,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.disable_cors()
         self.logger.debug("Redis post-connect configuration complete.")
 
+        disk_before = psutil.disk_io_counters()
+        mem_before = psutil.virtual_memory()
         t0 = time.time()
         if is_port_available(lrr_port):
             self.start_lrr()
@@ -413,7 +417,17 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.stop_lrr()
             self.start_lrr()
             self.logger.debug("LRR service restarted.")
-        self._record_timing("setup", time.time() - t0)
+        disk_after = psutil.disk_io_counters()
+        timing_extra = {
+            "copytree_seconds": round(self._copytree_elapsed, 3),
+            "available_mem_mb": round(mem_before.available / (1024 * 1024), 1),
+        }
+        if disk_before and disk_after:
+            timing_extra["disk_read_bytes"] = disk_after.read_bytes - disk_before.read_bytes
+            timing_extra["disk_read_ops"] = disk_after.read_count - disk_before.read_count
+            timing_extra["disk_write_bytes"] = disk_after.write_bytes - disk_before.write_bytes
+            timing_extra["disk_write_ops"] = disk_after.write_count - disk_before.write_count
+        self._record_timing("setup", time.time() - t0, **timing_extra)
 
         redis_pid = self.redis_pid
         lrr_pid = self.lrr_pid
@@ -457,6 +471,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger.debug("Started Redis.")
 
         lrr_port = self.lrr_port
+        disk_before = psutil.disk_io_counters()
+        mem_before = psutil.virtual_memory()
         t0 = time.time()
         if is_port_available(lrr_port):
             self.start_lrr()
@@ -465,7 +481,16 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         else:
             self.test_lrr_connection(lrr_port)
             self.logger.debug(f"Running LRR service confirmed on port {lrr_port}, skipping startup.")
-        self._record_timing("start", time.time() - t0)
+        disk_after = psutil.disk_io_counters()
+        timing_extra = {
+            "available_mem_mb": round(mem_before.available / (1024 * 1024), 1),
+        }
+        if disk_before and disk_after:
+            timing_extra["disk_read_bytes"] = disk_after.read_bytes - disk_before.read_bytes
+            timing_extra["disk_read_ops"] = disk_after.read_count - disk_before.read_count
+            timing_extra["disk_write_bytes"] = disk_after.write_bytes - disk_before.write_bytes
+            timing_extra["disk_write_ops"] = disk_after.write_count - disk_before.write_count
+        self._record_timing("start", time.time() - t0, **timing_extra)
 
     @override
     def stop(self):

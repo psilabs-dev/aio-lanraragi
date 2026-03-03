@@ -258,15 +258,21 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Start the LRR server.
         """
 
-    def _record_timing(self, method: str, elapsed: float):
+    def _record_timing(self, method: str, elapsed: float, **extra):
         if not hasattr(self, '_timing_events'):
             self._timing_events = []
-        self._timing_events.append({
+        event = {
             "method": method,
             "elapsed_seconds": round(elapsed, 3),
             "timestamp": time.time(),
-        })
-        self.logger.info(f"[TIMING] {method}: lrr_init={elapsed:.2f}s")
+        }
+        event.update(extra)
+        self._timing_events.append(event)
+        extra_parts = " ".join(f"{k}={v}" for k, v in extra.items())
+        if extra_parts:
+            self.logger.info(f"[TIMING] {method}: lrr_init={elapsed:.2f}s {extra_parts}")
+        else:
+            self.logger.info(f"[TIMING] {method}: lrr_init={elapsed:.2f}s")
 
     @abc.abstractmethod
     def start_redis(self):
