@@ -403,6 +403,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.disable_cors()
         self.logger.debug("Redis post-connect configuration complete.")
 
+        t0 = time.time()
         if is_port_available(lrr_port):
             self.start_lrr()
             self.test_lrr_connection(lrr_port)
@@ -412,6 +413,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.stop_lrr()
             self.start_lrr()
             self.logger.debug("LRR service restarted.")
+        self._record_timing("setup", time.time() - t0)
 
         redis_pid = self.redis_pid
         lrr_pid = self.lrr_pid
@@ -455,6 +457,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger.debug("Started Redis.")
 
         lrr_port = self.lrr_port
+        t0 = time.time()
         if is_port_available(lrr_port):
             self.start_lrr()
             self.test_lrr_connection(lrr_port)
@@ -462,6 +465,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         else:
             self.test_lrr_connection(lrr_port)
             self.logger.debug(f"Running LRR service confirmed on port {lrr_port}, skipping startup.")
+        self._record_timing("start", time.time() - t0)
 
     @override
     def stop(self):

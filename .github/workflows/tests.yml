@@ -91,6 +91,14 @@ jobs:
           # Ensure Docker daemon is accessible to Python docker SDK
           DOCKER_HOST: unix:///var/run/docker.sock
 
+      - name: Upload timing report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: timing-report-docker
+          path: aio-lanraragi/integration_tests/timing-report.json
+          if-no-files-found: ignore
+
   # windows integration tests
   # refer to https://github.com/Difegue/LANraragi/blob/dev/.github/workflows/push-continous-delivery.yml
   tests-windows:
@@ -226,6 +234,14 @@ jobs:
           --staging "$env:GITHUB_WORKSPACE\staging" `
           --playwright `
           --npseed 42
+
+      - name: Upload timing report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: timing-report-windows
+          path: aio-lanraragi/integration_tests/timing-report.json
+          if-no-files-found: ignore
 
   check:
     if: always()

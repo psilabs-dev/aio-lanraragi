@@ -589,9 +589,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger.debug("Redis post-connect configuration complete.")
 
         # start lrr
+        t0 = time.time()
         self.start_lrr()
         self.logger.debug("Testing connection to LRR server.")
         self.test_lrr_connection(self.lrr_port, test_connection_max_retries)
+        self._record_timing("setup", time.time() - t0)
         if self.is_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
@@ -606,9 +608,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.redis_container.start()
         self.logger.debug("Redis container started.")
 
+        t0 = time.time()
         self.start_lrr()
         self.logger.debug("Testing connection to LRR server.")
         self.test_lrr_connection(self.lrr_port, test_connection_max_retries)
+        self._record_timing("start", time.time() - t0)
         if self.is_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
@@ -651,9 +655,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger.debug(f"Starting container: {self.redis_container_name}")
         self.redis_container.start()
         self.logger.debug("Redis container started.")
+        t0 = time.time()
         self.start_lrr()
         self.logger.debug("Testing connection to LRR server.")
         self.test_lrr_connection(self.lrr_port)
+        self._record_timing("restart", time.time() - t0)
         if self.is_allow_uploads:
             resp = self.allow_uploads()
             if resp.exit_code != 0:
