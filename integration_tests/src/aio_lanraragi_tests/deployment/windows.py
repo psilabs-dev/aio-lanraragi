@@ -2,6 +2,7 @@
 Windows LRR deployment module.
 """
 
+import contextlib
 import ctypes
 import logging
 import os
@@ -183,6 +184,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self._lrr_process = None
         self._lrr_output = deque(maxlen=10000)
         self._lrr_reader_thread = None
+        self._has_console = False
 
     @override
     def setup(
@@ -476,11 +478,11 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             # CREATE_NEW_PROCESS_GROUP. Allocate once and keep it across
             # cycles — repeated AllocConsole/FreeConsole causes condrv.sys
             # degradation on Windows (30-120s delays after ~5 cycles).
-            CREATE_NEW_PROCESS_GROUP: int = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-            if not getattr(self, "_console_allocated", False):
+            CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+            if not self._has_console:
                 k32 = ctypes.windll.kernel32
                 k32.AllocConsole()
-                self._console_allocated = True
+                self._has_console = True
             lrr_process = subprocess.Popen(
                 script,
                 env=lrr_env,
@@ -529,8 +531,21 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 "--port", str(self.redis_port),
             ]
             self.logger.debug(f"(redis_dir={redis_dir}, redis_logfile_path={redis_logfile_path}) running script {subprocess.list2cmdline(script)}")
-            redis_process = subprocess.Popen(script)
-            self.logger.debug(f"Started redis service with PID {redis_process.pid}.")
+
+            # Capture stdout/stderr to files (Redis may print errors before opening its logfile).
+            # File handles are intentionally kept open for the subprocess lifetime
+            # and closed in stop_redis().
+            self._redis_stdout_path = logs_dir / "redis-stdout.log"
+            self._redis_stderr_path = logs_dir / "redis-stderr.log"
+            self._redis_stdout_fh = open(self._redis_stdout_path, "w")  # noqa: SIM115
+            self._redis_stderr_fh = open(self._redis_stderr_path, "w")  # noqa: SIM115
+            self._redis_process = subprocess.Popen(
+                script,
+                stdout=self._redis_stdout_fh,
+                stderr=self._redis_stderr_fh,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            self.logger.debug(f"Started redis service with PID {self._redis_process.pid}.")
         finally:
             os.chdir(cwd)
 
@@ -561,7 +576,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             k32.SetConsoleCtrlHandler(None, True)
             k32.GenerateConsoleCtrlEvent(1, ctypes.c_uint(pid).value)
             k32.SetConsoleCtrlHandler(None, False)
-            time.sleep(0.5)
             self.logger.info(f"Shutting down LRR (pid={pid}) with CTRL_BREAK_EVENT; waiting...")
             while time.time() < deadline:
                 if is_port_available(port):
@@ -636,35 +650,92 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def stop_redis(self, timeout: int = 10):
         """
-        Stop the Redis server and wait for it to terminate.
+        Stop the Redis server via direct process kill.
 
-        Sends a shutdown command to Redis and waits for the port to become
-        available before returning. In testing, this ensures complete termination and
-        prevents subsequent tests from connecting to a dying Redis instance.
+        Uses TerminateProcess (proc.terminate) instead of cooperative SHUTDOWN
+        because Redis for Windows takes ~13s to release its listening socket
+        after SHUTDOWN. With CREATE_NO_WINDOW on the Popen call, there is no
+        conhost.exe to orphan, so hard-kill is safe. TerminateProcess causes
+        the kernel to RST all sockets (no TIME_WAIT), so the port is freed
+        immediately.
+
+        Falls back to port-based PID lookup + taskkill if no stored handle.
         """
         port = self.redis_port
+        proc = getattr(self, "_redis_process", None)
 
-        # If port is already free, Redis is already stopped
+        # Close stdout/stderr file handles so teardown rmtree can delete the files.
+        for attr in ("_redis_stdout_fh", "_redis_stderr_fh"):
+            fh = getattr(self, attr, None)
+            if fh is not None:
+                with contextlib.suppress(OSError):
+                    fh.close()
+                setattr(self, attr, None)
+
+        # Kill via stored process handle.
+        if proc is not None:
+            rc = proc.poll()
+            if rc is None:
+                self.logger.info(f"Killing Redis process (pid={proc.pid}) via terminate.")
+                self._kill_redis_process(proc)
+            else:
+                self.logger.info(f"Redis process (pid={proc.pid}) already exited with rc={rc}.")
+            self._redis_process = None
+        else:
+            self.logger.info("No stored Redis process handle.")
+
+        # Verify port is free; if not, fall back to port-owner kill.
         if is_port_available(port):
-            self.logger.debug(f"Redis port {port} is already available.")
+            self.logger.info(f"Redis port {port} is available.")
             return
 
-        # Send shutdown command to Redis
-        try:
-            self.redis_client.shutdown(now=True, force=True)
-        except redis.exceptions.ConnectionError:
-            # Redis may already be shutting down or dead
-            self.logger.debug("Redis connection error during shutdown (may already be terminating).")
+        # Port still occupied — something else holds it, or process hasn't fully exited.
+        pid = self.redis_pid
+        if pid:
+            self.logger.warning(f"Redis port {port} still occupied by pid={pid}; killing via taskkill.")
+            self._taskkill_pid(pid)
+        else:
+            self.logger.warning(f"Redis port {port} occupied but no owning PID found.")
 
-        # Wait for Redis to actually terminate
         deadline = time.time() + timeout
         while time.time() < deadline:
             if is_port_available(port):
-                self.logger.debug(f"Redis terminated, port {port} is now available.")
+                self.logger.info(f"Redis port {port} available after fallback kill.")
                 return
             time.sleep(0.5)
 
-        self.logger.warning(f"Redis port {port} still occupied after {timeout}s shutdown wait.")
+        raise DeploymentException(f"Failed to stop Redis and free port {port}!")
+
+    def _kill_redis_process(self, proc: subprocess.Popen):
+        """Kill a Redis process via its Popen handle, then fall back to taskkill."""
+        pid = proc.pid
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+                self.logger.info(f"Redis process {pid} terminated via handle (rc={proc.returncode}).")
+                return
+            except subprocess.TimeoutExpired:
+                self.logger.warning(f"Redis process {pid} did not exit after terminate(); escalating to taskkill.")
+        except OSError as e:
+            self.logger.warning(f"Failed to terminate Redis process {pid} via handle: {e}")
+        self._taskkill_pid(pid)
+
+    def _taskkill_pid(self, pid: int):
+        """Forcefully kill a process by PID using taskkill /F /T."""
+        output = subprocess.run(
+            ["taskkill", "/PID", str(pid), "/F", "/T"],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if output.returncode == 0:
+            self.logger.info(f"taskkill killed process {pid}. Output: {output.stdout.strip()}")
+        elif output.returncode == 128:
+            self.logger.info(f"taskkill: process {pid} already terminated.")
+        else:
+            self.logger.warning(f"taskkill failed for process {pid} (rc={output.returncode}): {output.stderr.strip()}")
 
     @override
     def get_lrr_logs(self, tail: int=100) -> bytes:
