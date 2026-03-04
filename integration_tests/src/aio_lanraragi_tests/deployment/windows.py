@@ -616,9 +616,15 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 parent_handles = -1
 
             # Instrument A: split console enter / CreateProcess / console exit timing.
+            # Console reuse: ensure parent has a console for child to inherit.
+            # Keep it across cycles — repeated AllocConsole/FreeConsole degrades
+            # due to condrv.sys internal state (see report_v7.md).
             t0_console = time.time()
-            console = _WindowsConsole()
-            console.__enter__()
+            k32 = ctypes.windll.kernel32
+            k32.GetConsoleWindow.restype = ctypes.c_void_p
+            had_console = bool(k32.GetConsoleWindow())
+            if not had_console:
+                k32.AllocConsole()
             t1_entered = time.time()
             lrr_process = subprocess.Popen(
                 script,
@@ -628,13 +634,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 creationflags=CREATE_NEW_PROCESS_GROUP,
             )
             t2_popen = time.time()
-            console.__exit__(None, None, None)
+            # No FreeConsole — parent keeps its console for future cycles.
             t3_exited = time.time()
 
             self._popen_timing = {
                 "console_enter_seconds": round(t1_entered - t0_console, 3),
                 "create_process_seconds": round(t2_popen - t1_entered, 3),
                 "console_exit_seconds": round(t3_exited - t2_popen, 3),
+                "had_console": had_console,
                 "orphan_perl_pids": orphan_pids,
                 "parent_handle_count": parent_handles,
                 "conhost_count": conhost_count,
@@ -780,8 +787,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.debug(f"Confirmed port availability on port: {port}")
             return
         elif pid := self.lrr_pid:
-            with _WindowsConsole(attach_to_pid=pid) as windows_console:
-                windows_console.send_ctrl_break_to_pid(pid)
+            # Send CTRL_BREAK directly — parent and child share a console
+            # (child inherited it via CREATE_NEW_PROCESS_GROUP), so no
+            # attach/detach dance needed. This avoids the condrv.sys
+            # degradation path that AttachConsole/FreeConsole triggers.
+            k32 = ctypes.windll.kernel32
+            k32.SetConsoleCtrlHandler(None, True)
+            k32.GenerateConsoleCtrlEvent(1, ctypes.c_uint(pid).value)
+            k32.SetConsoleCtrlHandler(None, False)
             self.logger.info(f"Shutting down LRR (pid={pid}) with CTRL_BREAK_EVENT; waiting...")
             while time.time() < deadline:
                 if is_port_available(port):
