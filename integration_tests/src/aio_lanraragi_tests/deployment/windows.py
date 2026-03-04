@@ -11,7 +11,6 @@ import subprocess
 import threading
 import time
 from collections import deque
-from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import override
 
@@ -25,109 +24,6 @@ from aio_lanraragi_tests.deployment.base import (
 from aio_lanraragi_tests.exceptions import DeploymentException
 
 LOGGER = logging.getLogger(__name__)
-
-class _WindowsConsole(AbstractContextManager):
-    """
-    Context manager for windows console. Do not directly attach a process in scope, this will result in
-    unaccounted-for orphaned attachments throughout the test runs.
-
-    Within a `_WindowsConsoleContextManager` scope, the following are provided:
-    - an attachment to a requested (or new) Windows console
-    - immunity to CTRL events
-    - ability to send CTRL signals to a target PID
-
-    Should obviously not be run on non-Windows systems, and since this is private we will not be checking.
-    """
-
-    @property
-    def attach_to_pid(self) -> int | None:
-        """
-        PID (if any) whose console we plan to attach to.
-        """
-        return self._attach_to_pid
-
-    @attach_to_pid.setter
-    def attach_to_pid(self, pid: int):
-        self._attach_to_pid = pid
-
-    @property
-    def had_console(self) -> bool:
-        """
-        True if current process already had a console before entering context.
-        Used to know whether we must restore that original state on exit.
-        """
-        return self._had_console
-
-    @had_console.setter
-    def had_console(self, value: bool):
-        self._had_console = value
-
-    @property
-    def detached_parent(self) -> bool:
-        """
-        True if we freed our console to make room for attaching to the target's console.
-        On Windows, you must `FreeConsole` before `AttachConsole`.
-        """
-        return self._detached_parent
-
-    @detached_parent.setter
-    def detached_parent(self, value: bool):
-        self._detached_parent = value
-
-    @property
-    def allocated_console(self) -> bool:
-        """
-        True if we allocated a brand-new console during `__enter__`.
-        If so, `__exit__` will free it.
-        """
-        return self._allocated_console
-
-    @allocated_console.setter
-    def allocated_console(self, value: bool):
-        self._allocated_console = value
-
-    def __init__(self, attach_to_pid: int | None = None):
-        self.attach_to_pid = attach_to_pid
-        self.had_console = False
-        self.detached_parent = False
-        self.allocated_console = False
-
-    def __enter__(self):
-        k32 = ctypes.windll.kernel32
-        get_console_window = k32.GetConsoleWindow
-        get_console_window.restype = ctypes.c_void_p
-
-        self.had_console = bool(get_console_window())
-        if self.attach_to_pid is not None and self.had_console:
-            k32.FreeConsole()
-            self.detached_parent = True
-
-        if self.attach_to_pid is not None:
-            attached = bool(k32.AttachConsole(ctypes.c_uint(self.attach_to_pid)))
-            if (not attached) and (not self.had_console) and k32.AllocConsole():
-                self.allocated_console = True
-        else:
-            if not self.had_console and k32.AllocConsole():
-                self.allocated_console = True
-        k32.SetConsoleCtrlHandler(None, True)
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        k32 = ctypes.windll.kernel32
-        k32.SetConsoleCtrlHandler(None, False)
-        if self.allocated_console or self.attach_to_pid is not None:
-            k32.FreeConsole()
-        if self.detached_parent:
-            ATTACH_PARENT_PROCESS = ctypes.c_uint(0xFFFFFFFF)  # (DWORD)-1
-            k32.AttachConsole(ATTACH_PARENT_PROCESS.value)
-        return False
-
-    def send_ctrl_break_to_pid(self, pid: int):
-        k32 = ctypes.windll.kernel32
-        CTRL_BREAK_EVENT = 1
-        target = ctypes.c_uint(pid or 0)
-        k32.GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, target)
-        time.sleep(0.5)
 
 class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     """
@@ -576,17 +472,22 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             ]
             self.logger.info(f"(lrr_network={lrr_network}, lrr_data_directory={lrr_data_directory}, lrr_log_directory={lrr_log_directory}, lrr_temp_directory={lrr_temp_directory}, lrr_thumb_directory={lrr_thumb_directory}) running script {subprocess.list2cmdline(script)}")
 
-            # Ensure we have a console so the child inherits it (or gets its own), and create a new
-            # process group so we can signal with CTRL_BREAK later.
+            # Ensure parent has a console so the child inherits it via
+            # CREATE_NEW_PROCESS_GROUP. Allocate once and keep it across
+            # cycles — repeated AllocConsole/FreeConsole causes condrv.sys
+            # degradation on Windows (30-120s delays after ~5 cycles).
             CREATE_NEW_PROCESS_GROUP: int = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-            with _WindowsConsole():
-                lrr_process = subprocess.Popen(
-                    script,
-                    env=lrr_env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    creationflags=CREATE_NEW_PROCESS_GROUP,
-                )
+            if not getattr(self, "_console_allocated", False):
+                k32 = ctypes.windll.kernel32
+                k32.AllocConsole()
+                self._console_allocated = True
+            lrr_process = subprocess.Popen(
+                script,
+                env=lrr_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                creationflags=CREATE_NEW_PROCESS_GROUP,
+            )
             self._lrr_process = lrr_process
             if lrr_process.stdout:
                 self._start_lrr_output_reader(lrr_process.stdout)
@@ -653,8 +554,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.debug(f"Confirmed port availability on port: {port}")
             return
         elif pid := self.lrr_pid:
-            with _WindowsConsole(attach_to_pid=pid) as windows_console:
-                windows_console.send_ctrl_break_to_pid(pid)
+            # Send CTRL_BREAK directly — parent and child share a console
+            # (child inherited it via CREATE_NEW_PROCESS_GROUP), so no
+            # attach/detach needed. Guard parent from the signal.
+            k32 = ctypes.windll.kernel32
+            k32.SetConsoleCtrlHandler(None, True)
+            k32.GenerateConsoleCtrlEvent(1, ctypes.c_uint(pid).value)
+            k32.SetConsoleCtrlHandler(None, False)
+            time.sleep(0.5)
             self.logger.info(f"Shutting down LRR (pid={pid}) with CTRL_BREAK_EVENT; waiting...")
             while time.time() < deadline:
                 if is_port_available(port):
