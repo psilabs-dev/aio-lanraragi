@@ -598,6 +598,17 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
 
+            # Instrument D: enumerate conhost.exe processes before AllocConsole.
+            conhost_count = 0
+            conhost_pids = []
+            for proc in psutil.process_iter(['pid', 'name', 'create_time']):
+                try:
+                    if proc.info['name'].lower() == 'conhost.exe':
+                        conhost_count += 1
+                        conhost_pids.append(proc.info['pid'])
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
             # Instrument C: parent process handle count before Popen.
             try:
                 parent_handles = psutil.Process(os.getpid()).num_handles()
@@ -626,6 +637,8 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 "console_exit_seconds": round(t3_exited - t2_popen, 3),
                 "orphan_perl_pids": orphan_pids,
                 "parent_handle_count": parent_handles,
+                "conhost_count": conhost_count,
+                "conhost_pids": conhost_pids,
             }
             self._lrr_process = lrr_process
             if lrr_process.stdout:
