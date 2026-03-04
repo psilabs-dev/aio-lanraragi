@@ -29,8 +29,6 @@ def generate_deployment(
                 windist, staging_dir, resource_prefix, port_offset,
                 logger=logger
             )
-            if request.config.getoption("--reuse-windist"):
-                environment._reuse_windist = True
 
         case 'darwin' | 'linux':
             # TODO: we're assuming macos is used as a development environment with docker installed,

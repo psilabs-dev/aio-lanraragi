@@ -258,22 +258,6 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Start the LRR server.
         """
 
-    def _record_timing(self, method: str, elapsed: float, **extra):
-        if not hasattr(self, '_timing_events'):
-            self._timing_events = []
-        event = {
-            "method": method,
-            "elapsed_seconds": round(elapsed, 3),
-            "timestamp": time.time(),
-        }
-        event.update(extra)
-        self._timing_events.append(event)
-        extra_parts = " ".join(f"{k}={v}" for k, v in extra.items())
-        if extra_parts:
-            self.logger.info(f"[TIMING] {method}: lrr_init={elapsed:.2f}s {extra_parts}")
-        else:
-            self.logger.info(f"[TIMING] {method}: lrr_init={elapsed:.2f}s")
-
     @abc.abstractmethod
     def start_redis(self):
         """
@@ -499,18 +483,12 @@ class AbstractLRRDeploymentContext(abc.ABC):
             except redis.exceptions.ConnectionError:
                 if retry_count >= max_retries:
                     self.logger.error("Failed to connect to Redis! Dumping Redis logs...")
-                    self._log_redis_connect_diagnostics(retry_count, max_retries)
                     self.display_redis_logs()
                     raise
                 time_to_sleep = 2 ** (retry_count + 1)
                 self.logger.warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
-                self._log_redis_connect_diagnostics(retry_count, max_retries)
                 retry_count += 1
                 time.sleep(time_to_sleep)
-
-    def _log_redis_connect_diagnostics(self, retry_count: int, max_retries: int):
-        """Hook for platform-specific Redis connection failure diagnostics. Override in subclass."""
-        pass
 
     def display_lrr_logs(self, tail: int=100, log_level: int=logging.ERROR):
         """

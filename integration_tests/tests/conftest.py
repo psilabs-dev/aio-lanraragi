@@ -1,4 +1,3 @@
-import json
 import logging
 import platform
 import time
@@ -85,7 +84,6 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--playwright", action="store_true", default=False, help="Run Playwright UI tests. Requires `playwright install`")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
-    parser.addoption("--reuse-windist", action="store_true", default=False, help="Skip windist removal during teardown (Windows A/B experiment).")
 
 def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
@@ -171,7 +169,6 @@ def pytest_sessionstart(session: pytest.Session):
         f"cpu_count={cpu_count} total_mem_gb={mem.total / (1024 ** 3):.2f} "
         f"avail_mem_gb={mem.available / (1024 ** 3):.2f}"
     )
-    session._all_timing_events = []
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
@@ -183,15 +180,6 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
     """
     outcome = yield
     report: pytest.TestReport = outcome.get_result()
-    if report.when == "call":
-        if hasattr(item.session, 'lrr_environments') and item.session.lrr_environments:
-            for prefix, env in item.session.lrr_environments.items():
-                if hasattr(env, '_timing_events') and env._timing_events:
-                    for event in env._timing_events:
-                        event["resource_prefix"] = prefix
-                        event["test_nodeid"] = item.nodeid
-                    item.session._all_timing_events.extend(env._timing_events)
-                    env._timing_events.clear()
     if report.when in ("call", "setup") and report.failed:
         if excinfo := call.excinfo:
             LOGGER.error(f"Test threw {excinfo.typename} with message \"{excinfo.value}\": dumping logs... ({item.nodeid}, phase={report.when})")
@@ -220,15 +208,3 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
                 LOGGER.info("No environment available.")
         except Exception as e:  # noqa: BLE001 — best-effort log dump
             LOGGER.error(f"Failed to dump failure info: {e}")
-
-def pytest_sessionfinish(session: pytest.Session, exitstatus: int):
-    events = getattr(session, '_all_timing_events', [])
-    if not events:
-        return
-    report = {
-        "global_run_id": getattr(session.config, 'global_run_id', None),
-        "events": events,
-    }
-    output_path = Path("timing-report.json")
-    output_path.write_text(json.dumps(report, indent=2))
-    LOGGER.info(f"Timing report written to {output_path} ({len(events)} events)")

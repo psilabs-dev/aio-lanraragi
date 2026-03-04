@@ -12,11 +12,9 @@ import subprocess
 import threading
 import time
 from collections import deque
-from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import override
 
-import psutil
 import redis
 
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, is_port_available
@@ -27,109 +25,6 @@ from aio_lanraragi_tests.deployment.base import (
 from aio_lanraragi_tests.exceptions import DeploymentException
 
 LOGGER = logging.getLogger(__name__)
-
-class _WindowsConsole(AbstractContextManager):
-    """
-    Context manager for windows console. Do not directly attach a process in scope, this will result in
-    unaccounted-for orphaned attachments throughout the test runs.
-
-    Within a `_WindowsConsoleContextManager` scope, the following are provided:
-    - an attachment to a requested (or new) Windows console
-    - immunity to CTRL events
-    - ability to send CTRL signals to a target PID
-
-    Should obviously not be run on non-Windows systems, and since this is private we will not be checking.
-    """
-
-    @property
-    def attach_to_pid(self) -> int | None:
-        """
-        PID (if any) whose console we plan to attach to.
-        """
-        return self._attach_to_pid
-
-    @attach_to_pid.setter
-    def attach_to_pid(self, pid: int):
-        self._attach_to_pid = pid
-
-    @property
-    def had_console(self) -> bool:
-        """
-        True if current process already had a console before entering context.
-        Used to know whether we must restore that original state on exit.
-        """
-        return self._had_console
-
-    @had_console.setter
-    def had_console(self, value: bool):
-        self._had_console = value
-
-    @property
-    def detached_parent(self) -> bool:
-        """
-        True if we freed our console to make room for attaching to the target's console.
-        On Windows, you must `FreeConsole` before `AttachConsole`.
-        """
-        return self._detached_parent
-
-    @detached_parent.setter
-    def detached_parent(self, value: bool):
-        self._detached_parent = value
-
-    @property
-    def allocated_console(self) -> bool:
-        """
-        True if we allocated a brand-new console during `__enter__`.
-        If so, `__exit__` will free it.
-        """
-        return self._allocated_console
-
-    @allocated_console.setter
-    def allocated_console(self, value: bool):
-        self._allocated_console = value
-
-    def __init__(self, attach_to_pid: int | None = None):
-        self.attach_to_pid = attach_to_pid
-        self.had_console = False
-        self.detached_parent = False
-        self.allocated_console = False
-
-    def __enter__(self):
-        k32 = ctypes.windll.kernel32
-        get_console_window = k32.GetConsoleWindow
-        get_console_window.restype = ctypes.c_void_p
-
-        self.had_console = bool(get_console_window())
-        if self.attach_to_pid is not None and self.had_console:
-            k32.FreeConsole()
-            self.detached_parent = True
-
-        if self.attach_to_pid is not None:
-            attached = bool(k32.AttachConsole(ctypes.c_uint(self.attach_to_pid)))
-            if (not attached) and (not self.had_console) and k32.AllocConsole():
-                self.allocated_console = True
-        else:
-            if not self.had_console and k32.AllocConsole():
-                self.allocated_console = True
-        k32.SetConsoleCtrlHandler(None, True)
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        k32 = ctypes.windll.kernel32
-        k32.SetConsoleCtrlHandler(None, False)
-        if self.allocated_console or self.attach_to_pid is not None:
-            k32.FreeConsole()
-        if self.detached_parent:
-            ATTACH_PARENT_PROCESS = ctypes.c_uint(0xFFFFFFFF)  # (DWORD)-1
-            k32.AttachConsole(ATTACH_PARENT_PROCESS.value)
-        return False
-
-    def send_ctrl_break_to_pid(self, pid: int):
-        k32 = ctypes.windll.kernel32
-        CTRL_BREAK_EVENT = 1
-        target = ctypes.c_uint(pid or 0)
-        k32.GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, target)
-        time.sleep(0.5)
 
 class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     """
@@ -289,7 +184,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self._lrr_process = None
         self._lrr_output = deque(maxlen=10000)
         self._lrr_reader_thread = None
-        self._reuse_windist = False
+        self._has_console = False
 
     @override
     def setup(
@@ -332,12 +227,9 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         # copy the windist directory.
         windist_dir = self.windist_dir
         if not windist_dir.exists():
-            t0 = time.time()
             shutil.copytree(original_windist_dir, windist_dir)
-            self._copytree_elapsed = time.time() - t0
-            self.logger.info(f"Copied windist directory ({self._copytree_elapsed:.2f}s): {windist_dir}")
+            self.logger.info(f"Copied windist directory: {windist_dir}")
         else:
-            self._copytree_elapsed = 0.0
             self.logger.info(f"Reusing existing windist directory: {windist_dir}")
         self.plugin_paths = plugin_paths
         self.apply_plugins()
@@ -406,7 +298,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.disable_cors()
         self.logger.debug("Redis post-connect configuration complete.")
 
-        t0 = time.time()
         if is_port_available(lrr_port):
             self.start_lrr()
             self.test_lrr_connection(lrr_port)
@@ -416,8 +307,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.stop_lrr()
             self.start_lrr()
             self.logger.debug("LRR service restarted.")
-        timing_extra = self._collect_popen_timing()
-        self._record_timing("setup", time.time() - t0, **timing_extra)
 
         redis_pid = self.redis_pid
         lrr_pid = self.lrr_pid
@@ -461,7 +350,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger.debug("Started Redis.")
 
         lrr_port = self.lrr_port
-        t0 = time.time()
         if is_port_available(lrr_port):
             self.start_lrr()
             self.test_lrr_connection(lrr_port)
@@ -469,8 +357,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         else:
             self.test_lrr_connection(lrr_port)
             self.logger.debug(f"Running LRR service confirmed on port {lrr_port}, skipping startup.")
-        timing_extra = self._collect_popen_timing()
-        self._record_timing("start", time.time() - t0, **timing_extra)
 
     @override
     def stop(self):
@@ -483,12 +369,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def restart(self):
         self.stop()
         self.start()
-
-    def _collect_popen_timing(self) -> dict:
-        timing = getattr(self, "_popen_timing", None)
-        if not timing:
-            return {}
-        return dict(timing)
 
     def _start_lrr_output_reader(self, pipe):
         def _reader():
@@ -515,20 +395,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         if hasattr(self, "_redis_client") and self._redis_client is not None:
             self._redis_client.close()
         if remove_data:
-            t0 = time.time()
             dirs_to_remove = [
                 ("contents", contents_dir), ("logs", log_dir), ("pid", pid_dir),
                 ("windist", windist_dir), ("redis", redis_dir), ("temp", temp_dir),
             ]
-            if self._reuse_windist:
-                dirs_to_remove = [(label, d) for label, d in dirs_to_remove if label != "windist"]
-                self.logger.info("Reuse windist: skipping windist removal.")
             for label, d in dirs_to_remove:
                 if d.exists():
                     self._remove_ro(d)
                     shutil.rmtree(d)
-            elapsed = time.time() - t0
-            self.logger.info(f"Teardown rmtree completed in {elapsed:.2f}s.")
 
     @override
     def start_lrr(self):
@@ -585,47 +459,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             ]
             self.logger.info(f"(lrr_network={lrr_network}, lrr_data_directory={lrr_data_directory}, lrr_log_directory={lrr_log_directory}, lrr_temp_directory={lrr_temp_directory}, lrr_thumb_directory={lrr_thumb_directory}) running script {subprocess.list2cmdline(script)}")
 
-            # Ensure we have a console so the child inherits it (or gets its own), and create a new
-            # process group so we can signal with CTRL_BREAK later.
-            CREATE_NEW_PROCESS_GROUP: int = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-
-            # Instrument B: snapshot orphan perl processes before Popen.
-            orphan_pids = []
-            for proc in psutil.process_iter(['pid', 'name']):
-                try:
-                    if 'perl' in proc.info['name'].lower():
-                        orphan_pids.append(proc.info['pid'])
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-
-            # Instrument D: enumerate conhost.exe processes before AllocConsole.
-            conhost_count = 0
-            conhost_pids = []
-            for proc in psutil.process_iter(['pid', 'name', 'create_time']):
-                try:
-                    if proc.info['name'].lower() == 'conhost.exe':
-                        conhost_count += 1
-                        conhost_pids.append(proc.info['pid'])
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-
-            # Instrument C: parent process handle count before Popen.
-            try:
-                parent_handles = psutil.Process(os.getpid()).num_handles()
-            except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
-                parent_handles = -1
-
-            # Instrument A: split console enter / CreateProcess / console exit timing.
             # Console reuse: ensure parent has a console for child to inherit.
             # Keep it across cycles — repeated AllocConsole/FreeConsole degrades
             # due to condrv.sys internal state (see report_v7.md).
-            t0_console = time.time()
-            k32 = ctypes.windll.kernel32
-            k32.GetConsoleWindow.restype = ctypes.c_void_p
-            had_console = bool(k32.GetConsoleWindow())
-            if not had_console:
+            CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+            if not self._has_console:
+                k32 = ctypes.windll.kernel32
                 k32.AllocConsole()
-            t1_entered = time.time()
+                self._has_console = True
             lrr_process = subprocess.Popen(
                 script,
                 env=lrr_env,
@@ -633,62 +474,12 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 stderr=subprocess.STDOUT,
                 creationflags=CREATE_NEW_PROCESS_GROUP,
             )
-            t2_popen = time.time()
-            # No FreeConsole — parent keeps its console for future cycles.
-            t3_exited = time.time()
-
-            self._popen_timing = {
-                "console_enter_seconds": round(t1_entered - t0_console, 3),
-                "create_process_seconds": round(t2_popen - t1_entered, 3),
-                "console_exit_seconds": round(t3_exited - t2_popen, 3),
-                "had_console": had_console,
-                "orphan_perl_pids": orphan_pids,
-                "parent_handle_count": parent_handles,
-                "conhost_count": conhost_count,
-                "conhost_pids": conhost_pids,
-            }
             self._lrr_process = lrr_process
             if lrr_process.stdout:
                 self._start_lrr_output_reader(lrr_process.stdout)
             self.logger.debug(f"Started LRR process with PID: {lrr_process.pid}.")
         finally:
             os.chdir(cwd)
-
-    @override
-    def _log_redis_connect_diagnostics(self, retry_count: int, max_retries: int):
-        proc = getattr(self, "_redis_process", None)
-        port = self.redis_port
-        port_avail = is_port_available(port)
-        if proc is not None:
-            rc = proc.poll()
-            self.logger.warning(
-                f"Redis connect diagnostic ({retry_count+1}/{max_retries}): "
-                f"process.pid={proc.pid}, process.poll()={rc}, port_available={port_avail}"
-            )
-        else:
-            self.logger.warning(
-                f"Redis connect diagnostic ({retry_count+1}/{max_retries}): "
-                f"no process handle, port_available={port_avail}"
-            )
-        # Log captured Redis stderr/stdout if available.
-        for label, path_attr in [("stderr", "_redis_stderr_path"), ("stdout", "_redis_stdout_path")]:
-            fpath = getattr(self, path_attr, None)
-            if fpath and Path(fpath).exists():
-                content = Path(fpath).read_text(errors="replace").strip()
-                if content:
-                    self.logger.warning(f"Redis {label}: {content}")
-        # Log TCP state for the port.
-        try:
-            result = subprocess.run(
-                ["netstat", "-ano"],
-                capture_output=True, text=True, timeout=5,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            port_lines = [line.strip() for line in result.stdout.splitlines() if f":{port}" in line]
-            if port_lines:
-                self.logger.warning(f"TCP state for port {port}: {port_lines}")
-        except (OSError, subprocess.TimeoutExpired) as e:
-            self.logger.warning(f"Failed to query netstat: {e}")
 
     @override
     def start_redis(self):
