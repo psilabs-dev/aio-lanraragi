@@ -2,6 +2,7 @@
 Windows LRR deployment module.
 """
 
+import contextlib
 import ctypes
 import logging
 import os
@@ -11,7 +12,6 @@ import subprocess
 import threading
 import time
 from collections import deque
-from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import override
 
@@ -25,109 +25,6 @@ from aio_lanraragi_tests.deployment.base import (
 from aio_lanraragi_tests.exceptions import DeploymentException
 
 LOGGER = logging.getLogger(__name__)
-
-class _WindowsConsole(AbstractContextManager):
-    """
-    Context manager for windows console. Do not directly attach a process in scope, this will result in
-    unaccounted-for orphaned attachments throughout the test runs.
-
-    Within a `_WindowsConsoleContextManager` scope, the following are provided:
-    - an attachment to a requested (or new) Windows console
-    - immunity to CTRL events
-    - ability to send CTRL signals to a target PID
-
-    Should obviously not be run on non-Windows systems, and since this is private we will not be checking.
-    """
-
-    @property
-    def attach_to_pid(self) -> int | None:
-        """
-        PID (if any) whose console we plan to attach to.
-        """
-        return self._attach_to_pid
-
-    @attach_to_pid.setter
-    def attach_to_pid(self, pid: int):
-        self._attach_to_pid = pid
-
-    @property
-    def had_console(self) -> bool:
-        """
-        True if current process already had a console before entering context.
-        Used to know whether we must restore that original state on exit.
-        """
-        return self._had_console
-
-    @had_console.setter
-    def had_console(self, value: bool):
-        self._had_console = value
-
-    @property
-    def detached_parent(self) -> bool:
-        """
-        True if we freed our console to make room for attaching to the target's console.
-        On Windows, you must `FreeConsole` before `AttachConsole`.
-        """
-        return self._detached_parent
-
-    @detached_parent.setter
-    def detached_parent(self, value: bool):
-        self._detached_parent = value
-
-    @property
-    def allocated_console(self) -> bool:
-        """
-        True if we allocated a brand-new console during `__enter__`.
-        If so, `__exit__` will free it.
-        """
-        return self._allocated_console
-
-    @allocated_console.setter
-    def allocated_console(self, value: bool):
-        self._allocated_console = value
-
-    def __init__(self, attach_to_pid: int | None = None):
-        self.attach_to_pid = attach_to_pid
-        self.had_console = False
-        self.detached_parent = False
-        self.allocated_console = False
-
-    def __enter__(self):
-        k32 = ctypes.windll.kernel32
-        get_console_window = k32.GetConsoleWindow
-        get_console_window.restype = ctypes.c_void_p
-
-        self.had_console = bool(get_console_window())
-        if self.attach_to_pid is not None and self.had_console:
-            k32.FreeConsole()
-            self.detached_parent = True
-
-        if self.attach_to_pid is not None:
-            attached = bool(k32.AttachConsole(ctypes.c_uint(self.attach_to_pid)))
-            if (not attached) and (not self.had_console) and k32.AllocConsole():
-                self.allocated_console = True
-        else:
-            if not self.had_console and k32.AllocConsole():
-                self.allocated_console = True
-        k32.SetConsoleCtrlHandler(None, True)
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        k32 = ctypes.windll.kernel32
-        k32.SetConsoleCtrlHandler(None, False)
-        if self.allocated_console or self.attach_to_pid is not None:
-            k32.FreeConsole()
-        if self.detached_parent:
-            ATTACH_PARENT_PROCESS = ctypes.c_uint(0xFFFFFFFF)  # (DWORD)-1
-            k32.AttachConsole(ATTACH_PARENT_PROCESS.value)
-        return False
-
-    def send_ctrl_break_to_pid(self, pid: int):
-        k32 = ctypes.windll.kernel32
-        CTRL_BREAK_EVENT = 1
-        target = ctypes.c_uint(pid or 0)
-        k32.GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, target)
-        time.sleep(0.5)
 
 class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     """
@@ -287,6 +184,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self._lrr_process = None
         self._lrr_output = deque(maxlen=10000)
         self._lrr_reader_thread = None
+        self._has_console = False
 
     @override
     def setup(
@@ -576,17 +474,22 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             ]
             self.logger.info(f"(lrr_network={lrr_network}, lrr_data_directory={lrr_data_directory}, lrr_log_directory={lrr_log_directory}, lrr_temp_directory={lrr_temp_directory}, lrr_thumb_directory={lrr_thumb_directory}) running script {subprocess.list2cmdline(script)}")
 
-            # Ensure we have a console so the child inherits it (or gets its own), and create a new
-            # process group so we can signal with CTRL_BREAK later.
-            CREATE_NEW_PROCESS_GROUP: int = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-            with _WindowsConsole():
-                lrr_process = subprocess.Popen(
-                    script,
-                    env=lrr_env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    creationflags=CREATE_NEW_PROCESS_GROUP,
-                )
+            # Ensure parent has a console so the child inherits it via
+            # CREATE_NEW_PROCESS_GROUP. Allocate once and keep it across
+            # cycles — repeated AllocConsole/FreeConsole causes condrv.sys
+            # degradation on Windows (30-120s delays after ~5 cycles).
+            CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+            if not self._has_console:
+                k32 = ctypes.windll.kernel32
+                k32.AllocConsole()
+                self._has_console = True
+            lrr_process = subprocess.Popen(
+                script,
+                env=lrr_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                creationflags=CREATE_NEW_PROCESS_GROUP,
+            )
             self._lrr_process = lrr_process
             if lrr_process.stdout:
                 self._start_lrr_output_reader(lrr_process.stdout)
@@ -628,8 +531,21 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 "--port", str(self.redis_port),
             ]
             self.logger.debug(f"(redis_dir={redis_dir}, redis_logfile_path={redis_logfile_path}) running script {subprocess.list2cmdline(script)}")
-            redis_process = subprocess.Popen(script)
-            self.logger.debug(f"Started redis service with PID {redis_process.pid}.")
+
+            # Capture stdout/stderr to files (Redis may print errors before opening its logfile).
+            # File handles are intentionally kept open for the subprocess lifetime
+            # and closed in stop_redis().
+            self._redis_stdout_path = logs_dir / "redis-stdout.log"
+            self._redis_stderr_path = logs_dir / "redis-stderr.log"
+            self._redis_stdout_fh = open(self._redis_stdout_path, "w")  # noqa: SIM115
+            self._redis_stderr_fh = open(self._redis_stderr_path, "w")  # noqa: SIM115
+            self._redis_process = subprocess.Popen(
+                script,
+                stdout=self._redis_stdout_fh,
+                stderr=self._redis_stderr_fh,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            self.logger.debug(f"Started redis service with PID {self._redis_process.pid}.")
         finally:
             os.chdir(cwd)
 
@@ -653,8 +569,13 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.debug(f"Confirmed port availability on port: {port}")
             return
         elif pid := self.lrr_pid:
-            with _WindowsConsole(attach_to_pid=pid) as windows_console:
-                windows_console.send_ctrl_break_to_pid(pid)
+            # Send CTRL_BREAK directly — parent and child share a console
+            # (child inherited it via CREATE_NEW_PROCESS_GROUP), so no
+            # attach/detach needed. Guard parent from the signal.
+            k32 = ctypes.windll.kernel32
+            k32.SetConsoleCtrlHandler(None, True)
+            k32.GenerateConsoleCtrlEvent(1, ctypes.c_uint(pid).value)
+            k32.SetConsoleCtrlHandler(None, False)
             self.logger.info(f"Shutting down LRR (pid={pid}) with CTRL_BREAK_EVENT; waiting...")
             while time.time() < deadline:
                 if is_port_available(port):
@@ -729,35 +650,92 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def stop_redis(self, timeout: int = 10):
         """
-        Stop the Redis server and wait for it to terminate.
+        Stop the Redis server via direct process kill.
 
-        Sends a shutdown command to Redis and waits for the port to become
-        available before returning. In testing, this ensures complete termination and
-        prevents subsequent tests from connecting to a dying Redis instance.
+        Uses TerminateProcess (proc.terminate) instead of cooperative SHUTDOWN
+        because Redis for Windows takes ~13s to release its listening socket
+        after SHUTDOWN. With CREATE_NO_WINDOW on the Popen call, there is no
+        conhost.exe to orphan, so hard-kill is safe. TerminateProcess causes
+        the kernel to RST all sockets (no TIME_WAIT), so the port is freed
+        immediately.
+
+        Falls back to port-based PID lookup + taskkill if no stored handle.
         """
         port = self.redis_port
+        proc = getattr(self, "_redis_process", None)
 
-        # If port is already free, Redis is already stopped
+        # Close stdout/stderr file handles so teardown rmtree can delete the files.
+        for attr in ("_redis_stdout_fh", "_redis_stderr_fh"):
+            fh = getattr(self, attr, None)
+            if fh is not None:
+                with contextlib.suppress(OSError):
+                    fh.close()
+                setattr(self, attr, None)
+
+        # Kill via stored process handle.
+        if proc is not None:
+            rc = proc.poll()
+            if rc is None:
+                self.logger.info(f"Killing Redis process (pid={proc.pid}) via terminate.")
+                self._kill_redis_process(proc)
+            else:
+                self.logger.info(f"Redis process (pid={proc.pid}) already exited with rc={rc}.")
+            self._redis_process = None
+        else:
+            self.logger.info("No stored Redis process handle.")
+
+        # Verify port is free; if not, fall back to port-owner kill.
         if is_port_available(port):
-            self.logger.debug(f"Redis port {port} is already available.")
+            self.logger.info(f"Redis port {port} is available.")
             return
 
-        # Send shutdown command to Redis
-        try:
-            self.redis_client.shutdown(now=True, force=True)
-        except redis.exceptions.ConnectionError:
-            # Redis may already be shutting down or dead
-            self.logger.debug("Redis connection error during shutdown (may already be terminating).")
+        # Port still occupied — something else holds it, or process hasn't fully exited.
+        pid = self.redis_pid
+        if pid:
+            self.logger.warning(f"Redis port {port} still occupied by pid={pid}; killing via taskkill.")
+            self._taskkill_pid(pid)
+        else:
+            self.logger.warning(f"Redis port {port} occupied but no owning PID found.")
 
-        # Wait for Redis to actually terminate
         deadline = time.time() + timeout
         while time.time() < deadline:
             if is_port_available(port):
-                self.logger.debug(f"Redis terminated, port {port} is now available.")
+                self.logger.info(f"Redis port {port} available after fallback kill.")
                 return
             time.sleep(0.5)
 
-        self.logger.warning(f"Redis port {port} still occupied after {timeout}s shutdown wait.")
+        raise DeploymentException(f"Failed to stop Redis and free port {port}!")
+
+    def _kill_redis_process(self, proc: subprocess.Popen):
+        """Kill a Redis process via its Popen handle, then fall back to taskkill."""
+        pid = proc.pid
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+                self.logger.info(f"Redis process {pid} terminated via handle (rc={proc.returncode}).")
+                return
+            except subprocess.TimeoutExpired:
+                self.logger.warning(f"Redis process {pid} did not exit after terminate(); escalating to taskkill.")
+        except OSError as e:
+            self.logger.warning(f"Failed to terminate Redis process {pid} via handle: {e}")
+        self._taskkill_pid(pid)
+
+    def _taskkill_pid(self, pid: int):
+        """Forcefully kill a process by PID using taskkill /F /T."""
+        output = subprocess.run(
+            ["taskkill", "/PID", str(pid), "/F", "/T"],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if output.returncode == 0:
+            self.logger.info(f"taskkill killed process {pid}. Output: {output.stdout.strip()}")
+        elif output.returncode == 128:
+            self.logger.info(f"taskkill: process {pid} already terminated.")
+        else:
+            self.logger.warning(f"taskkill failed for process {pid} (rc={output.returncode}): {output.stderr.strip()}")
 
     @override
     def get_lrr_logs(self, tail: int=100) -> bytes:

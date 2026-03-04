@@ -155,7 +155,11 @@ async def test_ignore_invalid_plugin_type(lrr_client: LRRClient, environment: Ab
     assert plugin_path.exists(), f"Test plugin file not found: {plugin_path}"
 
     # >>>>> CHECK PLUGINS STAGE >>>>>
+    invalid_namespace = "testinvalidplugintype"
     response, error = await lrr_client.misc_api.get_available_plugins(GetAvailablePluginsRequest(type="metadata"))
     assert not error, f"Failed to get plugins (status {error.status}): {error.error}"
-    assert not response.plugins, f"Plugins is not empty: {response.plugins}"
+    plugin_namespaces = {plugin.namespace for plugin in response.plugins}
+    assert invalid_namespace not in plugin_namespaces, (
+        f"Invalid plugin type should be ignored but was found: {invalid_namespace}"
+    )
     # <<<<< CHECK PLUGINS STAGE <<<<<
