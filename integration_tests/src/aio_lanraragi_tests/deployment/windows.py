@@ -406,8 +406,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.disable_cors()
         self.logger.debug("Redis post-connect configuration complete.")
 
-        disk_before = psutil.disk_io_counters()
-        mem_before = psutil.virtual_memory()
         t0 = time.time()
         if is_port_available(lrr_port):
             self.start_lrr()
@@ -418,21 +416,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.stop_lrr()
             self.start_lrr()
             self.logger.debug("LRR service restarted.")
-        disk_after = psutil.disk_io_counters()
-        timing_extra = {
-            "copytree_seconds": round(self._copytree_elapsed, 3),
-            "available_mem_mb": round(mem_before.available / (1024 * 1024), 1),
-            "popen_seconds": round(getattr(self, "_popen_elapsed", 0), 3),
-        }
-        first_output_at = getattr(self, "_first_output_at", None)
-        popen_returned_at = getattr(self, "_popen_returned_at", None)
-        if first_output_at and popen_returned_at:
-            timing_extra["first_output_seconds"] = round(first_output_at - popen_returned_at, 3)
-        if disk_before and disk_after:
-            timing_extra["disk_read_bytes"] = disk_after.read_bytes - disk_before.read_bytes
-            timing_extra["disk_read_ops"] = disk_after.read_count - disk_before.read_count
-            timing_extra["disk_write_bytes"] = disk_after.write_bytes - disk_before.write_bytes
-            timing_extra["disk_write_ops"] = disk_after.write_count - disk_before.write_count
+        timing_extra = self._collect_popen_timing()
         self._record_timing("setup", time.time() - t0, **timing_extra)
 
         redis_pid = self.redis_pid
@@ -477,11 +461,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger.debug("Started Redis.")
 
         lrr_port = self.lrr_port
-        self._popen_elapsed = 0
-        self._popen_returned_at = None
-        self._first_output_at = None
-        disk_before = psutil.disk_io_counters()
-        mem_before = psutil.virtual_memory()
         t0 = time.time()
         if is_port_available(lrr_port):
             self.start_lrr()
@@ -490,20 +469,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         else:
             self.test_lrr_connection(lrr_port)
             self.logger.debug(f"Running LRR service confirmed on port {lrr_port}, skipping startup.")
-        disk_after = psutil.disk_io_counters()
-        timing_extra = {
-            "available_mem_mb": round(mem_before.available / (1024 * 1024), 1),
-            "popen_seconds": round(self._popen_elapsed, 3),
-        }
-        first_output_at = self._first_output_at
-        popen_returned_at = self._popen_returned_at
-        if first_output_at and popen_returned_at:
-            timing_extra["first_output_seconds"] = round(first_output_at - popen_returned_at, 3)
-        if disk_before and disk_after:
-            timing_extra["disk_read_bytes"] = disk_after.read_bytes - disk_before.read_bytes
-            timing_extra["disk_read_ops"] = disk_after.read_count - disk_before.read_count
-            timing_extra["disk_write_bytes"] = disk_after.write_bytes - disk_before.write_bytes
-            timing_extra["disk_write_ops"] = disk_after.write_count - disk_before.write_count
+        timing_extra = self._collect_popen_timing()
         self._record_timing("start", time.time() - t0, **timing_extra)
 
     @override
@@ -518,15 +484,17 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.stop()
         self.start()
 
+    def _collect_popen_timing(self) -> dict:
+        timing = getattr(self, "_popen_timing", None)
+        if not timing:
+            return {}
+        return dict(timing)
+
     def _start_lrr_output_reader(self, pipe):
         def _reader():
             for line in iter(pipe.readline, b''):
-                if self._first_output_at is None:
-                    self._first_output_at = time.time()
                 cleaned = line.replace(b'\r\n', b'\n')
                 self._lrr_output.append(cleaned)
-                if b'[TIMING]' in cleaned:
-                    self.logger.info(cleaned.decode('utf-8', errors='replace').rstrip())
         t = threading.Thread(target=_reader, daemon=True)
         t.start()
         self._lrr_reader_thread = t
@@ -620,18 +588,45 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             # Ensure we have a console so the child inherits it (or gets its own), and create a new
             # process group so we can signal with CTRL_BREAK later.
             CREATE_NEW_PROCESS_GROUP: int = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-            self._first_output_at = None
-            t_popen_start = time.time()
-            with _WindowsConsole():
-                lrr_process = subprocess.Popen(
-                    script,
-                    env=lrr_env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    creationflags=CREATE_NEW_PROCESS_GROUP,
-                )
-            self._popen_returned_at = time.time()
-            self._popen_elapsed = self._popen_returned_at - t_popen_start
+
+            # Instrument B: snapshot orphan perl processes before Popen.
+            orphan_pids = []
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    if 'perl' in proc.info['name'].lower():
+                        orphan_pids.append(proc.info['pid'])
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+            # Instrument C: parent process handle count before Popen.
+            try:
+                parent_handles = psutil.Process(os.getpid()).num_handles()
+            except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+                parent_handles = -1
+
+            # Instrument A: split console enter / CreateProcess / console exit timing.
+            t0_console = time.time()
+            console = _WindowsConsole()
+            console.__enter__()
+            t1_entered = time.time()
+            lrr_process = subprocess.Popen(
+                script,
+                env=lrr_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                creationflags=CREATE_NEW_PROCESS_GROUP,
+            )
+            t2_popen = time.time()
+            console.__exit__(None, None, None)
+            t3_exited = time.time()
+
+            self._popen_timing = {
+                "console_enter_seconds": round(t1_entered - t0_console, 3),
+                "create_process_seconds": round(t2_popen - t1_entered, 3),
+                "console_exit_seconds": round(t3_exited - t2_popen, 3),
+                "orphan_perl_pids": orphan_pids,
+                "parent_handle_count": parent_handles,
+            }
             self._lrr_process = lrr_process
             if lrr_process.stdout:
                 self._start_lrr_output_reader(lrr_process.stdout)

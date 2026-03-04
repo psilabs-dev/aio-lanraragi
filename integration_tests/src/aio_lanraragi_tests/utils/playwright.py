@@ -1,10 +1,12 @@
 import logging
+import re
 from urllib.parse import urlparse
 
 import playwright.async_api._generated
 from lanraragi.clients.client import LRRClient
 
 LOGGER = logging.getLogger(__name__)
+IGNORED_EXTERNAL_CONSOLE_ERROR_PATTERN = r"https://api\.github\.com/repos/difegue/lanraragi/releases/latest|Github API rate limit exceeded|Failed to load resource: the server responded with a status of 403"
 
 async def assert_browser_responses_ok(responses: list[playwright.async_api._generated.Response], lrr_client: LRRClient, logger: logging.Logger=LOGGER):
     """
@@ -42,7 +44,15 @@ async def assert_console_logs_ok(console_evts: list[playwright.async_api._genera
     """
 
     for evt in console_evts:
-        assert evt.type != "error", f"Console logged at error level: {evt.text}"
+        if evt.type != "error":
+            continue
+
+        text = evt.text or ""
+        if re.search(IGNORED_EXTERNAL_CONSOLE_ERROR_PATTERN, text):
+            LOGGER.warning(f"Ignoring known external console error: {text}")
+            continue
+
+        raise AssertionError(f"Console logged at error level: {text}")
 
 async def assert_no_spinner(page: playwright.async_api.Page, timeout_ms: int = 3000):
     """Assert that the reader loading spinner is gone within timeout_ms."""
