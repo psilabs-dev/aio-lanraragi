@@ -227,7 +227,15 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.resource_prefix = resource_prefix
         self.port_offset = port_offset
 
-        self.build_path = build
+        if build is not None:
+            build_path = Path(build)
+            if not build_path.is_absolute():
+                raise DeploymentException(
+                    "--build must be an absolute path to the LANraragi project root."
+                )
+            self.build_path = str(build_path)
+        else:
+            self.build_path = None
         self.image = image
         self.global_run_id = global_run_id
         self.git_url = git_url

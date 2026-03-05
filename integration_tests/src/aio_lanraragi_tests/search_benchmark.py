@@ -445,7 +445,7 @@ if __name__ == "__main__":
     setup_sp.add_argument("--image", help="Docker image to use")
     setup_sp.add_argument("--git-url", help="Git URL to use")
     setup_sp.add_argument("--git-branch", help="Git branch to use")
-    setup_sp.add_argument("--build", help="Build path to use")
+    setup_sp.add_argument("--build", help="Absolute build path to use")
     setup_sp.add_argument("--docker-api", action='store_true', help="Stream docker build logs")
     setup_sp.add_argument("--nofunmode", action="store_true", help="Start LRR with nofunmode (default false).")
     setup_sp.add_argument("--staging", default=DEFAULT_STAGING_DIR, help="Path to staging directory.")

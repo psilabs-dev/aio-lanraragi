@@ -27,7 +27,8 @@ def pytest_addoption(parser: pytest.Parser):
     Parameters
     ----------
     build : `str`
-        Docker image build path to LANraragi project root directory. Overrides the `--image` flag.
+        Absolute path to LANraragi project root directory for Docker image build.
+        Overrides the `--image` flag.
 
     image : `str`
         Docker image tag to use for LANraragi image. Defaults to "difegue/lanraragi".
@@ -65,7 +66,7 @@ def pytest_addoption(parser: pytest.Parser):
     npseed : `int = 42`
         Seed (in numpy) to set for any randomized behavior.
     """
-    parser.addoption("--build", action="store", default=None, help="Path to docker build context for LANraragi.")
+    parser.addoption("--build", action="store", default=None, help="Absolute path to docker build context for LANraragi.")
     parser.addoption("--image", action="store", default=None, help="LANraragi image to use.")
     parser.addoption("--git-url", action="store", default=None, help="Link to a LANraragi git repository (e.g. fork or branch).")
     parser.addoption("--git-branch", action="store", default=None, help="Branch to checkout; if not supplied, uses the main branch.")

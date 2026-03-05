@@ -86,7 +86,7 @@ def console():
     up_parser.add_argument("--image", help="Docker image to use")
     up_parser.add_argument("--git-url", help="Git URL to use")
     up_parser.add_argument("--git-branch", help="Git branch to use")
-    up_parser.add_argument("--build", help="Build path to use")
+    up_parser.add_argument("--build", help="Absolute build path to use")
     up_parser.add_argument("--dockerfile", help="Path to a custom Dockerfile. If relative, resolved relative to --build. Cannot be combined with --git-url or --image.")
     up_parser.add_argument("--docker-api", action='store_true', help="Stream docker build logs")
     up_parser.add_argument("--nofunmode", action="store_true", help="Start LRR with nofunmode (default false).")
