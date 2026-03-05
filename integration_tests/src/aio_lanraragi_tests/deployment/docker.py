@@ -181,10 +181,17 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def dockerfile_path(self) -> Path | None:
         """
         Customizable path to dockerfile. Defaults to `tools/build/docker/Dockerfile`.
+
+        Priority:
+            1. manually passed dockerfile path
+            2. path associated to the manually passed build path
+            3. None (assumes built off git URL; handle later)
         """
         if self._dockerfile_path is not None:
             return self._dockerfile_path
-        return Path(self.build_path) / "tools" / "build" / "docker" / "Dockerfile"
+        if self.build_path is not None:
+            return Path(self.build_path) / "tools" / "build" / "docker" / "Dockerfile"
+        return None
 
     @property
     def redis_container_conf_path(self) -> str:
@@ -843,7 +850,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if not Path(build_path).exists():
             raise FileNotFoundError(f"Build path {build_path} does not exist!")
 
-        dockerfile_path = self.dockerfile_path
+        dockerfile_path = self.dockerfile_path or Path(build_path) / "tools" / "build" / "docker" / "Dockerfile"
         if not dockerfile_path.exists():
             raise FileNotFoundError(f"Dockerfile {dockerfile_path} does not exist!")
 
