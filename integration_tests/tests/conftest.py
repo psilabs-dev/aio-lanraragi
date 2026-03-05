@@ -41,11 +41,15 @@ def pytest_addoption(parser: pytest.Parser):
         Path to a custom Dockerfile.
         Cannot be combined with --git-url or --image.
 
+    build-ref : `str`
+        Git ref (commit hash, branch, tag) to check out before building from --build path.
+        Requires --build.
+
     git-url : `str`
         URL of LANraragi git repository to build a Docker image from.
 
-    git-branch : `str`
-        Optional branch name of the corresponding git repository.
+    git-ref : `str`
+        Optional git ref (branch, tag, commit) of the corresponding git repository.
 
     windist : `str`
         Path to the original LRR app distribution bundle for Windows.
@@ -67,9 +71,10 @@ def pytest_addoption(parser: pytest.Parser):
         Seed (in numpy) to set for any randomized behavior.
     """
     parser.addoption("--build", action="store", default=None, help="Absolute path to docker build context for LANraragi.")
+    parser.addoption("--build-ref", action="store", default=None, help="Git ref (commit, branch, tag) to checkout before building. Requires --build.")
     parser.addoption("--image", action="store", default=None, help="LANraragi image to use.")
     parser.addoption("--git-url", action="store", default=None, help="Link to a LANraragi git repository (e.g. fork or branch).")
-    parser.addoption("--git-branch", action="store", default=None, help="Branch to checkout; if not supplied, uses the main branch.")
+    parser.addoption("--git-ref", action="store", default=None, help="Git ref to checkout; if not supplied, uses the default branch.")
     parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
     parser.addoption("--dockerfile", action="store", default=None, help="Path to a custom Dockerfile. If relative, resolved relative to --build. Cannot be combined with --git-url or --image.")
     parser.addoption("--windist", action="store", default=None, help="Path to the LRR app distribution for Windows.")

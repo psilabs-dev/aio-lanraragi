@@ -7,6 +7,7 @@ import io
 import logging
 import os
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -218,9 +219,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self._lrr_gid
 
     def __init__(
-            self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient, staging_dir: str,
+            self, build: str, image: str, git_url: str, git_ref: str, docker_client: docker.DockerClient, staging_dir: str,
             resource_prefix: str, port_offset: int,
-            dockerfile: str=None, docker_api: docker.APIClient=None, logger: logging.Logger | None=None,
+            build_ref: str=None, dockerfile: str=None, docker_api: docker.APIClient=None, logger: logging.Logger | None=None,
             global_run_id: int=None, is_allow_uploads: bool=True, is_force_build: bool=False
     ):
 
@@ -236,10 +237,15 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.build_path = str(build_path)
         else:
             self.build_path = None
+        if build_ref is not None and self.build_path is None:
+            raise DeploymentException("--build-ref requires --build.")
+        self.build_ref = build_ref
+        self._original_build_path = self.build_path
+        self._worktree_dir: str | None = None
         self.image = image
         self.global_run_id = global_run_id
         self.git_url = git_url
-        self.git_branch = git_branch
+        self.git_ref = git_ref
         self._docker_client = docker_client
         self._docker_api = docker_api
         self._staging_dir = Path(staging_dir)
@@ -426,6 +432,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         )
 
         # >>>>> IMAGE PREPARATION >>>>>
+        if self.build_ref and self._original_build_path:
+            self._setup_worktree(self._original_build_path, self.build_ref)
+
         image_id = self.lrr_image_name
         redis_conf_src: Path | None = None
         if build_path := self.build_path:
@@ -439,8 +448,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.logger.debug(f"Cloning {self.git_url} to {tmpdir}...")
                 repo_dir = Path(tmpdir) / "LANraragi"
                 repo = Repo.clone_from(self.git_url, repo_dir)
-                if self.git_branch: # throws git.exc.GitCommandError if branch does not exist.
-                    repo.git.checkout(self.git_branch)
+                if self.git_ref: # throws git.exc.GitCommandError if ref does not exist.
+                    repo.git.checkout(self.git_ref)
                 self._build_docker_image(repo.working_dir, force=True)
                 conf_in_repo = Path(repo.working_dir) / "tools" / "build" / "docker" / "redis.conf"
                 if conf_in_repo.exists():
@@ -674,6 +683,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Remove all resources and close all closable resources/clients/connections.
         """
         self._reset_docker_test_env(remove_data=remove_data)
+        self._cleanup_worktree()
         if hasattr(self, "_redis_client") and self._redis_client is not None:
             self._redis_client.close()
         if self._docker_api:
@@ -857,6 +867,46 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         build_time = time.time() - build_start
         self.logger.info(f"LRR image {image_id} build complete: time {build_time}s")
         return
+
+    def _setup_worktree(self, repo_path: str, ref: str):
+        """
+        Create a temporary git worktree at the given ref and update self.build_path to point to it.
+
+        Raises:
+            DeploymentException: if the ref cannot be resolved or worktree creation fails.
+        """
+        try:
+            subprocess.run(
+                ["git", "-C", repo_path, "rev-parse", "--verify", f"{ref}^{{commit}}"],
+                check=True, capture_output=True, text=True
+            )
+        except subprocess.CalledProcessError:
+            raise DeploymentException(f"Git ref '{ref}' not found in repository at {repo_path}.")
+
+        worktree_dir = tempfile.mkdtemp(prefix="aio_lrr_build_")
+        self.logger.debug(f"Creating worktree at {worktree_dir} for ref {ref}.")
+        subprocess.run(
+            ["git", "-C", repo_path, "worktree", "add", "--detach", worktree_dir, ref],
+            check=True, capture_output=True, text=True
+        )
+        self._worktree_dir = worktree_dir
+        self.build_path = worktree_dir
+
+    def _cleanup_worktree(self):
+        """
+        Remove the temporary worktree and restore self.build_path to the original value.
+        """
+        if self._worktree_dir is None:
+            return
+        self.logger.debug(f"Removing worktree at {self._worktree_dir}.")
+        subprocess.run(
+            ["git", "-C", self._original_build_path, "worktree", "remove", "--force", self._worktree_dir],
+            capture_output=True, text=True
+        )
+        if Path(self._worktree_dir).exists():
+            shutil.rmtree(self._worktree_dir)
+        self.build_path = self._original_build_path
+        self._worktree_dir = None
 
     def _pull_docker_image_if_not_exists(self, image: str, force: bool=False):
         """

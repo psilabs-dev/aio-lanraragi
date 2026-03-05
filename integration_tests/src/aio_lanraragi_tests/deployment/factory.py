@@ -36,9 +36,10 @@ def generate_deployment(
             # to run homebrew integration tests.
 
             build_path: str = request.config.getoption("--build")
+            build_ref: str = request.config.getoption("--build-ref")
             image: str = request.config.getoption("--image")
             git_url: str = request.config.getoption("--git-url")
-            git_branch: str = request.config.getoption("--git-branch")
+            git_ref: str = request.config.getoption("--git-ref")
             dockerfile: str = request.config.getoption("--dockerfile")
             use_docker_api: bool = request.config.getoption("--docker-api")
             staging_dir: str = request.config.getoption("--staging")
@@ -49,8 +50,8 @@ def generate_deployment(
             docker_client = docker.from_env()
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
             environment = DockerLRRDeploymentContext(
-                build_path, image, git_url, git_branch, docker_client, staging_dir, resource_prefix, port_offset,
-                dockerfile=dockerfile, docker_api=docker_api,
+                build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
+                build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
                 global_run_id=global_run_id, is_allow_uploads=True,
                 logger=logger
             )
