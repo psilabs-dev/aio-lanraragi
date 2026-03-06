@@ -13,16 +13,121 @@ import playwright.async_api
 import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.archive import (
+    ExtractArchiveRequest,
+    GetArchiveMetadataRequest,
+    GetArchivePageRequest,
+)
 
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
     assert_no_spinner,
+    get_image_bytes_from_responses,
 )
 
 LOGGER = logging.getLogger(__name__)
 
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+async def test_slideshow(
+    lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+):
+    """
+    Tests basic slideshow functionality.
+
+    1. Uploads 1 archives to LRR
+    2. Opens archive (5 pages)
+    3. Adjust slideshow duration to 1s
+    3. Start slideshow mode with 1s duration per page
+    4. Wait 9 seconds
+    5. Expect the final page (check page count + image bytes hash equal)
+    6. Check reading progress is complete via API (slideshow affects reading progress)
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_title = "test archive title"
+        archive_name = "test archive name"
+        archive_path = create_archive_file(Path(tmpdir), archive_name, num_pages=5)
+        response, error = await upload_archive(
+            lrr_client,
+            archive_path,
+            archive_path.name,
+            semaphore,
+            title=archive_title,
+            tags="",
+        )
+        assert not error, f"Upload failed (status {error.status}): {error.error}"
+        arcid = response.arcid
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await browser.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}")
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+
+            # configure slideshow duration
+            LOGGER.info("Configuring slideshow duration to 1s")
+            await page.keyboard.press("o") # open options
+            await page.locator("#settingsOverlay").wait_for(state="visible")
+            header = await page.locator("#settingsOverlay h2.ih").first.text_content()
+            assert header.strip() == "Reader Options", f"Expected 'Reader Options' header, got {header!r}"
+            await page.locator("#auto-next-page-input").fill("1")
+            await page.locator("#auto-next-page-apply").click()
+            await page.keyboard.press("Tab") # blur input so keyboard shortcuts work
+            await page.keyboard.press("o") # close options
+            await page.locator("#settingsOverlay").wait_for(state="hidden")
+
+            LOGGER.info("Starting slideshow with keypress n")
+            await page.keyboard.press("n")
+
+            LOGGER.info("Waiting for 9 seconds...")
+            await page.wait_for_timeout(9000)
+
+            # Verify slideshow landed on the final page.
+            current_page_text = await page.locator("span.current-page").first.text_content()
+            assert current_page_text.strip() == "5", f"Expected current page to be 5, got {current_page_text!r}"
+
+            # Get displayed image bytes from the captured browser responses.
+            img_src = await page.locator("#img").get_attribute("src")
+            browser_image_bytes = await get_image_bytes_from_responses(responses, img_src)
+
+            # Get 5th page image bytes via API.
+            response, error = await lrr_client.archive_api.extract_archive(ExtractArchiveRequest(arcid=arcid))
+            assert not error, f"Extract failed (status {error.status}): {error.error}"
+            response, error = await lrr_client.archive_api.get_archive_page(GetArchivePageRequest(page_url=response.pages[-1]))
+            assert not error, f"Failed to download last page (status {error.status}): {error.error}"
+
+            assert browser_image_bytes == response.data, "Browser image bytes do not match API page bytes for the last page."
+
+            response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+            assert response.progress == 5, "Archive reading progress is not updated to last page after slideshow."
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
