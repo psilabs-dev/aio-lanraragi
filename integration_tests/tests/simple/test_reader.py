@@ -10,6 +10,7 @@ from pathlib import Path
 
 import playwright
 import playwright.async_api
+import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
 
@@ -37,7 +38,6 @@ async def test_webkit_reader_preload(
     the reader should serve the already preloaded image without re-fetching the
     same page image URL over the network.
     """
-    archive_title = "Safari Preload Regression Archive"
 
     # >>>>> TEST CONNECTION STAGE >>>>>
     _, error = await lrr_client.misc_api.get_server_info()
@@ -46,14 +46,16 @@ async def test_webkit_reader_preload(
 
     # >>>>> UPLOAD STAGE >>>>>
     with tempfile.TemporaryDirectory() as tmpdir:
-        archive_path = create_archive_file(Path(tmpdir), "safari-preload-regression", num_pages=6)
+        archive_title = "test archive title"
+        archive_name = "test archive name"
+        archive_path = create_archive_file(Path(tmpdir), archive_name, num_pages=6)
         response, error = await upload_archive(
             lrr_client,
             archive_path,
             archive_path.name,
             semaphore,
             title=archive_title,
-            tags="safari,preload,regression",
+            tags="",
         )
         assert not error, f"Upload failed (status {error.status}): {error.error}"
         arcid = response.arcid
@@ -127,9 +129,6 @@ async def test_double_page_navigation(
     Feature regression check:
     - PR: https://github.com/Difegue/LANraragi/pull/1459
     """
-    archive_title = "Double Page Navigation Archive"
-    archive_name = "dbl-nav"
-
     # >>>>> TEST CONNECTION STAGE >>>>>
     _, error = await lrr_client.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
@@ -138,6 +137,8 @@ async def test_double_page_navigation(
 
     # >>>>> UPLOAD STAGE >>>>>
     with tempfile.TemporaryDirectory() as tmpdir:
+        archive_title = "test archive title"
+        archive_name = "test archive name"
         archive_path = create_archive_file(Path(tmpdir), archive_name, num_pages=6)
         response, error = await upload_archive(
             lrr_client,
@@ -145,7 +146,7 @@ async def test_double_page_navigation(
             archive_path.name,
             semaphore,
             title=archive_title,
-            tags="double-page,navigation",
+            tags="",
         )
         assert not error, f"Upload failed (status {error.status}): {error.error}"
         arcid = response.arcid
@@ -237,10 +238,6 @@ async def test_handler_resource_management(
     After several navigation cycles revisiting the same pages, each
     image element should carry at most one 'load' event handler.
     """
-    archive_title = "Handler Resource Management Archive"
-    archive_name = "handler-res"
-    num_cycles = 4
-
     # >>>>> TEST CONNECTION STAGE >>>>>
     _, error = await lrr_client.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
@@ -249,6 +246,8 @@ async def test_handler_resource_management(
 
     # >>>>> UPLOAD STAGE >>>>>
     with tempfile.TemporaryDirectory() as tmpdir:
+        archive_title = "test archive title"
+        archive_name = "test archive name"
         archive_path = create_archive_file(Path(tmpdir), archive_name, num_pages=6)
         response, error = await upload_archive(
             lrr_client,
@@ -293,6 +292,7 @@ async def test_handler_resource_management(
             # Each cycle: page 0 -> page 1 -> page 0.
             # If handlers accumulate, page 0's Image object will gain one
             # additional 'load' handler per revisit.
+            num_cycles = 4
             for cycle in range(num_cycles):
                 LOGGER.info(f"Navigation cycle {cycle + 1}/{num_cycles}: forward to page 1.")
                 await page.keyboard.press("ArrowRight")
