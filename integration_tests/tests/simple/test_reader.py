@@ -108,7 +108,7 @@ async def test_webkit_reader_preload(
                 assert response.url != prefetched_url, f"Detected URL refetch for prefetched page during page turn: {prefetched_url}"
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
         finally:
             await bc.close()
             await browser.close()
@@ -218,7 +218,7 @@ async def test_double_page_navigation(
             assert img_dp_src.endswith(expected_page_path(2)), f"#img_doublepage expected {expected_page_path(2)}, got src={img_dp_src!r}"
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
         finally:
             await bc.close()
             await browser.close()
@@ -344,7 +344,7 @@ async def test_handler_resource_management(
             )
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
         finally:
             await bc.close()
             await browser.close()

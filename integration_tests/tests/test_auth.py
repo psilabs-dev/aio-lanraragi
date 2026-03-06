@@ -286,7 +286,7 @@ async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploym
 
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
         finally:
             await bc.close()
             await browser.close()
@@ -328,7 +328,7 @@ async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploym
 
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
         finally:
             await bc.close()
             await browser.close()
@@ -389,7 +389,7 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
 
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
         finally:
             await bc.close()
             await browser.close()
@@ -416,7 +416,7 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
 
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
         finally:
             await bc.close()
             await browser.close()

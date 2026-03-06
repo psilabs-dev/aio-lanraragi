@@ -36,12 +36,20 @@ async def assert_browser_responses_ok(responses: list[playwright.async_api._gene
         elif status >= 400:
             logger.warning(f"Status {status} with {response.request.method} {response.url}")
 
-async def assert_console_logs_ok(console_evts: list[playwright.async_api._generated.ConsoleMessage]):
+async def assert_console_logs_ok(
+        console_evts: list[playwright.async_api._generated.ConsoleMessage],
+        lrr_base_url: str
+):
     """
-    Assert that all console logs captured during a Playwright browser session were not errors.
+    Assert that all LRR console logs captured during a Playwright browser session were not errors.
     """
 
     for evt in console_evts:
+        if (url := evt.location.get("url")) and not url.startswith(lrr_base_url):
+            LOGGER.debug(f"Skipping non-LRR console log: {url}")
+            continue
+        LOGGER.info(f"Console: {evt.text}")
+
         assert evt.type != "error", f"Console logged at error level: {evt.text}"
 
 async def assert_no_spinner(page: playwright.async_api.Page, timeout_ms: int = 3000):
