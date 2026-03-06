@@ -21,7 +21,7 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_STAGING_DIR = str(Path.cwd() / ".staging")
 
 def get_deployment(
-    build_path: str=None, image: str=None, git_url: str=None, git_branch: str=None, dockerfile: str=None,
+    build_path: str=None, build_ref: str=None, image: str=None, git_url: str=None, git_ref: str=None, dockerfile: str=None,
     docker_api: docker.APIClient=None, staging_dir: str=None
 ) -> DockerLRRDeploymentContext:
     """
@@ -39,17 +39,17 @@ def get_deployment(
         raise DeploymentException("--dockerfile cannot be combined with --image.")
     docker_client = docker.from_env()
     environment = DockerLRRDeploymentContext(
-        build_path, image, git_url, git_branch, docker_client, staging_dir, STAGING_RESOURCE_PREFIX, STAGING_PORT_OFFSET,
-        dockerfile=dockerfile, docker_api=docker_api,
+        build_path, image, git_url, git_ref, docker_client, staging_dir, STAGING_RESOURCE_PREFIX, STAGING_PORT_OFFSET,
+        build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
         global_run_id=0, is_allow_uploads=True, is_force_build=True
     )
     return environment
 
 def up(
-    image: str=None, git_url: str=None, git_branch: str=None, build: str=None, dockerfile: str=None,
+    image: str=None, git_url: str=None, git_ref: str=None, build: str=None, build_ref: str=None, dockerfile: str=None,
     docker_api: docker.APIClient=None, staging_dir: str=None, with_nofunmode: bool=False
 ):
-    d = get_deployment(build_path=build, image=image, git_url=git_url, git_branch=git_branch, dockerfile=dockerfile, docker_api=docker_api, staging_dir=staging_dir)
+    d = get_deployment(build_path=build, build_ref=build_ref, image=image, git_url=git_url, git_ref=git_ref, dockerfile=dockerfile, docker_api=docker_api, staging_dir=staging_dir)
     d.setup(with_api_key=True, with_nofunmode=with_nofunmode)
     print("LRR staging environment setup complete.")
     sys.exit(0)
@@ -85,8 +85,9 @@ def console():
     up_parser = subparsers.add_parser("up", help="Create and start staging environment")
     up_parser.add_argument("--image", help="Docker image to use")
     up_parser.add_argument("--git-url", help="Git URL to use")
-    up_parser.add_argument("--git-branch", help="Git branch to use")
-    up_parser.add_argument("--build", help="Build path to use")
+    up_parser.add_argument("--git-ref", help="Git ref (branch, tag, commit) to checkout from git URL")
+    up_parser.add_argument("--build", help="Absolute build path to use")
+    up_parser.add_argument("--build-ref", help="Git ref (commit, branch, tag) to checkout before building. Requires --build.")
     up_parser.add_argument("--dockerfile", help="Path to a custom Dockerfile. If relative, resolved relative to --build. Cannot be combined with --git-url or --image.")
     up_parser.add_argument("--docker-api", action='store_true', help="Stream docker build logs")
     up_parser.add_argument("--nofunmode", action="store_true", help="Start LRR with nofunmode (default false).")
@@ -128,8 +129,8 @@ def console():
                 if args.docker_api:
                     docker_api = docker.APIClient(base_url="unix://var/run/docker.sock")
                 up(
-                    image=args.image, git_url=args.git_url, git_branch=args.git_branch, build=args.build,
-                    dockerfile=args.dockerfile, docker_api=docker_api, staging_dir=args.staging,
+                    image=args.image, git_url=args.git_url, git_ref=args.git_ref, build=args.build,
+                    build_ref=args.build_ref, dockerfile=args.dockerfile, docker_api=docker_api, staging_dir=args.staging,
                     with_nofunmode=args.nofunmode
                 )
             case "down":

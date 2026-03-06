@@ -7,6 +7,8 @@ import io
 import logging
 import os
 import shutil
+import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -22,7 +24,10 @@ import docker.models.volumes
 from git import Repo
 
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_REDIS_PORT
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.base import (
+    AbstractLRRDeploymentContext,
+    PluginPathsT,
+)
 from aio_lanraragi_tests.exceptions import DeploymentException
 
 DEFAULT_REDIS_DOCKER_TAG = "redis:7.2.4"
@@ -150,6 +155,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self.staging_dir / dirname
 
     @property
+    def plugins_root_dir(self) -> Path:
+        dirname = self.resource_prefix + "plugins"
+        return self.staging_dir / dirname
+
+    @property
     def docker_client(self) -> docker.DockerClient:
         return self._docker_client
 
@@ -171,10 +181,17 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def dockerfile_path(self) -> Path | None:
         """
         Customizable path to dockerfile. Defaults to `tools/build/docker/Dockerfile`.
+
+        Priority:
+            1. manually passed dockerfile path
+            2. path associated to the manually passed build path
+            3. None (assumes built off git URL; handle later)
         """
         if self._dockerfile_path is not None:
             return self._dockerfile_path
-        return Path(self.build_path) / "tools" / "build" / "docker" / "Dockerfile"
+        if self.build_path is not None:
+            return Path(self.build_path) / "tools" / "build" / "docker" / "Dockerfile"
+        return None
 
     @property
     def redis_container_conf_path(self) -> str:
@@ -209,20 +226,33 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self._lrr_gid
 
     def __init__(
-            self, build: str, image: str, git_url: str, git_branch: str, docker_client: docker.DockerClient, staging_dir: str,
+            self, build: str, image: str, git_url: str, git_ref: str, docker_client: docker.DockerClient, staging_dir: str,
             resource_prefix: str, port_offset: int,
-            dockerfile: str=None, docker_api: docker.APIClient=None, logger: logging.Logger | None=None,
+            build_ref: str=None, dockerfile: str=None, docker_api: docker.APIClient=None, logger: logging.Logger | None=None,
             global_run_id: int=None, is_allow_uploads: bool=True, is_force_build: bool=False
     ):
 
         self.resource_prefix = resource_prefix
         self.port_offset = port_offset
 
-        self.build_path = build
+        if build is not None:
+            build_path = Path(build)
+            if not build_path.is_absolute():
+                raise DeploymentException(
+                    "--build must be an absolute path to the LANraragi project root."
+                )
+            self.build_path = str(build_path)
+        else:
+            self.build_path = None
+        if build_ref is not None and self.build_path is None:
+            raise DeploymentException("--build-ref requires --build.")
+        self.build_ref = build_ref
+        self._original_build_path = self.build_path
+        self._worktree_dir: str | None = None
         self.image = image
         self.global_run_id = global_run_id
         self.git_url = git_url
-        self.git_branch = git_branch
+        self.git_ref = git_ref
         self._docker_client = docker_client
         self._docker_api = docker_api
         self._staging_dir = Path(staging_dir)
@@ -297,6 +327,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.warning("LANraragi container not available for log extraction")
             return b"No LANraragi container available"
 
+    @override
     def get_redis_logs(self, tail: int=100) -> bytes:
         """
         Get the Redis container logs.
@@ -308,9 +339,32 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             return b"No Redis container available"
 
     @override
+    def apply_plugins(self):
+        plugins_root_dir = self.plugins_root_dir
+        if plugins_root_dir.exists():
+            shutil.rmtree(plugins_root_dir)
+        plugins_root_dir.mkdir(parents=True, exist_ok=False)
+
+        for plugin_type, plugin_paths in self.plugin_paths.items():
+            if not plugin_paths:
+                continue
+
+            source_type_dir = plugins_root_dir / plugin_type
+            source_type_dir.mkdir(parents=True, exist_ok=False)
+
+            # Keep test plugins in a dedicated namespace to avoid collisions.
+            testing_dir = source_type_dir / "Testing"
+            testing_dir.mkdir(parents=True, exist_ok=False)
+            for plugin_path in plugin_paths:
+                source = Path(plugin_path)
+                if not source.exists():
+                    raise FileNotFoundError(f"Plugin path does not exist: {source}")
+                shutil.copy2(source, testing_dir / source.name)
+
+    @override
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
-        environment: dict[str, str]={},
+        environment: dict[str, str]={}, plugin_paths: PluginPathsT={},
         test_connection_max_retries: int=4
     ):
         """
@@ -332,6 +386,18 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             raise FileNotFoundError("Staging directory not provided. Use --staging to specify a host directory for bind mounts.")
         if not staging_dir.exists():
             raise FileNotFoundError(f"Staging directory {staging_dir} not found.")
+        self.plugin_paths = plugin_paths
+        self.apply_plugins()
+
+        plugin_volumes: dict[str, dict[str, str]] = {}
+        for plugin_type, paths in self.plugin_paths.items():
+            if not paths:
+                continue
+            source_testing_dir = self.plugins_root_dir / plugin_type / "Testing"
+            plugin_volumes[str(source_testing_dir)] = {
+                "bind": f"/home/koyomi/lanraragi/lib/LANraragi/Plugin/{plugin_type}/Testing",
+                "mode": "ro",
+            }
 
         contents_dir = self.archives_dir
         thumb_dir = self.thumb_dir
@@ -358,6 +424,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.debug(f"Creating Redis dir: {redis_dir}")
             redis_dir.mkdir(parents=True, exist_ok=False)
 
+            # Brief delay for VirtioFS to propagate the
+            # newly created directory before it is used as a bind mount source.
+            if sys.platform == "darwin":
+                time.sleep(1)
+
         # log the setup resource allocations for user to see
         # the docker image is not included, haven't decided how to classify it yet.
         self.logger.info(
@@ -368,6 +439,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         )
 
         # >>>>> IMAGE PREPARATION >>>>>
+        if self.build_ref and self._original_build_path:
+            self._setup_worktree(self._original_build_path, self.build_ref)
+
         image_id = self.lrr_image_name
         redis_conf_src: Path | None = None
         if build_path := self.build_path:
@@ -381,8 +455,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.logger.debug(f"Cloning {self.git_url} to {tmpdir}...")
                 repo_dir = Path(tmpdir) / "LANraragi"
                 repo = Repo.clone_from(self.git_url, repo_dir)
-                if self.git_branch: # throws git.exc.GitCommandError if branch does not exist.
-                    repo.git.checkout(self.git_branch)
+                if self.git_ref: # throws git.exc.GitCommandError if ref does not exist.
+                    repo.git.checkout(self.git_ref)
                 self._build_docker_image(repo.working_dir, force=True)
                 conf_in_repo = Path(repo.working_dir) / "tools" / "build" / "docker" / "redis.conf"
                 if conf_in_repo.exists():
@@ -399,6 +473,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.docker_client.images.get(image).tag(image_id)
             redis_conf_src = self._extract_redis_conf_from_image(image_id)
 
+        # TODO: why does this exist
         self._applied_redis_conf_src = redis_conf_src
 
         # pull redis
@@ -493,6 +568,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if not needs_recreate_lrr and set(current_env_list) != set(lrr_environment):
                 self.logger.debug("LRR environment differs from desired; removing existing container for recreation.")
                 needs_recreate_lrr = True
+            if not needs_recreate_lrr and plugin_volumes:
+                self.logger.debug("Test-time plugin mounts are configured; removing existing container for recreation.")
+                needs_recreate_lrr = True
             if needs_recreate_lrr:
                 self.logger.debug("LRR Image hash has been updated: removing existing container.")
                 self.lrr_container.stop(timeout=1)
@@ -504,13 +582,15 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             create_lrr_container = True
         if create_lrr_container:
             self.logger.debug(f"Creating LRR container: {self.lrr_container_name}")
+            lrr_volumes = {
+                str(contents_dir): {"bind": "/home/koyomi/lanraragi/content", "mode": "rw"},
+                str(thumb_dir): {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"},
+                str(logs_dir): {"bind": "/home/koyomi/lanraragi/log", "mode": "rw"},
+            }
+            lrr_volumes.update(plugin_volumes)
             self.lrr_container = self.docker_client.containers.create(
                 image_id, hostname=lrr_container_name, name=lrr_container_name, detach=True, network=network_name, ports=lrr_ports, environment=lrr_environment,
-                volumes={
-                    str(contents_dir): {"bind": "/home/koyomi/lanraragi/content", "mode": "rw"},
-                    str(thumb_dir): {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"},
-                    str(logs_dir): {"bind": "/home/koyomi/lanraragi/log", "mode": "rw"},
-                }
+                volumes=lrr_volumes
             )
             self.logger.debug("LRR container created.")
 
@@ -567,11 +647,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         WARNING: stopping container does NOT necessarily make the corresponding ports available.
         It is possible that the docker daemon still reserves the port, and may not free it until
         the underlying network configurations are updated, which can take up to a minute. See:
-        
+
         - https://docs.docker.com/engine/network/packet-filtering-firewalls
         - https://stackoverflow.com/questions/63467759/close-docker-port-when-container-is-stopped
 
-        All this is to say, do not use port availability as an indicator that a container is 
+        All this is to say, do not use port availability as an indicator that a container is
         successfully stopped.
         """
         if self.lrr_container:
@@ -610,6 +690,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Remove all resources and close all closable resources/clients/connections.
         """
         self._reset_docker_test_env(remove_data=remove_data)
+        self._cleanup_worktree()
         if hasattr(self, "_redis_client") and self._redis_client is not None:
             self._redis_client.close()
         if self._docker_api:
@@ -685,7 +766,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         To handle potential FS stale cache issues, a forceful removal will be attempted within containers,
         before they are shut down and an external bind mount source removal is invoked.
-        
+
         If something goes wrong during setup, the environment will be reset and the data should be removed.
         """
         if remove_data and self.lrr_container:
@@ -729,6 +810,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if self.logs_dir.exists():
                 shutil.rmtree(self.logs_dir)
                 self.logger.debug(f"Removed logs directory: {self.logs_dir}")
+            if self.plugins_root_dir.exists():
+                shutil.rmtree(self.plugins_root_dir)
+                self.logger.debug(f"Removed plugins directory: {self.plugins_root_dir}")
             redis_conf_staging = self.staging_dir / (self.resource_prefix + "redis.conf")
             if redis_conf_staging.exists():
                 redis_conf_staging.unlink()
@@ -745,7 +829,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         Args:
             build_path: The path to the build directory.
             force: Whether to force the build (e.g. even if the image already exists).
-        
+
         Raises:
             FileNotFoundError: docker image or build path not found
             DeploymentException: if docker image build fails with log stream output
@@ -766,7 +850,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         if not Path(build_path).exists():
             raise FileNotFoundError(f"Build path {build_path} does not exist!")
 
-        dockerfile_path = self._dockerfile_path or (Path(build_path) / "tools" / "build" / "docker" / "Dockerfile")
+        dockerfile_path = self.dockerfile_path or Path(build_path) / "tools" / "build" / "docker" / "Dockerfile"
         if not dockerfile_path.exists():
             raise FileNotFoundError(f"Dockerfile {dockerfile_path} does not exist!")
 
@@ -790,6 +874,46 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         build_time = time.time() - build_start
         self.logger.info(f"LRR image {image_id} build complete: time {build_time}s")
         return
+
+    def _setup_worktree(self, repo_path: str, ref: str):
+        """
+        Create a temporary git worktree at the given ref and update self.build_path to point to it.
+
+        Raises:
+            DeploymentException: if the ref cannot be resolved or worktree creation fails.
+        """
+        try:
+            subprocess.run(
+                ["git", "-C", repo_path, "rev-parse", "--verify", f"{ref}^{{commit}}"],
+                check=True, capture_output=True, text=True
+            )
+        except subprocess.CalledProcessError:
+            raise DeploymentException(f"Git ref '{ref}' not found in repository at {repo_path}.")
+
+        worktree_dir = tempfile.mkdtemp(prefix="aio_lrr_build_")
+        self.logger.debug(f"Creating worktree at {worktree_dir} for ref {ref}.")
+        subprocess.run(
+            ["git", "-C", repo_path, "worktree", "add", "--detach", worktree_dir, ref],
+            check=True, capture_output=True, text=True
+        )
+        self._worktree_dir = worktree_dir
+        self.build_path = worktree_dir
+
+    def _cleanup_worktree(self):
+        """
+        Remove the temporary worktree and restore self.build_path to the original value.
+        """
+        if self._worktree_dir is None:
+            return
+        self.logger.debug(f"Removing worktree at {self._worktree_dir}.")
+        subprocess.run(
+            ["git", "-C", self._original_build_path, "worktree", "remove", "--force", self._worktree_dir],
+            capture_output=True, text=True
+        )
+        if Path(self._worktree_dir).exists():
+            shutil.rmtree(self._worktree_dir)
+        self.build_path = self._original_build_path
+        self._worktree_dir = None
 
     def _pull_docker_image_if_not_exists(self, image: str, force: bool=False):
         """

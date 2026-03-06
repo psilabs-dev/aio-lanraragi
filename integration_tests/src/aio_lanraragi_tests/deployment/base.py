@@ -4,6 +4,7 @@ import logging
 import shutil
 import time
 from pathlib import Path
+from typing import Literal
 
 import aiohttp
 import redis
@@ -13,6 +14,8 @@ from lanraragi.clients.client import LRRClient
 from aio_lanraragi_tests.common import DEFAULT_LRR_PORT, DEFAULT_REDIS_PORT
 from aio_lanraragi_tests.exceptions import DeploymentException
 from aio_lanraragi_tests.log_parse import parse_lrr_logs
+
+PluginPathsT = dict[Literal["Download", "Login", "Metadata", "Scripts"], list[str]]
 
 
 class AbstractLRRDeploymentContext(abc.ABC):
@@ -101,7 +104,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
         Staging directory handles all the files that belong to this deployment.
         This directory is supplied by the user, which should represent an isolated deployment environment.
         The reason we need a staging directory, is that we want to reproduce the docker effect of an isolated
-        workspace, where each directory within this parent is a volume which can be cleaned up, giving us a 
+        workspace, where each directory within this parent is a volume which can be cleaned up, giving us a
         volume inventory when running tests.
 
         Staging dir will have the following structure. When tearing down and removing everything, will
@@ -163,6 +166,10 @@ class AbstractLRRDeploymentContext(abc.ABC):
         return self.logs_dir / "shinobu.log"
 
     @property
+    def mojo_logs_path(self) -> Path:
+        return self.logs_dir / "mojo.log"
+
+    @property
     def redis_dir(self) -> Path:
         """
         Path to Redis database directory.
@@ -179,18 +186,31 @@ class AbstractLRRDeploymentContext(abc.ABC):
             self._redis_client = redis.Redis(host="127.0.0.1", port=self.redis_port, decode_responses=True)
         return self._redis_client
 
+    @property
+    def plugin_paths(self) -> PluginPathsT:
+        """
+        Test-time third party plugins
+        """
+        if not hasattr(self, "_plugin_paths"):
+            self._plugin_paths = {}
+        return self._plugin_paths
+
+    @plugin_paths.setter
+    def plugin_paths(self, plugin_paths: PluginPathsT):
+        self._plugin_paths = plugin_paths
+
     @abc.abstractmethod
     def setup(
         self, with_api_key: bool=False, with_nofunmode: bool=False, enable_cors: bool=False, lrr_debug_mode: bool=False,
-        environment: dict[str, str]={},
+        environment: dict[str, str]={}, plugin_paths: PluginPathsT={},
         test_connection_max_retries: int=4
     ):
         """
         Main entrypoint to setting up a LRR environment.
-        
+
         Performs all setup logic for a requirement, including creating directories and files, volumes, networks,
         and other resources required for a working LRR environment.
-        
+
         Does not, and will not perform any cleanup function. Use teardown or another API for that logic.
 
         Args:
@@ -199,6 +219,8 @@ class AbstractLRRDeploymentContext(abc.ABC):
             `enable_cors`: whether to enable CORS headers for the Client API
             `lrr_debug_mode`: whether to enable debug mode for the LRR application
             `environment`: additional environment variables map to pass through to LRR during startup time
+            `plugin_paths`: a list of (absolute) plugin paths by plugin type.
+                If plugins are provided: copies the assigned plugins over to the target directory.
             `test_connection_max_retries`: Number of attempts to connect to the LRR server. Usually resolves after 2, unless there are many files.
         """
 
@@ -246,7 +268,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
     def stop_lrr(self, timeout: int=10):
         """
         Stop the LRR server
-        
+
         Args:
             `timeout`: timeout in seconds.
         """
@@ -267,6 +289,21 @@ class AbstractLRRDeploymentContext(abc.ABC):
 
         Args:
             `tail`: max number of lines to keep from last line.
+        """
+
+    @abc.abstractmethod
+    def get_redis_logs(self, tail: int=100) -> bytes:
+        """
+        Get Redis logs as bytes.
+
+        Args:
+            `tail`: max number of lines to keep from last line.
+        """
+
+    @abc.abstractmethod
+    def apply_plugins(self):
+        """
+        Applies plugins to the LRR target plugins directory.
         """
 
     def get_redis_backup_dir(self, backup_id: str) -> Path:
@@ -372,6 +409,34 @@ class AbstractLRRDeploymentContext(abc.ABC):
         self.redis_client.select(2)
         self.redis_client.hset("LRR_CONFIG", "authprogress", "0")
 
+    def enable_openapi_bypass(self):
+        """
+        Disable OpenAPI request/response validation (bypass mode).
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "disableopenapi", "1")
+
+    def disable_openapi_bypass(self):
+        """
+        Enable OpenAPI request/response validation (normal mode).
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "disableopenapi", "0")
+
+    def enable_local_progress(self):
+        """
+        Enable local (client-side) progress tracking, disabling server-side progress tracking.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "localprogress", "1")
+
+    def disable_local_progress(self):
+        """
+        Disable local (client-side) progress tracking, re-enabling server-side progress tracking.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "localprogress", "0")
+
     def test_lrr_connection(self, port: int, test_connection_max_retries: int=4):
         """
         Test the LRR connection with retry and exponential backoff.
@@ -417,6 +482,8 @@ class AbstractLRRDeploymentContext(abc.ABC):
                 break
             except redis.exceptions.ConnectionError:
                 if retry_count >= max_retries:
+                    self.logger.error("Failed to connect to Redis! Dumping Redis logs...")
+                    self.display_redis_logs()
                     raise
                 time_to_sleep = 2 ** (retry_count + 1)
                 self.logger.warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
@@ -439,6 +506,51 @@ class AbstractLRRDeploymentContext(abc.ABC):
                 if line.strip():
                     self.logger.log(log_level, f"LRR: {line}")
 
+    def display_redis_logs(self, tail: int=100, log_level: int=logging.ERROR):
+        """
+        Display Redis logs to (error) output, used for debugging.
+
+        Args:
+            tail: show up to how many lines from the last output
+            log_level: integer value level of log (see logging module)
+        """
+        redis_logs = self.get_redis_logs(tail=tail)
+        if redis_logs:
+            log_text = redis_logs.decode('utf-8', errors='replace')
+            for line in log_text.split('\n'):
+                if line.strip():
+                    self.logger.log(log_level, f"Redis: {line}")
+
+    def _read_log_with_rotated_gzip(self, base_filename: str) -> str:
+        """
+        Read a log file and all compressed rotated variants in ascending rotation order.
+
+        Order:
+        - <base_filename>
+        - <base_filename>.1.gz
+        - <base_filename>.2.gz
+        - ...
+        """
+        parts: list[str] = []
+        log_path = self.logs_dir / base_filename
+        if log_path.exists():
+            with open(log_path) as f:
+                parts.append(f.read())
+
+        rotated_logs = list(self.logs_dir.glob(f"{base_filename}.*.gz"))
+
+        def parse_index(path: Path) -> int:
+            name = path.name
+            # expected format: <base_filename>.<idx>.gz
+            idx_str = name.split(".")[-2]
+            return int(idx_str)
+
+        for gz_path in sorted(rotated_logs, key=parse_index):
+            with gzip.open(gz_path, mode="rt", encoding="utf-8", errors="replace") as f:
+                parts.append(f.read())
+
+        return "".join(parts)
+
     def read_lrr_logs(self) -> str:
         """
         Read all lanraragi.log logs, including rotated ones, as a single string, in the order:
@@ -448,23 +560,18 @@ class AbstractLRRDeploymentContext(abc.ABC):
         - lanraragi.log.2.gz
         - ...
         """
-        parts: list[str] = []
-        if self.lanraragi_logs_path.exists():
-            with open(self.lanraragi_logs_path) as f:
-                parts.append(f.read())
+        return self._read_log_with_rotated_gzip("lanraragi.log")
 
-        rotated_logs = list(self.logs_dir.glob("lanraragi.log.*.gz"))
-        def parse_index(path: Path) -> int:
-            name = path.name
-            # expected format: lanraragi.log.<idx>.gz
-            idx_str = name.split(".")[-2]
-            return int(idx_str)
+    def read_mojo_logs(self) -> str:
+        """
+        Read all mojo.log logs, including rotated ones, as a single string, in the order:
 
-        for gz_path in sorted(rotated_logs, key=parse_index):
-            with gzip.open(gz_path, mode="rt", encoding="utf-8", errors="replace") as f:
-                parts.append(f.read())
-
-        return "".join(parts)
+        - mojo.log
+        - mojo.log.1.gz
+        - mojo.log.2.gz
+        - ...
+        """
+        return self._read_log_with_rotated_gzip("mojo.log")
 
     def read_log(self, log_file: str) -> str:
         """

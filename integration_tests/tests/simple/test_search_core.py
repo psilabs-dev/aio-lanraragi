@@ -41,7 +41,7 @@ async def test_xfail_catch_flakes(lrr_client: LRRClient, semaphore: asyncio.Sema
 async def test_search_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
     """
     Very basic functional test of the search API.
-    
+
     1. upload 100 archives
     2. search for 20 archives using the search API
     3. search for 20 archives using random search API

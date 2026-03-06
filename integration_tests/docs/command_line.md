@@ -29,14 +29,19 @@ Create and start environment with custom image:
 lrr-staging up --image myusername/customimage
 ```
 
-Create and start environment with specific git repo (with custom branch if specified):
+Create and start environment with specific git repo (with optional ref):
 ```sh
-lrr-staging up --git-url=https://github.com/difegue/LANraragi.git --git-branch=dev
+lrr-staging up --git-url=https://github.com/difegue/LANraragi.git --git-ref=dev
 ```
 
 Create and start environment with a local LANraragi project:
 ```sh
 lrr-staging up --build /path/to/LANraragi/project
+```
+
+Create and start environment from a local project at a specific git ref:
+```sh
+lrr-staging up --build /path/to/LANraragi/project --build-ref abc123
 ```
 
 ## `down` options

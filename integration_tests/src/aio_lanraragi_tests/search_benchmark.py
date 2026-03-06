@@ -72,11 +72,11 @@ def _mock_source_tag(arcidx: int) -> str:
     return f"source:www.example-lrr.org/id/{arcidx}/files"
 
 def get_deployment(
-    build_path: str=None, image: str=None, git_url: str=None, git_branch: str=None, docker_api: docker.APIClient=None, staging_dir: str=None
+    build_path: str=None, image: str=None, git_url: str=None, git_ref: str=None, docker_api: docker.APIClient=None, staging_dir: str=None
 ) -> DockerLRRDeploymentContext:
     docker_client = docker.from_env()
     environment = DockerLRRDeploymentContext(
-        build_path, image, git_url, git_branch, docker_client, staging_dir, DEFAULT_RESOURCE_PREFIX, DEFAULT_PORT_OFFSET, docker_api=docker_api,
+        build_path, image, git_url, git_ref, docker_client, staging_dir, DEFAULT_RESOURCE_PREFIX, DEFAULT_PORT_OFFSET, docker_api=docker_api,
         global_run_id=0, is_allow_uploads=True, is_force_build=True
     )
     return environment
@@ -90,11 +90,11 @@ def require_up(staging_dir: str) -> bool:
         return False
 
 def up(
-    image: str=None, git_url: str=None, git_branch: str=None, build: str=None, docker_api: docker.APIClient=None, staging_dir: str=None,
+    image: str=None, git_url: str=None, git_ref: str=None, build: str=None, docker_api: docker.APIClient=None, staging_dir: str=None,
     with_nofunmode: bool=False
 ):
     # increase number of retries since LRR is going to be busy with archive discovery.
-    d = get_deployment(build_path=build, image=image, git_url=git_url, git_branch=git_branch, docker_api=docker_api, staging_dir=staging_dir)
+    d = get_deployment(build_path=build, image=image, git_url=git_url, git_ref=git_ref, docker_api=docker_api, staging_dir=staging_dir)
     d.setup(with_api_key=True, with_nofunmode=with_nofunmode, test_connection_max_retries=8)
     print("LRR benchmarking environment setup complete.")
 
@@ -444,8 +444,8 @@ if __name__ == "__main__":
     setup_sp = subparsers.add_parser('up', help='Setup the LRR benchmark application.')
     setup_sp.add_argument("--image", help="Docker image to use")
     setup_sp.add_argument("--git-url", help="Git URL to use")
-    setup_sp.add_argument("--git-branch", help="Git branch to use")
-    setup_sp.add_argument("--build", help="Build path to use")
+    setup_sp.add_argument("--git-ref", help="Git ref (branch, tag, commit) to use")
+    setup_sp.add_argument("--build", help="Absolute build path to use")
     setup_sp.add_argument("--docker-api", action='store_true', help="Stream docker build logs")
     setup_sp.add_argument("--nofunmode", action="store_true", help="Start LRR with nofunmode (default false).")
     setup_sp.add_argument("--staging", default=DEFAULT_STAGING_DIR, help="Path to staging directory.")
@@ -476,7 +476,7 @@ if __name__ == "__main__":
                 if args.docker_api:
                     docker_api = docker.APIClient(base_url="unix://var/run/docker.sock")
                 up(
-                    image=args.image, git_url=args.git_url, git_branch=args.git_branch, build=args.build, docker_api=docker_api, staging_dir=args.staging,
+                    image=args.image, git_url=args.git_url, git_ref=args.git_ref, build=args.build, docker_api=docker_api, staging_dir=args.staging,
                     with_nofunmode=args.nofunmode
                 )
             case 'clean':

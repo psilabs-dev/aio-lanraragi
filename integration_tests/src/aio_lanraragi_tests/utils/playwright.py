@@ -43,3 +43,10 @@ async def assert_console_logs_ok(console_evts: list[playwright.async_api._genera
 
     for evt in console_evts:
         assert evt.type != "error", f"Console logged at error level: {evt.text}"
+
+async def assert_no_spinner(page: playwright.async_api.Page, timeout_ms: int = 3000):
+    """Assert that the reader loading spinner is gone within timeout_ms."""
+    await page.wait_for_function(
+        """() => !document.querySelector('#i3.loading')""",
+        timeout=timeout_ms,
+    )

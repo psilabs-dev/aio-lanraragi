@@ -41,14 +41,19 @@ Run integration tests with a custom Docker image:
 pytest tests --image myusername/customimage
 ```
 
-Run integration tests with a Docker image built off a LANraragi git repo (with a custom branch if specified):
+Run integration tests with a Docker image built off a LANraragi git repo (with an optional ref):
 ```sh
-pytest tests --git-url=https://github.com/difegue/LANraragi.git --git-branch=dev
+pytest tests --git-url=https://github.com/difegue/LANraragi.git --git-ref=dev
 ```
 
 Run integration tests with a Docker image built off a path to a local LANraragi project:
 ```sh
 pytest tests --build /path/to/LANraragi/project
+```
+
+Run integration tests from a local project at a specific git ref (commit, branch, or tag):
+```sh
+pytest tests --build /path/to/LANraragi/project --build-ref abc123
 ```
 
 ### Windows Deployment
