@@ -394,7 +394,7 @@ async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semap
 
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
         finally:
             await bc.close()
             await browser.close()
