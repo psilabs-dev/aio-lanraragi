@@ -77,6 +77,12 @@ class DownloadArchiveRequest(LanraragiRequest):
 class DownloadArchiveResponse(LanraragiResponse):
     data: bytes = Field(...)
 
+class GetArchivePageRequest(LanraragiRequest):
+    page_url: str = Field(...)
+
+class GetArchivePageResponse(LanraragiResponse):
+    data: bytes = Field(...)
+
 class ExtractArchiveRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
     force: bool | None = Field(None)
@@ -152,6 +158,8 @@ __all__ = [
     "QueueArchiveThumbnailExtractionResponse",
     "DownloadArchiveRequest",
     "DownloadArchiveResponse",
+    "GetArchivePageRequest",
+    "GetArchivePageResponse",
     "ExtractArchiveRequest",
     "ExtractArchiveResponse",
     "ClearNewArchiveFlagRequest",

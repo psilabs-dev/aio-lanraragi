@@ -1,5 +1,6 @@
 import http
 import json
+from urllib.parse import parse_qs, urlparse
 
 import aiohttp
 
@@ -25,6 +26,8 @@ from lanraragi.models.archive import (
     GetArchiveCategoriesResponse,
     GetArchiveMetadataRequest,
     GetArchiveMetadataResponse,
+    GetArchivePageRequest,
+    GetArchivePageResponse,
     GetArchiveTankoubonsRequest,
     GetArchiveTankoubonsResponse,
     GetArchiveThumbnailRequest,
@@ -137,6 +140,21 @@ class _ArchiveApiClient(_ApiClient):
         status, data = await self.api_context.download_file(url, self.headers)
         if status == 200:
             return (DownloadArchiveResponse(data=data), None)
+        return (None, _build_err_response(data, status))
+
+    async def get_archive_page(self, request: GetArchivePageRequest) -> _LRRClientResponse[GetArchivePageResponse]:
+        """
+        GET /api/archives/:id/page
+
+        Accepts a page URL entry from extract_archive's pages list.
+        """
+        full_url = self.api_context.build_url(request.page_url)
+        parsed = urlparse(full_url)
+        url = parsed._replace(query="", fragment="").geturl()
+        params = parse_qs(parsed.query)
+        status, data = await self.api_context.download_file(url, self.headers, params=params)
+        if status == 200:
+            return (GetArchivePageResponse(data=data), None)
         return (None, _build_err_response(data, status))
 
     async def extract_archive(self, request: ExtractArchiveRequest) -> _LRRClientResponse[ExtractArchiveResponse]:
