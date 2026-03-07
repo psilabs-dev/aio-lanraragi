@@ -55,7 +55,7 @@ async def test_slideshow(
     # >>>>> UPLOAD STAGE >>>>>
     with tempfile.TemporaryDirectory() as tmpdir:
         archive_title = "test archive title"
-        archive_name = "test archive name"
+        archive_name = "test-archive-name"
         archive_path = create_archive_file(Path(tmpdir), archive_name, num_pages=5)
         response, error = await upload_archive(
             lrr_client,
@@ -152,7 +152,7 @@ async def test_webkit_reader_preload(
     # >>>>> UPLOAD STAGE >>>>>
     with tempfile.TemporaryDirectory() as tmpdir:
         archive_title = "test archive title"
-        archive_name = "test archive name"
+        archive_name = "test-archive-name"
         archive_path = create_archive_file(Path(tmpdir), archive_name, num_pages=6)
         response, error = await upload_archive(
             lrr_client,
@@ -194,7 +194,7 @@ async def test_webkit_reader_preload(
             await page.wait_for_timeout(1000)
 
             # check that prefetch occurred.
-            next_page_url = f"/api/archives/{arcid}/page?path=safari-preload-regression-pg-2.png"
+            next_page_url = f"/api/archives/{arcid}/page?path={archive_name}-pg-2.png"
             prefetched_url = None
             for response in responses[:responses_before_page_turn]:
                 if response.request.method != "GET":
@@ -243,7 +243,7 @@ async def test_double_page_navigation(
     # >>>>> UPLOAD STAGE >>>>>
     with tempfile.TemporaryDirectory() as tmpdir:
         archive_title = "test archive title"
-        archive_name = "test archive name"
+        archive_name = "test-archive-name"
         archive_path = create_archive_file(Path(tmpdir), archive_name, num_pages=6)
         response, error = await upload_archive(
             lrr_client,
@@ -259,7 +259,6 @@ async def test_double_page_navigation(
     # <<<<< UPLOAD STAGE <<<<<
 
     # Expected query parameter suffix for a given 0-indexed page.
-    # Archive "dbl-nav" with 6 pages produces: dbl-nav-pg-1.png through dbl-nav-pg-6.png
     def expected_page_path(page_index: int) -> str:
         return f"path={archive_name}-pg-{page_index + 1}.png"
 
@@ -352,7 +351,7 @@ async def test_handler_resource_management(
     # >>>>> UPLOAD STAGE >>>>>
     with tempfile.TemporaryDirectory() as tmpdir:
         archive_title = "test archive title"
-        archive_name = "test archive name"
+        archive_name = "test-archive-name"
         archive_path = create_archive_file(Path(tmpdir), archive_name, num_pages=6)
         response, error = await upload_archive(
             lrr_client,
