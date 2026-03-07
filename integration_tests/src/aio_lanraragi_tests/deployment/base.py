@@ -457,13 +457,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
             except requests.exceptions.ConnectionError:
                 if retry_count < test_connection_max_retries:
                     time_to_sleep = 2 ** (retry_count + 1)
-
-                    if retry_count < test_connection_max_retries-3:
-                        self.logger.debug(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
-                    elif retry_count < test_connection_max_retries-2:
-                        self.logger.info(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
-                    elif retry_count < test_connection_max_retries-1:
-                        self.logger.warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
+                    self.logger.debug(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
                     retry_count += 1
                     time.sleep(time_to_sleep)
                     continue
@@ -486,7 +480,7 @@ class AbstractLRRDeploymentContext(abc.ABC):
                     self.display_redis_logs()
                     raise
                 time_to_sleep = 2 ** (retry_count + 1)
-                self.logger.warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
+                self.logger.debug(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
                 retry_count += 1
                 time.sleep(time_to_sleep)
 
