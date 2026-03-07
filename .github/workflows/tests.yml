@@ -24,8 +24,8 @@ on:
         default: 'dev'
 
 env:
-  LRR_REPOSITORY: ${{ github.event.inputs.lrr_repository || 'difegue/LANraragi' }}
-  LRR_REF: ${{ github.event.inputs.lrr_ref || 'dev' }}
+  LRR_REPOSITORY: ${{ github.event.inputs.lrr_repository || 'psilabs-dev/LANraragi' }}
+  LRR_REF: ${{ github.event.inputs.lrr_ref || 'bugfix/last-page' }}
 
 jobs:
 
