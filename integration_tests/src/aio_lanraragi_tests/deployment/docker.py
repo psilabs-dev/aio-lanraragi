@@ -339,6 +339,16 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             return b"No Redis container available"
 
     @override
+    def read_redis_logs(self) -> str:
+        """
+        Read full Redis container logs as a string.
+        """
+        if self.redis_container:
+            return self.redis_container.logs().decode('utf-8', errors='replace')
+        self.logger.warning("Redis container not available for log extraction")
+        return ""
+
+    @override
     def apply_plugins(self):
         plugins_root_dir = self.plugins_root_dir
         if plugins_root_dir.exists():

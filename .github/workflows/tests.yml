@@ -84,12 +84,21 @@ jobs:
           uv run pytest tests --log-cli-level=INFO \
             --build "$GITHUB_WORKSPACE/lanraragi" \
             --staging "$GITHUB_WORKSPACE/staging" \
+            --server-logs "$GITHUB_WORKSPACE/server-logs" \
             --playwright \
             --docker-api \
             --npseed 42
         env:
           # Ensure Docker daemon is accessible to Python docker SDK
           DOCKER_HOST: unix:///var/run/docker.sock
+
+      - name: Upload server logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs-ubuntu
+          path: ${{ github.workspace }}/server-logs/
+          retention-days: 14
 
   # windows integration tests
   # refer to https://github.com/Difegue/LANraragi/blob/dev/.github/workflows/push-continous-delivery.yml
@@ -224,8 +233,17 @@ jobs:
           --log-cli-level=INFO `
           --windist "$env:GITHUB_WORKSPACE\LANraragi\win-dist" `
           --staging "$env:GITHUB_WORKSPACE\staging" `
+          --server-logs "$env:GITHUB_WORKSPACE\server-logs" `
           --playwright `
           --npseed 42
+
+      - name: Upload server logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs-windows
+          path: ${{ github.workspace }}\server-logs\
+          retention-days: 14
 
   check:
     if: always()

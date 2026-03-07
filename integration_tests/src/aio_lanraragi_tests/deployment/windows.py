@@ -766,6 +766,14 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger.error("No Redis logs are available!")
         return b"No Redis logs available."
 
+    @override
+    def read_redis_logs(self) -> str:
+        if self.redis_log_path.exists():
+            with open(self.redis_log_path, encoding='utf-8', errors='replace') as f:
+                return f.read()
+        self.logger.warning("No Redis logs are available!")
+        return ""
+
     # TODO: I hope we don't have to use this.
     def _kill_lrr_perl_processes_by_path(self):
         """
