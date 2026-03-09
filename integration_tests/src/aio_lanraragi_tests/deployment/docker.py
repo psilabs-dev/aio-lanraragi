@@ -31,8 +31,6 @@ from aio_lanraragi_tests.deployment.base import (
 )
 from aio_lanraragi_tests.exceptions import DeploymentException
 
-DEFAULT_REDIS_DOCKER_TAG = "redis:7.2.4"
-DEFAULT_VALKEY_DOCKER_TAG = "valkey/valkey:7.2"
 DEFAULT_LANRARAGI_DOCKER_TAG = "difegue/lanraragi"
 
 LOGGER = logging.getLogger(__name__)
@@ -40,6 +38,21 @@ LOGGER = logging.getLogger(__name__)
 class DockerLRRCacheBackend(Enum):
     REDIS = "redis"
     VALKEY = "valkey"
+    VALKEY_8 = "valkey8"
+
+    @property
+    def is_valkey(self) -> bool:
+        return self in (DockerLRRCacheBackend.VALKEY, DockerLRRCacheBackend.VALKEY_8)
+
+    @property
+    def docker_tag(self): # Implicitly hinted
+        match self:
+            case DockerLRRCacheBackend.REDIS:
+                return "redis:7.2.4"
+            case DockerLRRCacheBackend.VALKEY:
+                return "valkey/valkey:7.2"
+            case DockerLRRCacheBackend.VALKEY_8:
+                return "valkey/valkey:8.1"
 
 class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
@@ -239,20 +252,18 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         return self._cache_backend
 
     @property
-    def cache_docker_tag(self) -> str:
-        if self._cache_backend == DockerLRRCacheBackend.VALKEY:
-            return DEFAULT_VALKEY_DOCKER_TAG
-        return DEFAULT_REDIS_DOCKER_TAG
+    def cache_docker_tag(self):
+        return self.cache_backend.docker_tag
 
     @property
     def cache_server_bin(self) -> str:
-        if self._cache_backend == DockerLRRCacheBackend.VALKEY:
+        if self.cache_backend.is_valkey:
             return "valkey-server"
         return "redis-server"
 
     @property
     def cache_cli_bin(self) -> str:
-        if self._cache_backend == DockerLRRCacheBackend.VALKEY:
+        if self.cache_backend.is_valkey:
             return "valkey-cli"
         return "redis-cli"
 
@@ -577,7 +588,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             }
             # Valkey's entrypoint checks writability of cwd (/data by default);
             # override to the bind-mounted data dir so the check passes.
-            if self._cache_backend == DockerLRRCacheBackend.VALKEY:
+            if self.cache_backend.is_valkey:
                 create_kwargs["working_dir"] = self.redis_container_data_path
             self.redis_container = self.docker_client.containers.create(
                 self.cache_docker_tag, **create_kwargs
