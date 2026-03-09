@@ -4,6 +4,7 @@ such as page navigation and viewing, manga mode, slideshow, ToC, etc.
 """
 
 import asyncio
+import json
 import logging
 import tempfile
 from pathlib import Path
@@ -19,6 +20,7 @@ from lanraragi.models.archive import (
     GetArchivePageRequest,
 )
 
+from aio_lanraragi_tests.common import LRR_INDEX_TITLE
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
@@ -447,6 +449,385 @@ async def test_handler_resource_management(
                 f"found {load_handler_count} (handlers are accumulating on cached Image objects)"
             )
 
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.dev("navigation")
+async def test_archive_navigation(
+    lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+):
+    """
+    Test navigation capabilities.
+
+    1. Upload 3 archives, 3 pages each.
+    2. Go to index page and click on first archive; collect the search draw metadata from
+        network (to know what the 2nd and 3rd archives are supposed to be).
+    3. Navigate (via "right" key press) from first archive to 3rd archive.
+        - Confirm that the 3rd and 6th key presses correspond to changes in archive title
+          and that the page bytes are the first pages of the 2nd and 3rd archives resp.
+        - Confirm when at last page of 3rd archive, right keypress does nothing.
+    4. Navigate to 2nd from 3rd archive via "[".
+    5. Navigate from 2nd to 1st archive via "left" keypress.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    archive_names = ["archive-1", "archive-2", "archive-3"]
+    archive_titles = ["Archive 1", "Archive 2", "Archive 3"]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for name, title in zip(archive_names, archive_titles):
+            archive_path = create_archive_file(Path(tmpdir), name, num_pages=3)
+            response, error = await upload_archive(
+                lrr_client,
+                archive_path,
+                archive_path.name,
+                semaphore,
+                title=title,
+                tags="",
+            )
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await browser.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            # Go to index page, wait for DT draw to complete.
+            await page.goto(lrr_client.lrr_base_url)
+            await page.wait_for_load_state("networkidle")
+            assert await page.title() == LRR_INDEX_TITLE
+
+            # exit overlay
+            if "New Version Release Notes" in await page.content():
+                LOGGER.info("Closing new releases overlay.")
+                await page.keyboard.press("Escape")
+
+            # Collect the datatables search response from the network waterfall
+            # to determine the display order of archives.
+            search_response_body = None
+            for resp in responses:
+                if "/search" not in resp.url or resp.request.method != "GET" or resp.status != 200:
+                    continue
+                body = json.loads(await resp.text())
+                if "data" in body and len(body["data"]) == 3:
+                    search_response_body = body
+                    break
+            assert search_response_body is not None, "Did not find datatables search response in network waterfall"
+            dt_arcids = []
+            dt_titles = []
+            for entry in search_response_body["data"]:
+                dt_arcids.append(entry["arcid"])
+                dt_titles.append(entry["title"])
+            LOGGER.info(f"Datatables archive order: {list(zip(dt_titles, dt_arcids))}")
+
+            # Assert and clear index page responses before navigating to reader.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            responses.clear()
+            console_evts.clear()
+
+            # Open the first archive from the thumbnail view (default index mode).
+            # #thumbs_container links trigger the datatables click handler,
+            # which sets sessionStorage.navigationState = 'datatables'.
+            LOGGER.info(f"Opening first archive: {dt_titles[0]}")
+            await page.locator("#thumbs_container a", has_text=dt_titles[0]).first.click()
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+            await page.wait_for_timeout(500)
+            assert f"id={dt_arcids[0]}" in page.url, f"Expected first archive in URL, got {page.url}"
+
+            # Navigate forward via ArrowRight through all 3 archives.
+            # 3 pages per archive, so presses at index 2 and 5 are archive transitions.
+            for keypress_count in range(6):
+                if keypress_count in (2, 5):
+                    # Full page navigation ahead; assert and clear responses at boundary.
+                    await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+                    await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+                    responses.clear()
+                    console_evts.clear()
+
+                LOGGER.info(f"ArrowRight press {keypress_count + 1}/6")
+                await page.keyboard.press("ArrowRight")
+
+                if keypress_count in (2, 5):
+                    expected_idx = 1 if keypress_count == 2 else 2
+                    await page.wait_for_url(lambda url, eid=dt_arcids[expected_idx]: eid in url)
+
+                await page.wait_for_load_state("networkidle")
+                await assert_no_spinner(page)
+                await page.wait_for_timeout(500)
+
+                # Archive transition: 1st archive -> 2nd archive
+                if keypress_count == 2:
+                    LOGGER.info("Verifying archive transition to 2nd archive.")
+                    title_text = await page.locator("#archive-title").text_content()
+                    assert dt_titles[1] in title_text, f"Expected title containing {dt_titles[1]!r}, got {title_text!r}"
+
+                    img_src = await page.locator("#img").get_attribute("src")
+                    browser_image_bytes = await get_image_bytes_from_responses(responses, img_src)
+                    response, error = await lrr_client.archive_api.extract_archive(ExtractArchiveRequest(arcid=dt_arcids[1]))
+                    assert not error, f"Extract failed (status {error.status}): {error.error}"
+                    response, error = await lrr_client.archive_api.get_archive_page(GetArchivePageRequest(page_url=response.pages[0]))
+                    assert not error, f"Failed to get first page of 2nd archive (status {error.status}): {error.error}"
+                    assert browser_image_bytes == response.data, "Browser image bytes do not match API first page of 2nd archive"
+
+                # Archive transition: 2nd archive -> 3rd archive
+                if keypress_count == 5:
+                    LOGGER.info("Verifying archive transition to 3rd archive.")
+                    title_text = await page.locator("#archive-title").text_content()
+                    assert dt_titles[2] in title_text, f"Expected title containing {dt_titles[2]!r}, got {title_text!r}"
+
+                    img_src = await page.locator("#img").get_attribute("src")
+                    browser_image_bytes = await get_image_bytes_from_responses(responses, img_src)
+                    response, error = await lrr_client.archive_api.extract_archive(ExtractArchiveRequest(arcid=dt_arcids[2]))
+                    assert not error, f"Extract failed (status {error.status}): {error.error}"
+                    response, error = await lrr_client.archive_api.get_archive_page(GetArchivePageRequest(page_url=response.pages[0]))
+                    assert not error, f"Failed to get first page of 3rd archive (status {error.status}): {error.error}"
+                    assert browser_image_bytes == response.data, "Browser image bytes do not match API first page of 3rd archive"
+
+            # Navigate to last page of 3rd archive.
+            # After the loop we are at page 1 (first page) of 3rd archive.
+            # Two more ArrowRight presses reach page 3 (last page).
+            LOGGER.info("Navigating to last page of 3rd archive.")
+            for _ in range(2):
+                await page.keyboard.press("ArrowRight")
+                await page.wait_for_load_state("networkidle")
+                await assert_no_spinner(page)
+                await page.wait_for_timeout(500)
+            current_page_text = await page.locator("span.current-page").first.text_content()
+            assert current_page_text.strip() == "3", f"Expected page 3 (last), got {current_page_text!r}"
+            assert f"id={dt_arcids[2]}" in page.url, "Expected to still be in 3rd archive at last page"
+
+            # Verify ArrowRight does nothing at last page of last archive.
+            LOGGER.info("Verifying ArrowRight is idempotent at last page of last archive.")
+            current_url = page.url
+            await page.keyboard.press("ArrowRight")
+            await page.wait_for_timeout(1000)
+            assert page.url == current_url, "URL changed when pressing right at last page of last archive"
+            page_text_after = await page.locator("span.current-page").first.text_content()
+            assert page_text_after.strip() == "3", "Page changed at last page of last archive"
+
+            # Navigate from 3rd to 2nd archive via "[".
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            responses.clear()
+            console_evts.clear()
+
+            LOGGER.info("Navigating from 3rd to 2nd archive via '[' key.")
+            await page.keyboard.press("[")
+            await page.wait_for_url(lambda url: dt_arcids[1] in url)
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+            await page.wait_for_timeout(500)
+            title_text = await page.locator("#archive-title").text_content()
+            assert dt_titles[1] in title_text, f"Expected title containing {dt_titles[1]!r} after '[', got {title_text!r}"
+            landing_page_text = await page.locator("span.current-page").first.text_content()
+            assert landing_page_text.strip() == "1", f"Expected '[' to land on page 1, got {landing_page_text!r}"
+
+            # Navigate from 2nd to 1st archive via ArrowLeft.
+            # "[" landed on page 1 (first page), so ArrowLeft triggers readPreviousArchive.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            responses.clear()
+            console_evts.clear()
+
+            LOGGER.info("Navigating from 2nd to 1st archive via ArrowLeft.")
+            await page.keyboard.press("ArrowLeft")
+            await page.wait_for_url(lambda url: dt_arcids[0] in url)
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+            await page.wait_for_timeout(500)
+            title_text = await page.locator("#archive-title").text_content()
+            assert dt_titles[0] in title_text, f"Expected title containing {dt_titles[0]!r} after ArrowLeft, got {title_text!r}"
+
+            # check browser traffic is OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.dev("navigation")
+async def test_slideshow_continue_navigation(
+    lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+):
+    """
+    Test that slideshow continues to the next archive.
+
+    1. Upload 3 archives, 3 pages each.
+    2. Go to index page and click on first archive; collect the search draw metadata from
+        network (to know what the 2nd and 3rd archives are supposed to be).
+    3. Configure slideshow to 1s per page and start slideshow.
+    4. Wait for a period of time, and assert that the 3rd page of 3rd archive is reached.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    archive_names = ["archive-1", "archive-2", "archive-3"]
+    archive_titles = ["Archive 1", "Archive 2", "Archive 3"]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for name, title in zip(archive_names, archive_titles):
+            archive_path = create_archive_file(Path(tmpdir), name, num_pages=3)
+            response, error = await upload_archive(
+                lrr_client,
+                archive_path,
+                archive_path.name,
+                semaphore,
+                title=title,
+                tags="",
+            )
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await browser.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            # Go to index page, wait for DT draw to complete.
+            await page.goto(lrr_client.lrr_base_url)
+            await page.wait_for_load_state("networkidle")
+            assert await page.title() == LRR_INDEX_TITLE
+
+            # exit overlay
+            if "New Version Release Notes" in await page.content():
+                LOGGER.info("Closing new releases overlay.")
+                await page.keyboard.press("Escape")
+
+            # Collect the datatables search response from the network waterfall
+            # to determine the display order of archives.
+            search_response_body = None
+            for resp in responses:
+                if "/search" not in resp.url or resp.request.method != "GET" or resp.status != 200:
+                    continue
+                body = json.loads(await resp.text())
+                if "data" in body and len(body["data"]) == 3:
+                    search_response_body = body
+                    break
+            assert search_response_body is not None, "Did not find datatables search response in network waterfall"
+            dt_arcids = []
+            dt_titles = []
+            for entry in search_response_body["data"]:
+                dt_arcids.append(entry["arcid"])
+                dt_titles.append(entry["title"])
+            LOGGER.info(f"Datatables archive order: {list(zip(dt_titles, dt_arcids))}")
+
+            # Assert and clear index page responses before navigating to reader.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            responses.clear()
+            console_evts.clear()
+
+            # Open the first archive from the thumbnail view.
+            LOGGER.info(f"Opening first archive: {dt_titles[0]}")
+            await page.locator("#thumbs_container a", has_text=dt_titles[0]).first.click()
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+            await page.wait_for_timeout(500)
+            assert f"id={dt_arcids[0]}" in page.url, f"Expected first archive in URL, got {page.url}"
+
+            # Configure slideshow duration to 1s and start.
+            LOGGER.info("Configuring slideshow duration to 1s")
+            await page.keyboard.press("o")
+            await page.locator("#settingsOverlay").wait_for(state="visible")
+            await page.locator("#auto-next-page-input").fill("1")
+            await page.locator("#auto-next-page-apply").click()
+            await page.keyboard.press("Tab")
+            await page.keyboard.press("o")
+            await page.locator("#settingsOverlay").wait_for(state="hidden")
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            responses.clear()
+            console_evts.clear()
+
+            LOGGER.info("Starting slideshow with keypress n")
+            await page.keyboard.press("n")
+
+            # Wait for the slideshow to cross into the 2nd archive.
+            LOGGER.info("Waiting for slideshow to reach 2nd archive...")
+            await page.wait_for_url(
+                lambda url: dt_arcids[1] in url,
+                timeout=30000,
+            )
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+            LOGGER.info("Slideshow reached 2nd archive.")
+            title_text = await page.locator("#archive-title").text_content()
+            assert dt_titles[1] in title_text, f"Expected title containing {dt_titles[1]!r}, got {title_text!r}"
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            responses.clear()
+            console_evts.clear()
+
+            # Wait for the slideshow to cross into the 3rd archive.
+            LOGGER.info("Waiting for slideshow to reach 3rd archive...")
+            await page.wait_for_url(
+                lambda url: dt_arcids[2] in url,
+                timeout=30000,
+            )
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+            LOGGER.info("Slideshow reached 3rd archive.")
+            title_text = await page.locator("#archive-title").text_content()
+            assert dt_titles[2] in title_text, f"Expected title containing {dt_titles[2]!r}, got {title_text!r}"
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            responses.clear()
+            console_evts.clear()
+
+            # Wait for the slideshow to reach the last page of the 3rd archive.
+            LOGGER.info("Waiting for slideshow to reach last page of 3rd archive...")
+            await page.wait_for_function(
+                """() => {
+                    const el = document.querySelector('span.current-page');
+                    return el && el.textContent.trim() === '3';
+                }""",
+                timeout=15000,
+            )
+
+            # Give slideshow time to stop (it should not advance further).
+            await page.wait_for_timeout(2000)
+            current_page_text = await page.locator("span.current-page").first.text_content()
+            assert current_page_text.strip() == "3", f"Expected page 3 (last), got {current_page_text!r}"
+            assert f"id={dt_arcids[2]}" in page.url, "Expected to be in 3rd archive at last page"
+
+            # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
         finally:
