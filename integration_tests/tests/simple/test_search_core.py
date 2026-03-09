@@ -163,11 +163,11 @@ async def test_search_functionality(
 
     # >>>>> ARCHIVE DEFINITION >>>>>
     archive_specs = [
-        {"name": "fate_go_memo", "title": "Fate GO MEMO", "tags": "artist:wada rco,character:ereshkigal,male:very cool", "pages": 50},
+        {"name": "fate_go_memo", "title": "Fate GO MEMO", "tags": "artist:wada rco,character:ereshkigal,male:very cool too", "pages": 50},
         {"name": "fate_go_memo_2", "title": "Fate GO MEMO 2", "tags": "artist:wada rco,character:waver velvet", "pages": 30},
         {"name": "ghost_in_the_shell", "title": "Ghost in the Shell", "tags": "artist:shirow masamune,full color,artbook", "pages": 200},
-        {"name": "saturn_japanese", "title": "Saturn Backup Cartridge - Japanese Manual", "tags": "character:segata,male:cool", "pages": 160},
-        {"name": "saturn_american", "title": "Saturn Backup Cartridge - American Manual", "tags": "character:segata,female:very cool", "pages": 180},
+        {"name": "saturn_japanese", "title": "Saturn Backup Cartridge - Japanese Manual", "tags": "character:segata sanshiro,male:very cool", "pages": 160},
+        {"name": "saturn_american", "title": "Saturn Backup Cartridge - American Manual", "tags": "character:segata,female:very cool too", "pages": 180},
         {"name": "medjed_collection", "title": "Medjed Collection", "tags": "vector,medjed", "pages": 20},
         {"name": "vector_art_book", "title": "Vector Art Book", "tags": "vector", "pages": 40},
         {"name": "new_release", "title": "New Release Archive", "tags": "new_release_tag", "pages": 10},
@@ -288,28 +288,28 @@ async def test_search_functionality(
         SearchArchiveIndexRequest(search_filter='"male:very cool"', groupby_tanks=False)
     )
     assert not error, f"Exact namespace search failed (status {error.status}): {error.error}"
-    assert {r.title for r in response.data} == {"Fate GO MEMO"}, f"Exact namespace search mismatch: { {r.title for r in response.data} }"
+    assert {r.title for r in response.data} == {"Saturn Backup Cartridge - Japanese Manual"}, f"Exact namespace search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: EXACT NAMESPACE SEARCH <<<<<
 
     # >>>>> SEARCH TESTS: FUZZY NAMESPACE SEARCH >>>>>
-    # Fuzzy search: namespace must match exactly, value fuzzy-matches
-    # "male:very cool" matches archives with namespace "male:" where value contains "very cool"
+    # Fuzzy search: namespace must match exactly, value is prefix-matched via glob (INDEX_male:very cool*)
+    # Matches "male:very cool" (Japanese Manual) and "male:very cool too" (Fate GO MEMO)
     response, error = await lrr_client.search_api.search_archive_index(
         SearchArchiveIndexRequest(search_filter="male:very cool", groupby_tanks=False)
     )
     assert not error, f"Fuzzy namespace search failed (status {error.status}): {error.error}"
-    expected = {"Fate GO MEMO"}  # Only archive with "male:very cool" tag
+    expected = {"Fate GO MEMO", "Saturn Backup Cartridge - Japanese Manual"}
     assert {r.title for r in response.data} == expected, f"Fuzzy namespace search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: FUZZY NAMESPACE SEARCH <<<<<
 
     # >>>>> SEARCH TESTS: VERY FUZZY NAMESPACE SEARCH >>>>>
-    # Very fuzzy (*prefix): namespace can have prefix (e.g., "female" matches "*male")
-    # "*male:very cool" matches namespaces ending with "male" (male, female) where value contains "very cool"
+    # Very fuzzy (*prefix): namespace glob-matched, value prefix-matched (INDEX_*male:very cool*)
+    # Matches "male:very cool" (Japanese), "male:very cool too" (Fate GO MEMO), "female:very cool too" (American)
     response, error = await lrr_client.search_api.search_archive_index(
         SearchArchiveIndexRequest(search_filter="*male:very cool", groupby_tanks=False)
     )
     assert not error, f"Very fuzzy namespace search failed (status {error.status}): {error.error}"
-    expected = {"Fate GO MEMO", "Saturn Backup Cartridge - American Manual"}  # male:very cool + female:very cool
+    expected = {"Fate GO MEMO", "Saturn Backup Cartridge - Japanese Manual", "Saturn Backup Cartridge - American Manual"}
     assert {r.title for r in response.data} == expected, f"Very fuzzy namespace search mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: VERY FUZZY NAMESPACE SEARCH <<<<<
 
@@ -347,11 +347,12 @@ async def test_search_functionality(
     # <<<<< SEARCH TESTS: TAG EXCLUSION <<<<<
 
     # >>>>> SEARCH TESTS: EXACT SEARCH WITH $ >>>>>
+    # $ anchors end of value: "character:segata$" matches "character:segata" but NOT "character:segata sanshiro"
     response, error = await lrr_client.search_api.search_archive_index(
         SearchArchiveIndexRequest(search_filter="character:segata$", groupby_tanks=False)
     )
     assert not error, f"Exact search with $ failed (status {error.status}): {error.error}"
-    expected = {"Saturn Backup Cartridge - Japanese Manual", "Saturn Backup Cartridge - American Manual"}
+    expected = {"Saturn Backup Cartridge - American Manual"}
     assert {r.title for r in response.data} == expected, f"Exact search with $ mismatch: { {r.title for r in response.data} }"
     # <<<<< SEARCH TESTS: EXACT SEARCH WITH $ <<<<<
 
