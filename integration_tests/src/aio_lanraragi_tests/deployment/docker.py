@@ -54,6 +54,15 @@ class DockerLRRCacheBackend(Enum):
             case DockerLRRCacheBackend.VALKEY_8:
                 return "valkey/valkey:8.1"
 
+def get_container_memory_mb(container: docker.models.containers.Container | None) -> float | None:
+    """Memory usage of a Docker container in MB, or None if container is unavailable."""
+    if container is None:
+        return None
+    stats = container.stats(stream=False)
+    mem_usage = stats["memory_stats"].get("usage", 0)
+    return mem_usage / (1024 * 1024)
+
+
 class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     """
@@ -390,6 +399,14 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             return self.redis_container.logs().decode('utf-8', errors='replace')
         self.logger.warning("Redis container not available for log extraction")
         return ""
+
+    def get_cache_backend_memory_mb(self) -> float | None:
+        """Memory usage of the cache backend container in MB."""
+        return get_container_memory_mb(self.redis_container)
+
+    def get_lrr_memory_mb(self) -> float | None:
+        """Memory usage of the LRR container in MB."""
+        return get_container_memory_mb(self.lrr_container)
 
     @override
     def apply_plugins(self):
