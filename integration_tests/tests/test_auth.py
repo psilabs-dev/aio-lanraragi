@@ -535,6 +535,8 @@ async def test_disable_cors_preflight(environment: AbstractLRRDeploymentContext,
     ):
         headers = response.headers
 
+        assert response.status == 200, f"Expected 200 for OPTIONS preflight, got {response.status}"
+
         # confirm the CORS headers aren't here.
         # this is the current default behavior (when disabled),
         # so we'll test with the strictest conditions.
@@ -557,6 +559,8 @@ async def test_enable_cors_preflight(environment: AbstractLRRDeploymentContext, 
         session.options(api) as response
     ):
         headers = response.headers
+
+        assert response.status == 200, f"Expected 200 for OPTIONS preflight, got {response.status}"
 
         # confirm the CORS headers exist.
         assert "Access-Control-Allow-Headers" in headers, "Allowed headers not in headers when CORS is enabled."
