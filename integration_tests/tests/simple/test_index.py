@@ -34,6 +34,7 @@ LOGGER = logging.getLogger(__name__)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
+@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1468")
 async def test_header_click_sort(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
