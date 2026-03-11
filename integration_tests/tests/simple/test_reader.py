@@ -15,12 +15,13 @@ import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import (
+    AddTocEntryRequest,
     ExtractArchiveRequest,
     GetArchiveMetadataRequest,
     GetArchivePageRequest,
 )
 
-from aio_lanraragi_tests.common import LRR_INDEX_TITLE
+from aio_lanraragi_tests.common import DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
@@ -828,6 +829,207 @@ async def test_slideshow_continue_navigation(
             assert f"id={dt_arcids[2]}" in page.url, "Expected to be in 3rd archive at last page"
 
             # check browser traffic is OK.
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE (slideshow_continue_navigation) <<<<<
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.xfail(reason="requires LRR-side fix: overlay re-render timing in addTocSection/removeTocSection", strict=False)
+async def test_toc_reader(
+    lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+):
+    """
+    Test ToC reader UI.
+
+    1. Upload 1 archive (10 pages), add 3 chapters via API (pages 1, 4, 7).
+    2. Login via browser (required for admin-gated ToC icons).
+    3. Open reader, open overlay, verify chapter selector has 3 options.
+    4. Verify overlay scoping: Chapter 1 shows 3 thumbnails (pages 1-3).
+    5. Navigate to Chapter 2 via dropdown, verify page jumps to 4, overlay shows 3 thumbnails.
+    6. Navigate to Chapter 3, verify overlay shows 4 thumbnails (pages 7-10).
+    7. Add chapter at page 2 via UI, verify dropdown grows to 4 options.
+    8. Edit chapter title via UI, verify rename persists via API.
+    9. Delete chapter via UI, verify deleted name absent from dropdown, 3 toc entries via API.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_path = create_archive_file(Path(tmpdir), "archive_1", num_pages=10)
+        response, error = await upload_archive(
+            lrr_client,
+            archive_path,
+            archive_path.name,
+            semaphore,
+            title="Title 1",
+            tags="artist:a",
+        )
+        assert not error, f"Upload failed (status {error.status}): {error.error}"
+        arcid = response.arcid
+    del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> ADD TOC VIA API >>>>>
+    for pg, title in [(1, "Chapter 1"), (4, "Chapter 2"), (7, "Chapter 3")]:
+        response, error = await lrr_client.archive_api.add_toc_entry(AddTocEntryRequest(arcid=arcid, page=pg, title=title))
+        assert not error, f"Failed to add toc entry page={pg} (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< ADD TOC VIA API <<<<<
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await browser.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            # login to get admin access (required for add/edit/delete toc icons)
+            await page.goto(f"{lrr_client.lrr_base_url}/login")
+            await page.wait_for_load_state("networkidle")
+            await page.fill("#pw_field", DEFAULT_LRR_PASSWORD)
+            await page.click("input[type='submit']")
+            await page.wait_for_load_state("networkidle")
+            responses.clear()
+            console_evts.clear()
+
+            await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}")
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+
+            # open overlay
+            await page.keyboard.press("q")
+            await page.locator("#archivePagesOverlay").wait_for(state="visible")
+
+            # verify chapter selector has 3 options
+            chapter_select = page.locator("#chapter-select")
+            options = chapter_select.locator("option")
+            option_count = await options.count()
+            assert option_count == 3, f"Expected 3 chapter options, got {option_count}"
+
+            option_texts = []
+            for i in range(option_count):
+                option_texts.append(await options.nth(i).text_content())
+            assert "Chapter 1" in option_texts[0]
+            assert "Chapter 2" in option_texts[1]
+            assert "Chapter 3" in option_texts[2]
+
+            # verify overlay scoping for chapter 1: pages 1-3 (3 thumbnails)
+            thumbnails = page.locator("#pages-section .quick-thumbnail")
+            ch1_count = await thumbnails.count()
+            assert ch1_count == 3, f"Expected 3 thumbnails for Chapter 1, got {ch1_count}"
+
+            # navigate to chapter 2 via dropdown
+            LOGGER.debug("Selecting Chapter 2 from dropdown.")
+            await chapter_select.select_option(value="4")
+            await page.wait_for_timeout(500)
+
+            # verify page counter jumped to page 4
+            current_page_text = await page.locator("span.current-page").first.text_content()
+            assert current_page_text.strip() == "4", f"Expected page 4 after chapter select, got {current_page_text!r}"
+
+            # verify overlay scoping for chapter 2: pages 4-6 (3 thumbnails)
+            ch2_count = await thumbnails.count()
+            assert ch2_count == 3, f"Expected 3 thumbnails for Chapter 2, got {ch2_count}"
+
+            # navigate to chapter 3 via dropdown
+            LOGGER.debug("Selecting Chapter 3 from dropdown.")
+            await chapter_select.select_option(value="7")
+            await page.wait_for_timeout(500)
+
+            # verify overlay scoping for chapter 3: pages 7-10 (4 thumbnails)
+            ch3_count = await thumbnails.count()
+            assert ch3_count == 4, f"Expected 4 thumbnails for Chapter 3, got {ch3_count}"
+
+            # >>>>> ADD CHAPTER VIA UI >>>>>
+            # navigate back to chapter 1 to add a chapter at page 2
+            await chapter_select.select_option(value="1")
+            await page.wait_for_timeout(1000)
+
+            # wait for thumbnails to render
+            await thumbnails.first.wait_for(state="visible")
+
+            # force-click the add-chapter icon on the 2nd thumbnail (page 2)
+            add_toc_icon = page.locator("#pages-section .quick-thumbnail").nth(1).locator(".add-toc")
+            await add_toc_icon.click(force=True)
+
+            # fill SweetAlert2 dialog
+            await page.get_by_role("textbox").fill("Chapter 1.5")
+            await page.get_by_role("button", name="OK").click()
+
+            # overlay reopens only after PUT + metadata reload completes
+            await page.locator("#archivePagesOverlay").wait_for(state="hidden")
+            await page.locator("#archivePagesOverlay").wait_for(state="visible")
+
+            # verify dropdown now has 4 options
+            option_count = await options.count()
+            assert option_count == 4, f"Expected 4 chapter options after add, got {option_count}"
+            # <<<<< ADD CHAPTER VIA UI <<<<<
+
+            # >>>>> EDIT CHAPTER VIA UI >>>>>
+            LOGGER.debug("Editing chapter title via UI.")
+            edit_icon = page.locator(".edit-toc").first
+            await edit_icon.click()
+
+            await page.get_by_role("textbox").fill("Chapter 1 Renamed")
+            await page.get_by_role("button", name="OK").click()
+
+            # overlay reopens only after PUT + metadata reload completes
+            await page.locator("#archivePagesOverlay").wait_for(state="hidden")
+            await page.locator("#archivePagesOverlay").wait_for(state="visible")
+
+            # verify via API that the rename took effect
+            response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+            assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
+            renamed_entry = None
+            for entry in response.toc:
+                if entry.page == 1:
+                    renamed_entry = entry
+                    break
+            assert renamed_entry is not None, "ToC entry for page 1 not found after edit"
+            assert renamed_entry.name == "Chapter 1 Renamed", f"Expected renamed title, got {renamed_entry.name!r}"
+            del response, error
+            # <<<<< EDIT CHAPTER VIA UI <<<<<
+
+            # >>>>> DELETE CHAPTER VIA UI >>>>>
+            LOGGER.debug("Deleting chapter via UI.")
+            delete_icon = page.locator(".remove-toc").first
+            await delete_icon.click()
+
+            # confirm SweetAlert2 deletion dialog
+            await page.get_by_role("button", name="Yes, delete it!").click()
+
+            # overlay reopens only after DELETE + metadata reload completes
+            await page.locator("#archivePagesOverlay").wait_for(state="hidden")
+            await page.locator("#archivePagesOverlay").wait_for(state="visible")
+
+            # dropdown still shows 4 options: buildChapterObject adds an implicit
+            # untitled chapter for pages before the first toc entry (now page 2)
+            option_count = await options.count()
+            assert option_count == 4, f"Expected 4 chapter options after delete, got {option_count}"
+            first_option_text = await options.nth(0).text_content()
+            assert "Chapter 1 Renamed" not in first_option_text, f"Deleted chapter still in dropdown: {first_option_text!r}"
+
+            # verify deletion via API
+            response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+            assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
+            assert len(response.toc) == 3, f"Expected 3 toc entries after UI delete, got {len(response.toc)}"
+            del response, error
+            # <<<<< DELETE CHAPTER VIA UI <<<<<
+
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
         finally:

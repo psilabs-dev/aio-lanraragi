@@ -16,6 +16,11 @@ import playwright.async_api
 import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.archive import (
+    AddTocEntryRequest,
+    GetArchiveMetadataRequest,
+    RemoveTocEntryRequest,
+)
 from lanraragi.models.category import (
     CreateCategoryRequest,
     DeleteCategoryRequest,
@@ -31,6 +36,7 @@ from aio_lanraragi_tests.deployment.base import (
 )
 from aio_lanraragi_tests.log_parse import parse_lrr_logs
 from aio_lanraragi_tests.utils.api_wrappers import (
+    create_archive_file,
     save_archives,
     upload_archive,
 )
@@ -311,6 +317,94 @@ async def test_concurrent_clients(environment: AbstractLRRDeploymentContext):
             assert not error, f"Failed to get server info (status {error.status}): {error.error}"
     finally:
         await session.close()
+
+@pytest.mark.asyncio
+async def test_toc_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, environment: AbstractLRRDeploymentContext):
+    """
+    Test ToC CRUD via API: add, overwrite, remove entries, and verify metadata.
+    """
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    LOGGER.debug("Established connection with test LRR server.")
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        save_path = create_archive_file(Path(tmpdir), "archive_1", 10)
+        response, error = await upload_archive(
+            lrr_client, save_path, save_path.name, semaphore,
+            title="Title 1", tags="artist:a",
+        )
+        assert not error, f"Upload failed (status {error.status}): {error.error}"
+        arcid = response.arcid
+    del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> ADD SINGLE CHAPTER >>>>>
+    response, error = await lrr_client.archive_api.add_toc_entry(AddTocEntryRequest(arcid=arcid, page=1, title="Chapter 1"))
+    assert not error, f"Failed to add toc entry (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+    assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
+    assert len(response.toc) == 1, f"Expected 1 toc entry, got {len(response.toc)}"
+    assert response.toc[0].page == 1
+    assert response.toc[0].name == "Chapter 1"
+    del response, error
+    # <<<<< ADD SINGLE CHAPTER <<<<<
+
+    # >>>>> ADD MULTIPLE CHAPTERS >>>>>
+    response, error = await lrr_client.archive_api.add_toc_entry(AddTocEntryRequest(arcid=arcid, page=5, title="Chapter 2"))
+    assert not error, f"Failed to add toc entry (status {error.status}): {error.error}"
+    response, error = await lrr_client.archive_api.add_toc_entry(AddTocEntryRequest(arcid=arcid, page=8, title="Chapter 3"))
+    assert not error, f"Failed to add toc entry (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+    assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
+    assert len(response.toc) == 3, f"Expected 3 toc entries, got {len(response.toc)}"
+    assert response.toc[0].page == 1
+    assert response.toc[1].page == 5
+    assert response.toc[2].page == 8
+    del response, error
+    # <<<<< ADD MULTIPLE CHAPTERS <<<<<
+
+    # >>>>> OVERWRITE CHAPTER TITLE >>>>>
+    response, error = await lrr_client.archive_api.add_toc_entry(AddTocEntryRequest(arcid=arcid, page=1, title="Chapter 1 Updated"))
+    assert not error, f"Failed to overwrite toc entry (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+    assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
+    assert len(response.toc) == 3, f"Expected 3 toc entries after overwrite, got {len(response.toc)}"
+    assert response.toc[0].name == "Chapter 1 Updated"
+    del response, error
+    # <<<<< OVERWRITE CHAPTER TITLE <<<<<
+
+    # >>>>> REMOVE CHAPTER >>>>>
+    response, error = await lrr_client.archive_api.remove_toc_entry(RemoveTocEntryRequest(arcid=arcid, page=5))
+    assert not error, f"Failed to remove toc entry (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+    assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
+    assert len(response.toc) == 2, f"Expected 2 toc entries after removal, got {len(response.toc)}"
+    assert response.toc[0].page == 1
+    assert response.toc[1].page == 8
+    del response, error
+    # <<<<< REMOVE CHAPTER <<<<<
+
+    # >>>>> REMOVE ALL CHAPTERS >>>>>
+    response, error = await lrr_client.archive_api.remove_toc_entry(RemoveTocEntryRequest(arcid=arcid, page=1))
+    assert not error, f"Failed to remove toc entry (status {error.status}): {error.error}"
+    response, error = await lrr_client.archive_api.remove_toc_entry(RemoveTocEntryRequest(arcid=arcid, page=8))
+    assert not error, f"Failed to remove toc entry (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+    assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
+    assert len(response.toc) == 0, f"Expected 0 toc entries after clearing all, got {len(response.toc)}"
+    del response, error
+    # <<<<< REMOVE ALL CHAPTERS <<<<<
+
+    # no error logs
+    expect_no_error_logs(environment, LOGGER)
 
 # skip: for demonstration purposes only.
 @pytest.mark.asyncio
