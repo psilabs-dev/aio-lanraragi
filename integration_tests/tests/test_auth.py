@@ -520,62 +520,55 @@ async def test_api_auth_matrix(
         )
 
 @pytest.mark.asyncio
-async def test_disable_cors_preflight(environment: AbstractLRRDeploymentContext, lrr_client: LRRClient, is_lrr_debug_mode: bool):
+async def test_options_preflight_matrix(environment: AbstractLRRDeploymentContext, lrr_client: LRRClient, is_lrr_debug_mode: bool):
     """
-    Test preflight header response from server when CORS is not configured.
-    This is the default behavior for LRR.
+    Test OPTIONS preflight across all CORS x nofun combinations.
 
-    Tests will be done with a privileged endpoint.
+    All combinations must return 200 — the OpenAPI plugin auto-generates OPTIONS
+    routes, and nofun must not block them.
+
+    When CORS is enabled, CORS headers must be present; when disabled, they must be absent.
     """
     environment.setup(enable_cors=False, lrr_debug_mode=is_lrr_debug_mode)
     api = lrr_client.build_url("/api/shinobu")
-    async with (
-        aiohttp.ClientSession(headers={"Origin": "https://www.example.com"}) as session,
-        session.options(api) as response
-    ):
-        headers = response.headers
 
-        assert response.status == 200, f"Expected 200 for OPTIONS preflight, got {response.status}"
+    for enable_cors in [False, True]:
+        for with_nofun in [False, True]:
+            LOGGER.debug(f"Testing preflight: cors={enable_cors}, nofun={with_nofun}.")
 
-        # confirm the CORS headers aren't here.
-        # this is the current default behavior (when disabled),
-        # so we'll test with the strictest conditions.
-        assert "Access-Control-Allow-Headers" not in headers, "Allowed headers not in headers when CORS is enabled."
-        assert "Access-Control-Allow-Methods" not in headers, "Allowed methods not present in headers when CORS is enabled."
-        assert "Access-Control-Allow-Origin" not in headers, "Allowed origin not present in headers when CORS is enabled."
+            if enable_cors:
+                environment.enable_cors()
+            else:
+                environment.disable_cors()
+            if with_nofun:
+                environment.enable_nofun_mode()
+            else:
+                environment.disable_nofun_mode()
+            environment.restart()
 
-    # check logs for errors
-    expect_no_error_logs(environment, LOGGER)
+            async with (
+                aiohttp.ClientSession(headers={"Origin": "https://www.example.com"}) as session,
+                session.options(api) as response
+            ):
+                headers = response.headers
+                label = f"cors={enable_cors}, nofun={with_nofun}"
 
-@pytest.mark.asyncio
-async def test_enable_cors_preflight(environment: AbstractLRRDeploymentContext, lrr_client: LRRClient, is_lrr_debug_mode: bool):
-    """
-    Test preflight header response from server when CORS is enabled.
-    """
-    environment.setup(enable_cors=True, lrr_debug_mode=is_lrr_debug_mode)
-    api = lrr_client.build_url("/api/shinobu")
-    async with (
-        aiohttp.ClientSession(headers={"Origin": "https://www.example.com"}) as session,
-        session.options(api) as response
-    ):
-        headers = response.headers
+                assert response.status == 200, f"Expected 200 for OPTIONS preflight ({label}), got {response.status}"
 
-        assert response.status == 200, f"Expected 200 for OPTIONS preflight, got {response.status}"
+                if enable_cors:
+                    assert "Access-Control-Allow-Headers" in headers, f"Missing Allow-Headers ({label})."
+                    assert "Access-Control-Allow-Methods" in headers, f"Missing Allow-Methods ({label})."
+                    assert "Access-Control-Allow-Origin" in headers, f"Missing Allow-Origin ({label})."
 
-        # confirm the CORS headers exist.
-        assert "Access-Control-Allow-Headers" in headers, "Allowed headers not in headers when CORS is enabled."
-        assert "Access-Control-Allow-Methods" in headers, "Allowed methods not present in headers when CORS is enabled."
-        assert "Access-Control-Allow-Origin" in headers, "Allowed origin not present in headers when CORS is enabled."
+                    expected_allowed_methods = {"GET", "OPTIONS", "POST", "DELETE", "PUT"}
+                    actual_allowed_methods = {m.strip() for m in headers["Access-Control-Allow-Methods"].split(",")}
+                    assert actual_allowed_methods == expected_allowed_methods, f"Allowed methods mismatch ({label})."
 
-        # confirm that the following methods must be provided by the server.
-        expected_allowed_methods = {"GET", "OPTIONS", "POST", "DELETE", "PUT"}
-        actual_allowed_methods = {method.strip() for method in headers["Access-Control-Allow-Methods"].split(",")}
-        assert actual_allowed_methods == expected_allowed_methods, "Actual allowed methods not a subset of expected allowed methods."
-
-        # confirm that the server allows any origin.
-        expected_allowed_origin = "*"
-        actual_allowed_origin = headers["Access-Control-Allow-Origin"].strip()
-        assert actual_allowed_origin == expected_allowed_origin, "CORS allowed origin does not match."
+                    assert headers["Access-Control-Allow-Origin"].strip() == "*", f"Allowed origin mismatch ({label})."
+                else:
+                    assert "Access-Control-Allow-Headers" not in headers, f"Unexpected Allow-Headers ({label})."
+                    assert "Access-Control-Allow-Methods" not in headers, f"Unexpected Allow-Methods ({label})."
+                    assert "Access-Control-Allow-Origin" not in headers, f"Unexpected Allow-Origin ({label})."
 
     # check logs for errors
     expect_no_error_logs(environment, LOGGER)
