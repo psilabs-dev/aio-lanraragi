@@ -212,9 +212,10 @@ async def test_compact_column_sort_with_three_columns(
     4. Click column 2 (series) header: assert asc then desc sort order.
     5. Change column count to 3 (triggers page reload).
     6. After reload, verify columns 1 and 2 still sort correctly.
-    7. Edit column 3 namespace to "group" via pencil icon + SweetAlert dialog.
-    8. Click column 3 (group) header: assert desc then asc sort order.
-    9. Expect no HTTP errors, no console errors, no server error logs.
+    7. Edit column 3 to "Group" (capital G) — assert cells empty (invalid namespace).
+    8. Edit column 3 to "group" (lowercase) — assert cells populated (valid namespace).
+    9. Click column 3 (group) header: assert desc then asc sort order.
+    10. Expect no HTTP errors, no console errors, no server error logs.
     """
 
     # >>>>> ARCHIVE DEFINITION >>>>>
@@ -375,8 +376,8 @@ async def test_compact_column_sort_with_three_columns(
             # <<<<< 3 COLUMNS (CHANGE COLUMN COUNT) <<<<<
 
             # >>>>> EDIT COLUMN 3 NAMESPACE >>>>>
-            # mixed-case "Group" exercises namespace case-normalization
-            LOGGER.debug("Editing column 3 to 'Group' and testing sort.")
+            # Phase 3a: "Group" (capital G) — invalid namespace, cells must be empty
+            LOGGER.info("Phase 3a: editing column 3 to 'Group' (invalid namespace)")
 
             edit_btn = page.locator("#edit-header-3")
             await edit_btn.click()
@@ -389,13 +390,48 @@ async def test_compact_column_sort_with_three_columns(
             await page.wait_for_load_state("networkidle")
             await page.wait_for_timeout(500)
 
+            # "Group" does not match "group:" tags — column 3 cells must be empty
+            col3_cells = page.locator("td.customheader3")
+            cell_count = await col3_cells.count()
+            assert cell_count == num_archives, (
+                f"Expected {num_archives} rows, got {cell_count}"
+            )
+            for i in range(cell_count):
+                text = (await col3_cells.nth(i).inner_text()).strip()
+                assert text == "", (
+                    f"Expected empty cell for invalid namespace 'Group', got: '{text}'"
+                )
+
+            # Phase 3b: "group" (lowercase) — valid namespace, cells populated + sort works
+            LOGGER.info("Phase 3b: editing column 3 to 'group' (valid namespace)")
+
+            edit_btn = page.locator("#edit-header-3")
+            await edit_btn.click()
+
+            swal_input = page.locator(".swal2-input")
+            await swal_input.wait_for(state="visible", timeout=5000)
+            await swal_input.fill("group")
+            swal_confirm = page.locator(".swal2-confirm")
+            await swal_confirm.click()
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(500)
+
+            # "group" matches "group:" tags — column 3 cells must be populated
+            col3_cells = page.locator("td.customheader3")
+            for i in range(await col3_cells.count()):
+                text = (await col3_cells.nth(i).inner_text()).strip()
+                assert text != "", (
+                    f"Expected non-empty cell for valid namespace 'group', got empty at row {i}"
+                )
+
+            # Verify header click sort works correctly with valid namespace
             header3 = page.locator("#customheader3")
             await header3.wait_for(state="visible", timeout=5000)
 
             asc_titles = expected_asc["group"]
             desc_titles = list(reversed(asc_titles))
-            await assert_header_sort(page, header3, desc_titles, "desc")
             await assert_header_sort(page, header3, asc_titles, "asc")
+            await assert_header_sort(page, header3, desc_titles, "desc")
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
