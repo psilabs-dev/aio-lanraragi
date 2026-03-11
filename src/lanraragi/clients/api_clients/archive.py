@@ -13,6 +13,7 @@ from lanraragi.clients.res_processors.archive import (
 )
 from lanraragi.clients.utils import _build_err_response
 from lanraragi.models.archive import (
+    AddTocEntryRequest,
     ClearNewArchiveFlagRequest,
     ClearNewArchiveFlagResponse,
     DeleteArchiveRequest,
@@ -35,6 +36,7 @@ from lanraragi.models.archive import (
     GetUntaggedArchivesResponse,
     QueueArchiveThumbnailExtractionRequest,
     QueueArchiveThumbnailExtractionResponse,
+    RemoveTocEntryRequest,
     UpdateArchiveMetadataRequest,
     UpdateArchiveThumbnailRequest,
     UpdateArchiveThumbnailResponse,
@@ -274,6 +276,28 @@ class _ArchiveApiClient(_ApiClient):
             response_j = json.loads(content)
             filename = response_j.get("filename")
             return (DeleteArchiveResponse(arcid=request.arcid, filename=filename), None)
+        return (None, _build_err_response(content, status))
+
+    async def add_toc_entry(self, request: AddTocEntryRequest) -> _LRRClientResponse[LanraragiResponse]:
+        """
+        PUT /api/archives/:id/toc
+        """
+        url = self.api_context.build_url(f"/api/archives/{request.arcid}/toc")
+        params = {"page": request.page, "title": request.title}
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers, params=params)
+        if status == 200:
+            return (LanraragiResponse(), None)
+        return (None, _build_err_response(content, status))
+
+    async def remove_toc_entry(self, request: RemoveTocEntryRequest) -> _LRRClientResponse[LanraragiResponse]:
+        """
+        DELETE /api/archives/:id/toc
+        """
+        url = self.api_context.build_url(f"/api/archives/{request.arcid}/toc")
+        params = {"page": request.page}
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers, params=params)
+        if status == 200:
+            return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))
 
 __all__ = [

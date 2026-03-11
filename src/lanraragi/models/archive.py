@@ -3,6 +3,10 @@ from pydantic import BaseModel, Field
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
 
+class TocEntry(BaseModel):
+    page: int = Field(...)
+    name: str = Field(...)
+
 class GetAllArchivesResponseRecord(BaseModel):
     arcid: str = Field(..., min_length=40, max_length=40)
     isnew: bool = Field(...)
@@ -33,6 +37,7 @@ class GetArchiveMetadataResponse(LanraragiResponse):
     title: str = Field(...)
     filename: str = Field(...)
     extension: str = Field(...)
+    toc: list[TocEntry] = Field(default_factory=list)
 
 class GetArchiveCategoriesRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
@@ -139,9 +144,19 @@ class DeleteArchiveResponse(LanraragiResponse):
     arcid: str = Field(..., min_length=40, max_length=40)
     filename: str | None = Field(None)
 
+class AddTocEntryRequest(LanraragiRequest):
+    arcid: str = Field(..., min_length=40, max_length=40)
+    page: int = Field(...)
+    title: str = Field(...)
+
+class RemoveTocEntryRequest(LanraragiRequest):
+    arcid: str = Field(..., min_length=40, max_length=40)
+    page: int = Field(...)
+
 # <<<<< ARCHIVE <<<<<
 
 __all__ = [
+    "TocEntry",
     "GetAllArchivesResponseRecord",
     "GetAllArchivesResponse",
     "GetUntaggedArchivesResponse",
@@ -173,4 +188,6 @@ __all__ = [
     "UpdateArchiveMetadataRequest",
     "DeleteArchiveRequest",
     "DeleteArchiveResponse",
+    "AddTocEntryRequest",
+    "RemoveTocEntryRequest",
 ]
