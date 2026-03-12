@@ -4,18 +4,20 @@ Docker deployment context with PostgreSQL support.
 Extends the base Docker deployment to add a PostgreSQL container alongside
 Redis and LRR. Redis is still used for config, cache, locks, and filemap;
 PostgreSQL handles archive/category/tankoubon metadata and search indexing.
+
+PostgreSQL data is stored in a Docker named volume (not a bind mount) to
+avoid VirtioFS permission coherency failures on macOS that cause pg_wal
+PANIC under concurrent write load.
 """
 
 import contextlib
 import logging
-import shutil
-import sys
 import time
-from pathlib import Path
 from typing import override
 
 import docker.errors
 import docker.models.containers
+import docker.models.volumes
 
 from aio_lanraragi_tests.common import DEFAULT_POSTGRES_PORT
 from aio_lanraragi_tests.deployment.base import PluginPathsT
@@ -25,10 +27,6 @@ from aio_lanraragi_tests.deployment.docker import (
 )
 from aio_lanraragi_tests.exceptions import DeploymentException
 
-# Pin to exact minor version. Postgres 18+ changed PGDATA layout
-# (https://github.com/docker-library/postgres/pull/1259) and has WAL
-# permission issues with bind-mounted data dirs on macOS/Colima.
-# Use 17.x until the pg18 bind-mount story stabilises.
 DEFAULT_POSTGRES_DOCKER_TAG = "postgres:17.4"
 
 LOGGER = logging.getLogger(__name__)
@@ -66,9 +64,12 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
         return DEFAULT_POSTGRES_PORT + self.port_offset
 
     @property
-    def postgres_dir(self) -> Path:
-        dirname = self.resource_prefix + "postgres"
-        return self.staging_dir / dirname
+    def postgres_volume_name(self) -> str:
+        return self.resource_prefix + "postgres_data"
+
+    @property
+    def postgres_volume(self) -> docker.models.volumes.Volume | None:
+        return self._get_volume_by_name(self.postgres_volume_name)
 
     def __init__(
         self, build: str, image: str, git_url: str, git_ref: str,
@@ -125,15 +126,13 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
         environment: dict[str, str] = {}, plugin_paths: PluginPathsT = {},
         test_connection_max_retries: int = 4,
     ):
-        # create postgres data directory
-        postgres_dir = self.postgres_dir
-        if not postgres_dir.exists():
-            self.logger.debug(f"Creating Postgres dir: {postgres_dir}")
-            postgres_dir.mkdir(parents=True, exist_ok=False)
-            if sys.platform == "darwin":
-                time.sleep(1)
+        # create postgres named volume (avoids VirtioFS bind mount issues on macOS)
+        volume_name = self.postgres_volume_name
+        if not self.postgres_volume:
+            self.logger.debug(f"Creating Postgres volume: {volume_name}")
+            self.docker_client.volumes.create(volume_name)
         else:
-            self.logger.debug(f"Postgres directory exists: {postgres_dir}")
+            self.logger.debug(f"Postgres volume exists: {volume_name}")
 
         # pull postgres image
         self._pull_docker_image_if_not_exists(DEFAULT_POSTGRES_DOCKER_TAG, force=False)
@@ -158,7 +157,7 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
                     "start_period": 2_000_000_000,
                 },
                 volumes={
-                    str(postgres_dir): {"bind": "/var/lib/postgresql/data", "mode": "rw"},
+                    volume_name: {"bind": "/var/lib/postgresql/data", "mode": "rw"},
                 },
                 environment=[
                     "POSTGRES_USER=postgres",
@@ -239,8 +238,10 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
             self.postgres_container.remove(v=True, force=True)
             self.logger.debug(f"Removed container: {self.postgres_container_name}")
 
-        if remove_data and self.postgres_dir.exists():
-            shutil.rmtree(self.postgres_dir)
-            self.logger.debug(f"Removed postgres directory: {self.postgres_dir}")
+        if remove_data:
+            volume = self.postgres_volume
+            if volume:
+                volume.remove(force=True)
+                self.logger.debug(f"Removed postgres volume: {self.postgres_volume_name}")
 
         super()._reset_docker_test_env(remove_data=remove_data)
