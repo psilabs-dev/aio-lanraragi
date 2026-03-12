@@ -1,5 +1,6 @@
 import logging
 import platform
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--dockerfile", action="store", default=None, help="Path to a custom Dockerfile. If relative, resolved relative to --build. Cannot be combined with --git-url or --image.")
     parser.addoption("--windist", action="store", default=None, help="Path to the LRR app distribution for Windows.")
     parser.addoption("--staging", action="store", default=Path.cwd() / ".staging", help="Path to the LRR staging directory (defaults to .staging).")
+    parser.addoption("--server-logs", action="store", default=None, help="Absolute path to generated test-time server logs directory (not saved by default).")
     parser.addoption("--lrr-debug", action="store_true", default=False, help="Enable debug mode for the LRR logs.")
     parser.addoption(
         "--dev",
@@ -90,6 +92,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--playwright", action="store_true", default=False, help="Run Playwright UI tests. Requires `playwright install`")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
+    parser.addoption("--cache-backend", action="store", default="redis", choices=["redis", "valkey", "valkey8"], help="Cache backend for Docker deployments. Default: redis.")
 
 def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
@@ -158,6 +161,11 @@ def pytest_sessionstart(session: pytest.Session):
     Configure a global run ID for a pytest session.
     """
     config = session.config
+
+    server_logs = config.getoption("--server-logs")
+    if server_logs is not None and not Path(server_logs).is_absolute():
+        raise pytest.UsageError("--server-logs must be an absolute path.")
+
     config.global_run_id = int(time.time() * 1000)
     global_run_id = config.global_run_id
     npseed: int = config.getoption("--npseed")
@@ -176,41 +184,71 @@ def pytest_sessionstart(session: pytest.Session):
         f"avail_mem_gb={mem.available / (1024 ** 3):.2f}"
     )
 
+def _sanitize_nodeid(nodeid: str) -> str:
+    """Sanitize a pytest node ID into a filesystem-safe directory name."""
+    return re.sub(r'[^\w.\-]', '_', nodeid)
+
+
+def _save_server_logs(
+    server_logs_dir: Path,
+    nodeid: str,
+    environments: dict[str, AbstractLRRDeploymentContext],
+):
+    """
+    Save full server logs for each environment to the server-logs directory.
+
+    For LRR and Redis, file-based log readers are tried first. If they return
+    empty (e.g. LRR crashed before writing logs), process-level logs
+    (container stdout for Docker, console output deque for Windows) are used
+    as a fallback.
+    """
+    sanitized = _sanitize_nodeid(nodeid)
+    for prefix, environment in environments.items():
+        out_dir = server_logs_dir / sanitized / prefix
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # LRR logs: file-based, fallback to process logs.
+        lrr_logs = environment.read_lrr_logs()
+        if not lrr_logs:
+            lrr_logs = environment.get_lrr_logs(tail=10000).decode('utf-8', errors='replace')
+        if lrr_logs:
+            (out_dir / "lanraragi.log").write_text(lrr_logs, encoding='utf-8')
+
+        if environment.shinobu_logs_path.exists():
+            shinobu_logs = environment.read_log(environment.shinobu_logs_path)
+            if shinobu_logs:
+                (out_dir / "shinobu.log").write_text(shinobu_logs, encoding='utf-8')
+
+        mojo_logs = environment.read_mojo_logs()
+        if mojo_logs:
+            (out_dir / "mojo.log").write_text(mojo_logs, encoding='utf-8')
+
+        # Redis logs: file-based, fallback to process logs.
+        redis_logs = environment.read_redis_logs()
+        if not redis_logs:
+            redis_logs = environment.get_redis_logs(tail=10000).decode('utf-8', errors='replace')
+        if redis_logs:
+            (out_dir / "redis.log").write_text(redis_logs, encoding='utf-8')
+
+
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
     """
-    Some logic to allow pytest to retrieve the LRR environment during a test failure.
-    Dumps LRR logs from environment before containers are cleaned up as error logs.
-
-    To see these logs, include `--log-cli-level=ERROR`.
+    Save server logs to the --server-logs directory on test failure.
     """
     outcome = yield
     report: pytest.TestReport = outcome.get_result()
     if report.when in ("call", "setup") and report.failed:
-        if excinfo := call.excinfo:
-            LOGGER.error(f"Test threw {excinfo.typename} with message \"{excinfo.value}\": dumping logs... ({item.nodeid}, phase={report.when})")
-        else:
-            LOGGER.error(f"Test failed: dumping logs... ({item.nodeid}, phase={report.when})")
+        server_logs_dir = item.config.getoption("--server-logs")
+        if not server_logs_dir:
+            return
+        server_logs_dir = Path(server_logs_dir)
         try:
             if hasattr(item.session, 'lrr_environments') and item.session.lrr_environments:
                 environments_by_prefix: dict[str, AbstractLRRDeploymentContext] = item.session.lrr_environments
-                for prefix, environment in environments_by_prefix.items():
-                    LOGGER.error(f">>>>> LRR LOGS (prefix: \"{prefix}\") >>>>>")
-                    lrr_logs = environment.read_lrr_logs()
-                    lines = lrr_logs.split('\n')[-100:]
-                    for line in lines:
-                        LOGGER.error(line)
-                    LOGGER.error(f"<<<<< LRR LOGS (prefix: \"{prefix}\") <<<<<")
-                    LOGGER.error(f">>>>> SHINOBU LOGS (prefix: \"{prefix}\") >>>>>")
-                    shinobu_logs = environment.read_log(environment.shinobu_logs_path)
-                    lines = shinobu_logs.split('\n')[-100:]
-                    for line in lines:
-                        LOGGER.error(line)
-                    LOGGER.error(f"<<<<< SHINOBU LOGS (prefix: \"{prefix}\") <<<<<")
-                    LOGGER.error(f">>>>> REDIS LOGS (prefix: \"{prefix}\") >>>>>")
-                    environment.display_redis_logs()
-                    LOGGER.error(f"<<<<< REDIS LOGS (prefix: \"{prefix}\") <<<<<")
+                _save_server_logs(server_logs_dir, item.nodeid, environments_by_prefix)
+                LOGGER.info(f"Server logs saved to {server_logs_dir / _sanitize_nodeid(item.nodeid)}")
             else:
-                LOGGER.info("No environment available.")
-        except Exception as e:  # noqa: BLE001 — best-effort log dump
-            LOGGER.error(f"Failed to dump failure info: {e}")
+                LOGGER.info("No environment available for log collection.")
+        except Exception as e:  # noqa: BLE001 — best-effort log save
+            LOGGER.error(f"Failed to save server logs: {e}")

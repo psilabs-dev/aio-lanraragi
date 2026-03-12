@@ -12,6 +12,7 @@ import sys
 import tarfile
 import tempfile
 import time
+from enum import Enum
 from pathlib import Path
 from typing import override
 
@@ -30,10 +31,37 @@ from aio_lanraragi_tests.deployment.base import (
 )
 from aio_lanraragi_tests.exceptions import DeploymentException
 
-DEFAULT_REDIS_DOCKER_TAG = "redis:7.2.4"
 DEFAULT_LANRARAGI_DOCKER_TAG = "difegue/lanraragi"
 
 LOGGER = logging.getLogger(__name__)
+
+class DockerLRRCacheBackend(Enum):
+    REDIS = "redis"
+    VALKEY = "valkey"
+    VALKEY_8 = "valkey8"
+
+    @property
+    def is_valkey(self) -> bool:
+        return self in (DockerLRRCacheBackend.VALKEY, DockerLRRCacheBackend.VALKEY_8)
+
+    @property
+    def docker_tag(self): # Implicitly hinted
+        match self:
+            case DockerLRRCacheBackend.REDIS:
+                return "redis:7.2.4"
+            case DockerLRRCacheBackend.VALKEY:
+                return "valkey/valkey:7.2"
+            case DockerLRRCacheBackend.VALKEY_8:
+                return "valkey/valkey:8.1"
+
+def get_container_memory_mb(container: docker.models.containers.Container | None) -> float | None:
+    """Memory usage of a Docker container in MB, or None if container is unavailable."""
+    if container is None:
+        return None
+    stats = container.stats(stream=False)
+    mem_usage = stats["memory_stats"].get("usage", 0)
+    return mem_usage / (1024 * 1024)
+
 
 class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
@@ -225,11 +253,34 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self._lrr_gid = os.getgid()
         return self._lrr_gid
 
+    @property
+    def cache_backend(self) -> DockerLRRCacheBackend:
+        """
+        Returns LRR cache backend.
+        """
+        return self._cache_backend
+
+    @property
+    def cache_docker_tag(self):
+        return self.cache_backend.docker_tag
+
+    @property
+    def cache_server_bin(self) -> str:
+        if self.cache_backend.is_valkey:
+            return "valkey-server"
+        return "redis-server"
+
+    @property
+    def cache_cli_bin(self) -> str:
+        if self.cache_backend.is_valkey:
+            return "valkey-cli"
+        return "redis-cli"
+
     def __init__(
             self, build: str, image: str, git_url: str, git_ref: str, docker_client: docker.DockerClient, staging_dir: str,
             resource_prefix: str, port_offset: int,
             build_ref: str=None, dockerfile: str=None, docker_api: docker.APIClient=None, logger: logging.Logger | None=None,
-            global_run_id: int=None, is_allow_uploads: bool=True, is_force_build: bool=False
+            global_run_id: int=None, is_allow_uploads: bool=True, is_force_build: bool=False, cache_backend: DockerLRRCacheBackend=DockerLRRCacheBackend.REDIS
     ):
 
         self.resource_prefix = resource_prefix
@@ -261,6 +312,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger = logger
         self.is_allow_uploads = is_allow_uploads
         self._is_force_build = is_force_build
+        self._cache_backend = cache_backend
 
         if dockerfile is not None:
             dockerfile_path = Path(dockerfile)
@@ -337,6 +389,24 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         else:
             self.logger.warning("Redis container not available for log extraction")
             return b"No Redis container available"
+
+    @override
+    def read_redis_logs(self) -> str:
+        """
+        Read full Redis container logs as a string.
+        """
+        if self.redis_container:
+            return self.redis_container.logs().decode('utf-8', errors='replace')
+        self.logger.warning("Redis container not available for log extraction")
+        return ""
+
+    def get_cache_backend_memory_mb(self) -> float | None:
+        """Memory usage of the cache backend container in MB."""
+        return get_container_memory_mb(self.redis_container)
+
+    def get_lrr_memory_mb(self) -> float | None:
+        """Memory usage of the LRR container in MB."""
+        return get_container_memory_mb(self.lrr_container)
 
     @override
     def apply_plugins(self):
@@ -476,8 +546,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         # TODO: why does this exist
         self._applied_redis_conf_src = redis_conf_src
 
-        # pull redis
-        self._pull_docker_image_if_not_exists(DEFAULT_REDIS_DOCKER_TAG, force=False)
+        # pull cache backend image
+        self._pull_docker_image_if_not_exists(self.cache_docker_tag, force=False)
         # <<<<< IMAGE PREPARATION <<<<<
 
         # prepare the network
@@ -492,7 +562,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         redis_port = self.redis_port
         redis_container_name = self.redis_container_name
         redis_healthcheck = {
-            "test": [ "CMD", "redis-cli", "--raw", "incr", "ping" ],
+            "test": [ "CMD", self.cache_cli_bin, "--raw", "incr", "ping" ],
             "start_period": 1000000 * 1000 # 1s
         }
         redis_ports = {
@@ -500,7 +570,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         }
         redis_command = (
             [
-                "redis-server", self.redis_container_conf_path,
+                self.cache_server_bin, self.redis_container_conf_path,
                 "--bind", "0.0.0.0",
                 "--logfile", "",
                 "--pidfile", "/home/koyomi/lanraragi/database/redis.pid",
@@ -522,17 +592,23 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             # since redis is not the image we're testing here and the volumes are what carry data.
         else:
             self.logger.debug(f"Creating redis container: {self.redis_container_name}")
+            create_kwargs = {
+                "name": redis_container_name,
+                "command": redis_command,
+                "user": f"{self.lrr_uid}:{self.lrr_gid}",
+                "hostname": redis_container_name,
+                "detach": True,
+                "network": network_name,
+                "ports": redis_ports,
+                "healthcheck": redis_healthcheck,
+                "volumes": redis_volumes,
+            }
+            # Valkey's entrypoint checks writability of cwd (/data by default);
+            # override to the bind-mounted data dir so the check passes.
+            if self.cache_backend.is_valkey:
+                create_kwargs["working_dir"] = self.redis_container_data_path
             self.redis_container = self.docker_client.containers.create(
-                DEFAULT_REDIS_DOCKER_TAG,
-                name=redis_container_name,
-                command=redis_command,
-                user=f"{self.lrr_uid}:{self.lrr_gid}",  # unix UID:GID
-                hostname=redis_container_name,
-                detach=True,
-                network=network_name,
-                ports=redis_ports,
-                healthcheck=redis_healthcheck,
-                volumes=redis_volumes,
+                self.cache_docker_tag, **create_kwargs
             )
 
         # then prepare the LRR container.
@@ -733,7 +809,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         container = self.redis_container
         if container is None:
             raise DeploymentException("No redis container found!")
-        return container.exec_run(["bash", "-c", f'redis-cli <<EOF\n{command}\nEOF'])
+        return container.exec_run(["bash", "-c", f'{self.cache_cli_bin} <<EOF\n{command}\nEOF'])
 
     def _extract_redis_conf_from_image(self, image_id: str) -> Path:
         """

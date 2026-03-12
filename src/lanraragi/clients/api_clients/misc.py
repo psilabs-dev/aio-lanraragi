@@ -76,13 +76,12 @@ class _MiscApiClient(_ApiClient):
         POST /api/plugins/use
         """
         url = self.api_context.build_url("/api/plugins/use")
-        form_data = aiohttp.FormData(quote_fields=False)
-        form_data.add_field('plugin', request.plugin)
+        params = {"plugin": request.plugin}
         if request.arcid:
-            form_data.add_field('id', request.arcid)
+            params["id"] = request.arcid
         if request.arg:
-            form_data.add_field('arg', request.arg)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, data=form_data)
+            params["arg"] = request.arg
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, params=params)
         if status == 200:
             raw = UsePluginRawResponse.model_validate_json(content)
             if raw.success == 0:
@@ -96,13 +95,12 @@ class _MiscApiClient(_ApiClient):
         POST /api/plugins/queue
         """
         url = self.api_context.build_url("/api/plugins/queue")
-        form_data = aiohttp.FormData(quote_fields=False)
-        form_data.add_field('plugin', request.plugin)
+        params = {"plugin": request.plugin}
         if request.arcid:
-            form_data.add_field('id', request.arcid)
+            params["id"] = request.arcid
         if request.arg:
-            form_data.add_field('arg', request.arg)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, data=form_data)
+            params["arg"] = request.arg
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, params=params)
         if status == 200:
             response_j = json.loads(content)
             job = response_j.get("job")

@@ -301,6 +301,12 @@ class AbstractLRRDeploymentContext(abc.ABC):
         """
 
     @abc.abstractmethod
+    def read_redis_logs(self) -> str:
+        """
+        Read full Redis logs as a string.
+        """
+
+    @abc.abstractmethod
     def apply_plugins(self):
         """
         Applies plugins to the LRR target plugins directory.
@@ -440,7 +446,6 @@ class AbstractLRRDeploymentContext(abc.ABC):
     def test_lrr_connection(self, port: int, test_connection_max_retries: int=4):
         """
         Test the LRR connection with retry and exponential backoff.
-        If connection is not established by then, teardown the deployment completely and raise an exception.
 
         Args:
             `test_connection_max_retries`: max number of retries before throwing a `DeploymentException`.
@@ -450,27 +455,17 @@ class AbstractLRRDeploymentContext(abc.ABC):
             try:
                 resp = requests.get(f"http://127.0.0.1:{port}")
                 if resp.status_code != 200:
-                    self.teardown(remove_data=True)
                     raise DeploymentException(f"Response status code is not 200: {resp.status_code}")
                 else:
                     break
             except requests.exceptions.ConnectionError:
                 if retry_count < test_connection_max_retries:
                     time_to_sleep = 2 ** (retry_count + 1)
-
-                    if retry_count < test_connection_max_retries-3:
-                        self.logger.debug(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
-                    elif retry_count < test_connection_max_retries-2:
-                        self.logger.info(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
-                    elif retry_count < test_connection_max_retries-1:
-                        self.logger.warning(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
+                    self.logger.debug(f"Could not reach LRR server ({retry_count+1}/{test_connection_max_retries}); retrying after {time_to_sleep}s.")
                     retry_count += 1
                     time.sleep(time_to_sleep)
                     continue
                 else:
-                    self.logger.error("Failed to connect to LRR server! Dumping logs and shutting down server.")
-                    self.display_lrr_logs()
-                    self.teardown(remove_data=True)
                     raise DeploymentException("Failed to connect to the LRR server!")
 
     def test_redis_connection(self, max_retries: int=4):
@@ -482,44 +477,11 @@ class AbstractLRRDeploymentContext(abc.ABC):
                 break
             except redis.exceptions.ConnectionError:
                 if retry_count >= max_retries:
-                    self.logger.error("Failed to connect to Redis! Dumping Redis logs...")
-                    self.display_redis_logs()
                     raise
                 time_to_sleep = 2 ** (retry_count + 1)
-                self.logger.warning(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
+                self.logger.debug(f"Failed to connect to Redis. Retry in {time_to_sleep}s ({retry_count+1}/{max_retries})...")
                 retry_count += 1
                 time.sleep(time_to_sleep)
-
-    def display_lrr_logs(self, tail: int=100, log_level: int=logging.ERROR):
-        """
-        Display LRR logs to (error) output, used for debugging.
-        This is still used by containers, in case log files do not exist.
-
-        Args:
-            tail: show up to how many lines from the last output
-            log_level: integer value level of log (see logging module)
-        """
-        lrr_logs = self.get_lrr_logs(tail=tail)
-        if lrr_logs:
-            log_text = lrr_logs.decode('utf-8', errors='replace')
-            for line in log_text.split('\n'):
-                if line.strip():
-                    self.logger.log(log_level, f"LRR: {line}")
-
-    def display_redis_logs(self, tail: int=100, log_level: int=logging.ERROR):
-        """
-        Display Redis logs to (error) output, used for debugging.
-
-        Args:
-            tail: show up to how many lines from the last output
-            log_level: integer value level of log (see logging module)
-        """
-        redis_logs = self.get_redis_logs(tail=tail)
-        if redis_logs:
-            log_text = redis_logs.decode('utf-8', errors='replace')
-            for line in log_text.split('\n'):
-                if line.strip():
-                    self.logger.log(log_level, f"Redis: {line}")
 
     def _read_log_with_rotated_gzip(self, base_filename: str) -> str:
         """

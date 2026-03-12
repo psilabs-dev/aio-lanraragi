@@ -5,7 +5,10 @@ import docker
 import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
+from aio_lanraragi_tests.deployment.docker import (
+    DockerLRRCacheBackend,
+    DockerLRRDeploymentContext,
+)
 from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
 
@@ -43,6 +46,7 @@ def generate_deployment(
             dockerfile: str = request.config.getoption("--dockerfile")
             use_docker_api: bool = request.config.getoption("--docker-api")
             staging_dir: str = request.config.getoption("--staging")
+            cache_backend: str = request.config.getoption("--cache-backend")
             if dockerfile and git_url:
                 raise DeploymentException("--dockerfile cannot be combined with --git-url.")
             if dockerfile and image:
@@ -53,7 +57,8 @@ def generate_deployment(
                 build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
                 build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
                 global_run_id=global_run_id, is_allow_uploads=True,
-                logger=logger
+                logger=logger,
+                cache_backend=DockerLRRCacheBackend(cache_backend),
             )
 
     return environment

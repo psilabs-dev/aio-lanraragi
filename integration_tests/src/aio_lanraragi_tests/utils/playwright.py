@@ -58,3 +58,18 @@ async def assert_no_spinner(page: playwright.async_api.Page, timeout_ms: int = 3
         """() => !document.querySelector('#i3.loading')""",
         timeout=timeout_ms,
     )
+
+async def get_image_bytes_from_responses(
+        responses: list[playwright.async_api._generated.Response],
+        img_src: str,
+) -> bytes:
+    """
+    Find the captured browser response matching a given image src URL and return its body bytes.
+
+    Searches the captured responses list for a successful GET matching the exact URL.
+    Raises AssertionError if no matching response is found.
+    """
+    for resp in responses:
+        if resp.request.method == "GET" and resp.url == img_src and resp.status == 200:
+            return await resp.body()
+    raise AssertionError(f"Could not find browser response for img src={img_src!r}")
