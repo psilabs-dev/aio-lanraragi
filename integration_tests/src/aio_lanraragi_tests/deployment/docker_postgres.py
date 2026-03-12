@@ -25,7 +25,11 @@ from aio_lanraragi_tests.deployment.docker import (
 )
 from aio_lanraragi_tests.exceptions import DeploymentException
 
-DEFAULT_POSTGRES_DOCKER_TAG = "postgres:18"
+# Pin to exact minor version. Postgres 18+ changed PGDATA layout
+# (https://github.com/docker-library/postgres/pull/1259) and has WAL
+# permission issues with bind-mounted data dirs on macOS/Colima.
+# Use 17.x until the pg18 bind-mount story stabilises.
+DEFAULT_POSTGRES_DOCKER_TAG = "postgres:17.4"
 
 LOGGER = logging.getLogger(__name__)
 
