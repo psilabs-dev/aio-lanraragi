@@ -15,6 +15,7 @@ import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
 
+from aio_lanraragi_tests.common import DEFAULT_LRR_PASSWORD
 from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
@@ -34,7 +35,6 @@ LOGGER = logging.getLogger(__name__)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1468")
 async def test_header_click_sort(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -198,7 +198,6 @@ async def test_header_click_sort(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.xfail(reason="Fails with a TODO from last year.")
 async def test_compact_column_sort_with_three_columns(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -688,6 +687,176 @@ async def test_custom_column_sort_display(
             assert sort_value == "title", (
                 f"Sort dropdown should show 'title' after selecting it. Got '{sort_value}'."
             )
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.dev("namespace-exclusion")
+async def test_search_autocomplete_namespace_exclusion(
+    lrr_client: LRRClient,
+    semaphore: asyncio.Semaphore,
+    environment: AbstractLRRDeploymentContext,
+) -> None:
+    """
+    Test that excluded namespaces are filtered from search autocomplete suggestions.
+
+    1. Upload 3 archives with both normal (artist, series) and noisy (source, date_added) tags.
+    2. Rebuild stat hashes.
+    3. Navigate to settings, configure excluded namespaces via UI, save.
+    4. Navigate to index page, verify excluded namespaces absent from sort dropdown.
+    5. Type partial match for an excluded tag, verify no suggestions appear.
+    6. Type partial match for a non-excluded tag, verify exact expected suggestions.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        archive_tags = [
+            "artist:alice,series:foo,source:https://a.test,date_added:1700000000",
+            "artist:alice,series:bar,source:https://b.test,date_added:1700000001",
+            "artist:bob,series:foo,source:https://c.test,date_added:1700000002",
+        ]
+        for i, tags in enumerate(archive_tags):
+            save_path = create_archive_file(tmpdir, f"archive-{i}", 3)
+            response, error = await upload_archive(
+                lrr_client, save_path, save_path.name, semaphore,
+                title=f"archive {i}", tags=tags,
+            )
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> STAT REBUILD STAGE >>>>>
+    await trigger_stat_rebuild(lrr_client)
+    # <<<<< STAT REBUILD STAGE <<<<<
+
+    # >>>>> SETTINGS STAGE >>>>>
+    # Navigate to settings UI, configure excluded namespaces, save.
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await bc.new_page()
+
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            # login to access settings
+            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+            await page.wait_for_load_state("networkidle")
+            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+            await page.get_by_role("button", name="Login").click()
+            await page.wait_for_load_state("networkidle")
+
+            # navigate to settings
+            await page.goto(f"{lrr_client.lrr_base_url}/config", timeout=60000)
+            await page.wait_for_load_state("networkidle")
+
+            # open "Tags and Thumbnails" section
+            await page.get_by_text("Tags and Thumbnails").click()
+            await page.wait_for_timeout(300)
+
+            # fill in excluded namespaces
+            excluded_input = page.locator("input[name='excludednamespaces']")
+            await excluded_input.wait_for(state="visible", timeout=5000)
+            await excluded_input.fill("source,date_added")
+
+            # save settings
+            await page.get_by_role("button", name="Save Settings").click()
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(500)
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< SETTINGS STAGE <<<<<
+
+    # verify /api/info returns the excluded namespaces
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to get server info (status {error.status}): {error.error}"
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await bc.new_page()
+
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            await page.goto(lrr_client.lrr_base_url, timeout=60000)
+            await page.wait_for_load_state("domcontentloaded")
+            await page.wait_for_load_state("networkidle")
+
+            # dismiss new version overlay if present
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
+
+            # wait for stat-driven namespace options to populate the sort dropdown
+            sort_dropdown = page.locator("#namespace-sortby")
+            await sort_dropdown.locator("option[value='artist']").wait_for(state="attached", timeout=10000)
+
+            # verify excluded namespaces are NOT in the sort dropdown
+            options = await sort_dropdown.locator("option").all()
+            option_values = []
+            for opt in options:
+                option_values.append(await opt.get_attribute("value"))
+            LOGGER.info(f"Sort dropdown options: {option_values}")
+            assert "source" not in option_values, "Expected 'source' to be excluded from sort dropdown"
+            assert "date_added" not in option_values, "Expected 'date_added' to be excluded from sort dropdown"
+            assert "artist" in option_values, "Expected 'artist' in sort dropdown options"
+            assert "series" in option_values, "Expected 'series' in sort dropdown options"
+
+            # type a partial match for an excluded namespace tag into search bar
+            search_input = page.locator("#search-input")
+            await search_input.click()
+            await search_input.fill(".test")
+            await page.wait_for_timeout(500)
+
+            # excluded tags must not appear in suggestions
+            suggestion_items = page.locator(".awesomplete > ul > li")
+            suggestions = []
+            for i in range(await suggestion_items.count()):
+                suggestions.append(await suggestion_items.nth(i).inner_text())
+            LOGGER.info(f"Awesomplete suggestions for '.test': {suggestions}")
+            assert len(suggestions) == 0, f"Expected no suggestions for excluded namespace, got: {suggestions}"
+
+            # type a partial match for a non-excluded tag
+            await search_input.fill("")
+            await page.wait_for_timeout(200)
+            await search_input.fill("alice")
+            await page.wait_for_timeout(500)
+
+            suggestion_items = page.locator(".awesomplete > ul > li")
+            suggestions = []
+            for i in range(await suggestion_items.count()):
+                suggestions.append(await suggestion_items.nth(i).inner_text())
+            LOGGER.info(f"Awesomplete suggestions for 'alice': {suggestions}")
+            assert len(suggestions) == 1, f"Expected exactly 1 suggestion, got: {suggestions}"
+            assert suggestions[0] == "artist:alice", f"Expected 'artist:alice', got: {suggestions[0]}"
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)

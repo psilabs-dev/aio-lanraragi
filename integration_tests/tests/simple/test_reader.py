@@ -211,11 +211,15 @@ async def test_webkit_reader_preload(
                 f"next_page_url_fragment={next_page_url}"
             )
 
-            # check that prefetch URL doesn't appear again.
+            # check that prefetch URL doesn't appear again (GET refetch or HEAD size request).
             for response in responses[responses_before_page_turn:]:
-                if response.request.method != "GET":
+                if response.request.method not in ("GET", "HEAD"):
                     continue
-                assert response.url != prefetched_url, f"Detected URL refetch for prefetched page during page turn: {prefetched_url}"
+                if next_page_url not in response.url:
+                    continue
+                assert False, (
+                    f"Detected {response.request.method} request for prefetched page during page turn: {response.url}"
+                )
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
@@ -227,6 +231,7 @@ async def test_webkit_reader_preload(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
+@pytest.mark.regression
 async def test_double_page_navigation(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 ):
@@ -839,7 +844,6 @@ async def test_slideshow_continue_navigation(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.xfail(reason="requires LRR-side fix: overlay re-render timing in addTocSection/removeTocSection", strict=False)
 async def test_toc_reader(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 ):

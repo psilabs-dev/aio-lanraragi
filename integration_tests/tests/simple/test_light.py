@@ -260,7 +260,6 @@ async def test_drop_database(lrr_client: LRRClient, environment: AbstractLRRDepl
     expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
-@pytest.mark.dev("openapi")
 async def test_openapi_invalid_request(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     - PR: https://github.com/Difegue/LANraragi/pull/1448

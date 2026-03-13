@@ -354,6 +354,7 @@ async def test_random_archive_search(
 
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
+@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1473", strict=False)
 @pytest.mark.asyncio
 async def test_custom_namespaces(
     lrr_client: LRRClient,
@@ -448,12 +449,10 @@ async def test_custom_namespaces(
     )
     assert not error, f"Sort by artist desc failed (status {error.status}): {error.error}"
     titles = [r.title for r in response.data]
-    # In descending order, archives without artist (zzzz) are reversed to the front
-    # Order: zzzz (x2), d, c, b, a, a
-    # First two should be the ones without artist tag
-    archives_without_artist = titles[:2]
+    # Archives missing the sort namespace should be at the back regardless of sort direction
+    archives_without_artist = titles[-2:]
     assert set(archives_without_artist) == {"Title 4 No Artist", "Title 6 No Tags"}, \
-        f"Archives without artist should be first in desc order: {archives_without_artist}"
+        f"Archives without artist should be at end in desc order: {archives_without_artist}"
     LOGGER.debug("Sort by artist descending test passed.")
     # <<<<< NAMESPACE SORT TESTS: ARTIST DESCENDING <<<<<
 

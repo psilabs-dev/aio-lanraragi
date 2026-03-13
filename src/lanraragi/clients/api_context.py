@@ -279,16 +279,16 @@ class ApiContextManager(contextlib.AbstractAsyncContextManager):
                     case http.HTTPMethod.GET:
                         async with (await self._get_session()).get(url=url, headers=headers, params=params, data=data, json=json_data) as async_response:
                             if data:
-                                self.logger.warning("GET requests should not include a data field.")
+                                self.logger.debug("GET requests should not include a data field.")
                             return (async_response.status, await async_response.text())
                     case http.HTTPMethod.PUT:
                         if params:
-                            self.logger.warning("PUT requests should not include query parameters.")
+                            self.logger.debug("PUT requests should not include query parameters.")
                         async with (await self._get_session()).put(url=url, headers=headers, params=params, data=data, json=json_data) as async_response:
                             return (async_response.status, await async_response.text())
                     case http.HTTPMethod.POST:
                         if params:
-                            self.logger.warning("POST requests should not include query parameters.")
+                            self.logger.debug("POST requests should not include query parameters.")
                         async with (await self._get_session()).post(url=url, headers=headers, params=params, data=data, json=json_data) as async_response:
                             return (async_response.status, await async_response.text())
                     case http.HTTPMethod.DELETE:
