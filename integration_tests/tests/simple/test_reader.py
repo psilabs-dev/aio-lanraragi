@@ -844,7 +844,6 @@ async def test_slideshow_continue_navigation(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.xfail(reason="requires LRR-side fix: overlay re-render timing in addTocSection/removeTocSection", strict=False)
 async def test_toc_reader(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 ):
