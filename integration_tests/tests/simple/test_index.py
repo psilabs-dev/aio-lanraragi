@@ -35,7 +35,6 @@ LOGGER = logging.getLogger(__name__)
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1468")
 async def test_header_click_sort(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -199,7 +198,6 @@ async def test_header_click_sort(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1468")
 async def test_compact_column_sort_with_three_columns(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
