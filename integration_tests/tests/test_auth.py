@@ -520,7 +520,6 @@ async def test_api_auth_matrix(
         )
 
 @pytest.mark.asyncio
-@pytest.mark.dev("openapi")
 async def test_options_preflight_matrix(environment: AbstractLRRDeploymentContext, lrr_client: LRRClient, is_lrr_debug_mode: bool):
     """
     Test OPTIONS preflight across all CORS x nofun combinations.
