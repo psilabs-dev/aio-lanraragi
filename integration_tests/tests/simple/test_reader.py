@@ -231,6 +231,7 @@ async def test_webkit_reader_preload(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
+@pytest.mark.regression
 async def test_double_page_navigation(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 ):
