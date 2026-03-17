@@ -80,14 +80,25 @@ def generate_deployment(
             docker_client = docker.from_env()
             docker_api = docker_client.api if use_docker_api else None
             use_postgres: bool = request.config.getoption("--postgres")
-            deployment_cls = DockerPostgresLRRDeploymentContext if use_postgres else ContainerLRRDeploymentContext
-            environment = deployment_cls(
-                build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
-                build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
-                global_run_id=global_run_id, is_allow_uploads=True,
-                logger=logger,
-                cache_backend=ContainerLRRCacheBackend(cache_backend),
-                container_runtime=container_runtime,
-            )
+            if use_postgres:
+                postgres_jit: bool = request.config.getoption("postgres_jit")
+                environment = DockerPostgresLRRDeploymentContext(
+                    build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
+                    build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
+                    global_run_id=global_run_id, is_allow_uploads=True,
+                    logger=logger,
+                    cache_backend=ContainerLRRCacheBackend(cache_backend),
+                    container_runtime=container_runtime,
+                    postgres_jit=postgres_jit,
+                )
+            else:
+                environment = ContainerLRRDeploymentContext(
+                    build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
+                    build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
+                    global_run_id=global_run_id, is_allow_uploads=True,
+                    logger=logger,
+                    cache_backend=ContainerLRRCacheBackend(cache_backend),
+                    container_runtime=container_runtime,
+                )
 
     return environment

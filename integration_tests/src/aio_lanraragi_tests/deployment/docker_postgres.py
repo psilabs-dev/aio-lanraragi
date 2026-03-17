@@ -15,7 +15,6 @@ import logging
 import time
 from typing import override
 
-import docker.errors
 import docker.models.containers
 import docker.models.volumes
 
@@ -71,6 +70,20 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
     def postgres_volume(self) -> docker.models.volumes.Volume | None:
         return self._get_volume_by_name(self.postgres_volume_name)
 
+    @property
+    def postgres_jit(self) -> bool:
+        """
+        Whether PostgreSQL JIT compilation is enabled (recommend enabled).
+
+        JIT compiles query expressions into native code at execution time.
+        At large scale (100K+ archives), JIT amortizes its upfront compilation
+        cost (~80-125ms) through faster execution of complex queries involving
+        tag filters, correlated subqueries, and multi-table joins. At small
+        scale (<10K archives), JIT overhead dominates query execution time
+        and should be disabled for accurate profiling.
+        """
+        return self._postgres_jit
+
     def __init__(
         self, build: str, image: str, git_url: str, git_ref: str,
         docker_client, staging_dir: str,
@@ -80,6 +93,7 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
         global_run_id: int = None, is_allow_uploads: bool = True,
         is_force_build: bool = False,
         cache_backend: DockerLRRCacheBackend = DockerLRRCacheBackend.REDIS,
+        postgres_jit: bool = True,
     ):
         super().__init__(
             build, image, git_url, git_ref, docker_client, staging_dir,
@@ -89,6 +103,7 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
             is_allow_uploads=is_allow_uploads, is_force_build=is_force_build,
             cache_backend=cache_backend,
         )
+        self._postgres_jit = postgres_jit
 
     def get_postgres_logs(self, tail: int = 100) -> bytes:
         if self.postgres_container:
@@ -144,13 +159,15 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
 
         # create postgres container
         if not self.postgres_container:
-            self.logger.debug(f"Creating postgres container: {self.postgres_container_name}")
+            jit_value = "on" if self.postgres_jit else "off"
+            self.logger.debug(f"Creating postgres container: {self.postgres_container_name} (jit={jit_value})")
             self.postgres_container = self.docker_client.containers.create(
                 DEFAULT_POSTGRES_DOCKER_TAG,
                 name=self.postgres_container_name,
                 hostname=self.postgres_container_name,
                 detach=True,
                 network=self.network_name,
+                command=["postgres", "-c", f"jit={jit_value}"],
                 ports={"5432/tcp": self.postgres_port},
                 healthcheck={
                     "test": ["CMD-SHELL", "pg_isready -U postgres"],
