@@ -123,6 +123,14 @@ def pytest_addoption(parser: pytest.Parser):
         "--no-postgres-jit", action="store_false", default=True, dest="postgres_jit",
         help="Disable PostgreSQL JIT compilation (enabled by default).",
     )
+    parser.addoption(
+        "--postgres-shared-buffers", type=int, action="store", default=128,
+        help="Postgres shared buffer in MB (default 128)",
+    )
+    parser.addoption(
+        "--postgres-work-mem", type=int, action="store", default=4,
+        help="Postgres work_mem in MB (default 4)"
+    )
 
 def pytest_configure(config: pytest.Config):
     config.addinivalue_line(

@@ -84,6 +84,28 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
         """
         return self._postgres_jit
 
+    @property
+    def postgres_shared_buffers_mb(self) -> int:
+        """PostgreSQL shared_buffers size in MB.
+
+        Controls the amount of memory dedicated to caching table and index data.
+        Default Postgres value is 128MB. For datasets with 100K+ archives,
+        256-512MB allows the full working set (archive table, tag map, indexes)
+        to stay resident in shared buffers, eliminating disk reads after warmup.
+        """
+        return self._postgres_shared_buffers_mb
+
+    @property
+    def postgres_work_mem_mb(self) -> int:
+        """PostgreSQL work_mem size in MB.
+
+        Controls per-operation memory for sorts and hash aggregates. Default
+        Postgres value is 4MB. Search queries with large result sets (sorting
+        100K titles with ICU collation, hash aggregating tag maps) spill to
+        disk at 4MB. 16-32MB keeps these operations in memory.
+        """
+        return self._postgres_work_mem_mb
+
     def __init__(
         self, build: str, image: str, git_url: str, git_ref: str,
         docker_client, staging_dir: str,
@@ -94,6 +116,8 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
         is_force_build: bool = False,
         cache_backend: DockerLRRCacheBackend = DockerLRRCacheBackend.REDIS,
         postgres_jit: bool = True,
+        postgres_shared_buffers_mb: int = 128,
+        postgres_work_mem_mb: int = 4,
     ):
         super().__init__(
             build, image, git_url, git_ref, docker_client, staging_dir,
@@ -104,6 +128,8 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
             cache_backend=cache_backend,
         )
         self._postgres_jit = postgres_jit
+        self._postgres_shared_buffers_mb = postgres_shared_buffers_mb
+        self._postgres_work_mem_mb = postgres_work_mem_mb
 
     def get_postgres_logs(self, tail: int = 100) -> bytes:
         if self.postgres_container:
@@ -160,14 +186,23 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
         # create postgres container
         if not self.postgres_container:
             jit_value = "on" if self.postgres_jit else "off"
-            self.logger.debug(f"Creating postgres container: {self.postgres_container_name} (jit={jit_value})")
+            self.logger.debug(
+                f"Creating postgres container: {self.postgres_container_name} "
+                f"(jit={jit_value}, shared_buffers={self.postgres_shared_buffers_mb}MB, "
+                f"work_mem={self.postgres_work_mem_mb}MB)"
+            )
             self.postgres_container = self.docker_client.containers.create(
                 DEFAULT_POSTGRES_DOCKER_TAG,
                 name=self.postgres_container_name,
                 hostname=self.postgres_container_name,
                 detach=True,
                 network=self.network_name,
-                command=["postgres", "-c", f"jit={jit_value}"],
+                command=[
+                    "postgres",
+                    "-c", f"jit={jit_value}",
+                    "-c", f"shared_buffers={self.postgres_shared_buffers_mb}MB",
+                    "-c", f"work_mem={self.postgres_work_mem_mb}MB",
+                ],
                 ports={"5432/tcp": self.postgres_port},
                 healthcheck={
                     "test": ["CMD-SHELL", "pg_isready -U postgres"],
