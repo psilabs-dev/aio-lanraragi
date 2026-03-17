@@ -119,6 +119,10 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--port-offset", type=int, action="store", default=0, help="Session-wide base port offset added to per-module offsets. Use to avoid conflicts between parallel sessions.")
     parser.addoption("--resource-prefix", action="store", default="", help="Session-wide prefix prepended to per-module resource prefixes. Use to isolate parallel sessions.")
     parser.addoption("--postgres", action="store_true", default=False, help="Deploy PostgreSQL alongside Redis for metadata/search (Docker only).")
+    parser.addoption(
+        "--no-postgres-jit", action="store_false", default=True, dest="postgres_jit",
+        help="Disable PostgreSQL JIT compilation (enabled by default).",
+    )
 
 def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
