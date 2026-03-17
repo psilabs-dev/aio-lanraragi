@@ -57,13 +57,23 @@ def generate_deployment(
             docker_client = docker.from_env()
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
             use_postgres: bool = request.config.getoption("--postgres")
-            deployment_cls = DockerPostgresLRRDeploymentContext if use_postgres else DockerLRRDeploymentContext
-            environment = deployment_cls(
-                build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
-                build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
-                global_run_id=global_run_id, is_allow_uploads=True,
-                logger=logger,
-                cache_backend=DockerLRRCacheBackend(cache_backend),
-            )
+            if use_postgres:
+                postgres_jit: bool = request.config.getoption("postgres_jit")
+                environment = DockerPostgresLRRDeploymentContext(
+                    build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
+                    build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
+                    global_run_id=global_run_id, is_allow_uploads=True,
+                    logger=logger,
+                    cache_backend=DockerLRRCacheBackend(cache_backend),
+                    postgres_jit=postgres_jit,
+                )
+            else:
+                environment = DockerLRRDeploymentContext(
+                    build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
+                    build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
+                    global_run_id=global_run_id, is_allow_uploads=True,
+                    logger=logger,
+                    cache_backend=DockerLRRCacheBackend(cache_backend),
+                )
 
     return environment
