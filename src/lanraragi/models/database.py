@@ -5,6 +5,7 @@ from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 
 class GetDatabaseStatsRequest(LanraragiRequest):
     minweight: int = Field(1)
+    hide_excluded_namespaces: bool | None = Field(None)
 
 class GetDatabaseStatsResponseTag(BaseModel):
     namespace: str = Field(...)

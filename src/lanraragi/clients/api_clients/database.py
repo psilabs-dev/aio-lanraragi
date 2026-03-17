@@ -26,6 +26,8 @@ class _DatabaseApiClient(_ApiClient):
         url = self.api_context.build_url("/api/database/stats")
         params = {}
         params["minweight"] = request.minweight
+        if request.hide_excluded_namespaces:
+            params["hide_excluded_namespaces"] = "true"
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers, params=params)
         if status == 200:
             return (_process_get_database_stats_response(content), None)

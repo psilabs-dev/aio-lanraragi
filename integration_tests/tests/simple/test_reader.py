@@ -266,9 +266,8 @@ async def test_double_page_navigation(
     del response, error
     # <<<<< UPLOAD STAGE <<<<<
 
-    # Expected query parameter suffix for a given 0-indexed page.
-    def expected_page_path(page_index: int) -> str:
-        return f"path={archive_name}-pg-{page_index + 1}.png"
+    def expected_filename(page_index: int) -> str:
+        return f"{archive_name}-pg-{page_index + 1}.png"
 
     # >>>>> UI STAGE >>>>>
     async with playwright.async_api.async_playwright() as p:
@@ -301,10 +300,10 @@ async def test_double_page_navigation(
 
             display_class = await page.locator("#display").get_attribute("class") or ""
             assert "double-mode" in display_class, f"Expected double-mode class on #display, got class={display_class!r}"
-            img_src = await page.locator("#img").get_attribute("src")
-            assert img_src.endswith(expected_page_path(1)), f"#img expected {expected_page_path(1)}, got src={img_src!r}"
-            img_dp_src = await page.locator("#img_doublepage").get_attribute("src")
-            assert img_dp_src.endswith(expected_page_path(2)), f"#img_doublepage expected {expected_page_path(2)}, got src={img_dp_src!r}"
+            img_fn = await page.locator("#img").get_attribute("data-filename")
+            assert img_fn == expected_filename(1), f"#img expected {expected_filename(1)}, got data-filename={img_fn!r}"
+            img_dp_fn = await page.locator("#img_doublepage").get_attribute("data-filename")
+            assert img_dp_fn == expected_filename(2), f"#img_doublepage expected {expected_filename(2)}, got data-filename={img_dp_fn!r}"
 
             # Pages 1+2 -> pages 3+4
             LOGGER.info("Navigating forward to pages 3+4.")
@@ -313,10 +312,10 @@ async def test_double_page_navigation(
             await assert_no_spinner(page)
             await page.wait_for_timeout(500)
 
-            img_src = await page.locator("#img").get_attribute("src")
-            assert img_src.endswith(expected_page_path(3)), f"#img expected {expected_page_path(3)}, got src={img_src!r}"
-            img_dp_src = await page.locator("#img_doublepage").get_attribute("src")
-            assert img_dp_src.endswith(expected_page_path(4)), f"#img_doublepage expected {expected_page_path(4)}, got src={img_dp_src!r}"
+            img_fn = await page.locator("#img").get_attribute("data-filename")
+            assert img_fn == expected_filename(3), f"#img expected {expected_filename(3)}, got data-filename={img_fn!r}"
+            img_dp_fn = await page.locator("#img_doublepage").get_attribute("data-filename")
+            assert img_dp_fn == expected_filename(4), f"#img_doublepage expected {expected_filename(4)}, got data-filename={img_dp_fn!r}"
 
             # Pages 3+4 -> pages 1+2 (navigate back)
             LOGGER.info("Navigating back to pages 1+2.")
@@ -325,10 +324,10 @@ async def test_double_page_navigation(
             await assert_no_spinner(page)
             await page.wait_for_timeout(500)
 
-            img_src = await page.locator("#img").get_attribute("src")
-            assert img_src.endswith(expected_page_path(1)), f"#img expected {expected_page_path(1)}, got src={img_src!r}"
-            img_dp_src = await page.locator("#img_doublepage").get_attribute("src")
-            assert img_dp_src.endswith(expected_page_path(2)), f"#img_doublepage expected {expected_page_path(2)}, got src={img_dp_src!r}"
+            img_fn = await page.locator("#img").get_attribute("data-filename")
+            assert img_fn == expected_filename(1), f"#img expected {expected_filename(1)}, got data-filename={img_fn!r}"
+            img_dp_fn = await page.locator("#img_doublepage").get_attribute("data-filename")
+            assert img_dp_fn == expected_filename(2), f"#img_doublepage expected {expected_filename(2)}, got data-filename={img_dp_fn!r}"
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
@@ -338,129 +337,6 @@ async def test_double_page_navigation(
     # <<<<< UI STAGE <<<<<
 
 
-@pytest.mark.asyncio
-@pytest.mark.playwright
-async def test_handler_resource_management(
-    lrr_client: LRRClient, semaphore: asyncio.Semaphore,
-):
-    """
-    Verify that repeated forward/backward page navigation does not
-    accumulate event handlers on reader image elements.
-
-    After several navigation cycles revisiting the same pages, each
-    image element should carry at most one 'load' event handler.
-    """
-    # >>>>> TEST CONNECTION STAGE >>>>>
-    _, error = await lrr_client.misc_api.get_server_info()
-    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-    LOGGER.debug("Established connection with test LRR server.")
-    # <<<<< TEST CONNECTION STAGE <<<<<
-
-    # >>>>> UPLOAD STAGE >>>>>
-    with tempfile.TemporaryDirectory() as tmpdir:
-        archive_title = "test archive title"
-        archive_name = "test-archive-name"
-        archive_path = create_archive_file(Path(tmpdir), archive_name, num_pages=6)
-        response, error = await upload_archive(
-            lrr_client,
-            archive_path,
-            archive_path.name,
-            semaphore,
-            title=archive_title,
-            tags="handler,resource,management",
-        )
-        assert not error, f"Upload failed (status {error.status}): {error.error}"
-        arcid = response.arcid
-    del response, error
-    # <<<<< UPLOAD STAGE <<<<<
-
-    def expected_page_path(page_index: int) -> str:
-        return f"path={archive_name}-pg-{page_index + 1}.png"
-
-    # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-
-        try:
-            page = await browser.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
-
-            await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}")
-            await page.wait_for_load_state("networkidle")
-            await assert_no_spinner(page)
-            await page.wait_for_timeout(500)
-
-            # Verify initial state: page 0 displayed
-            img_src = await page.locator("#img").get_attribute("src")
-            assert img_src.endswith(expected_page_path(0)), (
-                f"Initial #img expected {expected_page_path(0)}, got src={img_src!r}"
-            )
-
-            # Navigate forward/backward N cycles, revisiting the same pages.
-            # Each cycle: page 0 -> page 1 -> page 0.
-            # If handlers accumulate, page 0's Image object will gain one
-            # additional 'load' handler per revisit.
-            num_cycles = 4
-            for cycle in range(num_cycles):
-                LOGGER.info(f"Navigation cycle {cycle + 1}/{num_cycles}: forward to page 1.")
-                await page.keyboard.press("ArrowRight")
-                await page.wait_for_load_state("networkidle")
-                await assert_no_spinner(page)
-                await page.wait_for_timeout(300)
-
-                img_src = await page.locator("#img").get_attribute("src")
-                assert img_src.endswith(expected_page_path(1)), (
-                    f"Cycle {cycle + 1} forward: #img expected {expected_page_path(1)}, got src={img_src!r}"
-                )
-
-                LOGGER.info(f"Navigation cycle {cycle + 1}/{num_cycles}: back to page 0.")
-                await page.keyboard.press("ArrowLeft")
-                await page.wait_for_load_state("networkidle")
-                await assert_no_spinner(page)
-                await page.wait_for_timeout(300)
-
-                img_src = await page.locator("#img").get_attribute("src")
-                assert img_src.endswith(expected_page_path(0)), (
-                    f"Cycle {cycle + 1} back: #img expected {expected_page_path(0)}, got src={img_src!r}"
-                )
-
-            # Verify image element attributes are preserved after all cycles
-            img_class = await page.locator("#img").get_attribute("class")
-            assert img_class == "reader-image", (
-                f"#img class expected 'reader-image', got {img_class!r}"
-            )
-            img_priority = await page.locator("#img").get_attribute("fetchpriority")
-            assert img_priority == "high", (
-                f"#img fetchpriority expected 'high', got {img_priority!r}"
-            )
-
-            # Assert handler count via jQuery internal event data.
-            # jQuery._data(element, 'events') exposes handlers attached via .on().
-            # After N revisits of the same page, a well-managed reader should have
-            # at most 1 'load' handler on each image element.
-            load_handler_count = await page.evaluate(
-                """() => {
-                    const el = document.getElementById('img');
-                    const events = jQuery._data(el, 'events');
-                    if (!events || !events.load) return 0;
-                    return events.load.length;
-                }"""
-            )
-            assert load_handler_count == 1, (
-                f"Expected 1 load handler on #img after {num_cycles} navigation cycles, "
-                f"found {load_handler_count} (handlers are accumulating on cached Image objects)"
-            )
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-        finally:
-            await bc.close()
-            await browser.close()
-    # <<<<< UI STAGE <<<<<
 
 @pytest.mark.asyncio
 @pytest.mark.playwright

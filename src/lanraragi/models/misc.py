@@ -21,6 +21,7 @@ class GetServerInfoResponse(LanraragiResponse):
     version: str = Field(...)
     version_desc: str = Field(...)
     version_name: str = Field(...)
+    excluded_namespaces: list[str] = Field(default_factory=list)
 
 class GetOpdsCatalogRequest(LanraragiRequest):
     arcid: str | None = Field(None, min_length=40, max_length=40)

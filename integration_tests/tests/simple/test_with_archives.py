@@ -50,11 +50,14 @@ from aio_lanraragi_tests.deployment.base import (
 )
 from aio_lanraragi_tests.utils.api_wrappers import (
     add_archive_to_category,
+    create_archive_file,
     delete_archive,
     get_bookmark_category_detail,
     load_pages_from_archive,
     remove_archive_from_category,
     save_archives,
+    trigger_stat_rebuild,
+    upload_archive,
     upload_archives,
 )
 from aio_lanraragi_tests.utils.concurrency import retry_on_lock
@@ -671,6 +674,85 @@ async def test_minion_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, n
     assert not error, f"Failed to get minion job details (status {error.status}): {error.error}"
     del response, error
     # <<<<< GET MINION JOB DETAILS STAGE <<<<<
+
+    # no error logs
+    expect_no_error_logs(environment, LOGGER)
+
+@pytest.mark.asyncio
+@pytest.mark.dev("excluded-namespaces")
+async def test_excluded_namespaces_stats(lrr_client: LRRClient, semaphore: asyncio.Semaphore, environment: AbstractLRRDeploymentContext):
+    """
+    Test hide_excluded_namespaces parameter on /api/database/stats.
+
+    1. Upload archives with tags spanning multiple namespaces, rebuild stats.
+    2. Query stats without hide_excluded_namespaces, verify all namespaces present.
+    3. Configure excludednamespaces via Redis, query with hide_excluded_namespaces=true, verify excluded.
+    4. Query without the flag again, verify default still returns all namespaces.
+    5. Verify /api/info exposes the excluded_namespaces list.
+    """
+    archive_specs = [
+        {"name": "ns_test_1", "title": "NS Test 1", "tags": "artist:alpha,date_added:12345,source:https://example.com", "pages": 2},
+        {"name": "ns_test_2", "title": "NS Test 2", "tags": "artist:beta,date_added:67890,series:gamma", "pages": 2},
+    ]
+
+    # >>>>> UPLOAD STAGE >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        for spec in archive_specs:
+            save_path = create_archive_file(tmpdir, spec["name"], spec["pages"])
+            response, error = await upload_archive(
+                lrr_client, save_path, save_path.name, semaphore,
+                title=spec["title"], tags=spec["tags"],
+            )
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> STAT REBUILD STAGE >>>>>
+    await trigger_stat_rebuild(lrr_client)
+    # <<<<< STAT REBUILD STAGE <<<<<
+
+    # >>>>> STATS WITHOUT EXCLUSION >>>>>
+    response, error = await lrr_client.database_api.get_database_stats(GetDatabaseStatsRequest())
+    assert not error, f"Failed to get stats (status {error.status}): {error.error}"
+    all_namespaces = {tag.namespace for tag in response.data}
+    assert "date_added" in all_namespaces, "date_added namespace missing from unfiltered stats"
+    assert "source" in all_namespaces, "source namespace missing from unfiltered stats"
+    assert "artist" in all_namespaces, "artist namespace missing from unfiltered stats"
+    del response, error
+    # <<<<< STATS WITHOUT EXCLUSION <<<<<
+
+    # >>>>> CONFIGURE EXCLUDED NAMESPACES >>>>>
+    environment.redis_client.select(2)
+    environment.redis_client.hset("LRR_CONFIG", "excludednamespaces", "date_added,source")
+    # <<<<< CONFIGURE EXCLUDED NAMESPACES <<<<<
+
+    # >>>>> STATS WITH EXCLUSION >>>>>
+    response, error = await lrr_client.database_api.get_database_stats(
+        GetDatabaseStatsRequest(hide_excluded_namespaces=True)
+    )
+    assert not error, f"Failed to get filtered stats (status {error.status}): {error.error}"
+    filtered_namespaces = {tag.namespace for tag in response.data}
+    assert "date_added" not in filtered_namespaces, "date_added should be excluded"
+    assert "source" not in filtered_namespaces, "source should be excluded"
+    assert "artist" in filtered_namespaces, "artist should not be excluded"
+    del response, error
+    # <<<<< STATS WITH EXCLUSION <<<<<
+
+    # >>>>> STATS DEFAULT UNCHANGED >>>>>
+    response, error = await lrr_client.database_api.get_database_stats(GetDatabaseStatsRequest())
+    assert not error, f"Failed to get default stats (status {error.status}): {error.error}"
+    default_namespaces = {tag.namespace for tag in response.data}
+    assert "date_added" in default_namespaces, "date_added should be present in default stats"
+    assert "source" in default_namespaces, "source should be present in default stats"
+    del response, error
+    # <<<<< STATS DEFAULT UNCHANGED <<<<<
+
+    # >>>>> API INFO EXCLUDED NAMESPACES >>>>>
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to get server info (status {error.status}): {error.error}"
+    assert "date_added" in response.excluded_namespaces, "date_added should be in /api/info excluded_namespaces"
+    assert "source" in response.excluded_namespaces, "source should be in /api/info excluded_namespaces"
+    # <<<<< API INFO EXCLUDED NAMESPACES <<<<<
 
     # no error logs
     expect_no_error_logs(environment, LOGGER)

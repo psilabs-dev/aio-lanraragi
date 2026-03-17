@@ -71,6 +71,9 @@ def pytest_addoption(parser: pytest.Parser):
     regression : `bool = False`
         Run regression tests (behavioral expectation and e2e tests).
 
+    benchmark : `bool = False`
+        Run benchmark tests.
+
     npseed : `int = 42`
         Seed (in numpy) to set for any randomized behavior.
     """
@@ -95,6 +98,9 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--playwright", action="store_true", default=False, help="Run Playwright UI tests. Requires `playwright install`")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
     parser.addoption("--regression", action="store_true", default=False, help="Run regression tests (behavioral expectation and e2e tests).")
+    parser.addoption("--benchmark", action="store_true", default=False, help="Run benchmark tests.")
+    parser.addoption("--benchmark-output", action="store", default=None, help="Path to write benchmark results JSON.")
+    parser.addoption("--benchmark-label", action="store", default=None, help="Label for this benchmark run (e.g. c0-r0).")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
     parser.addoption("--cache-backend", action="store", default="redis", choices=["redis", "valkey", "valkey8"], help="Cache backend for Docker deployments. Default: redis.")
 
@@ -114,6 +120,10 @@ def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
         "markers",
         "regression: Regression tests will be skipped by default."
+    )
+    config.addinivalue_line(
+        "markers",
+        "benchmark: Benchmarking tests will be skipped by default."
     )
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]):
@@ -169,6 +179,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         for item in items:
             if 'regression' in item.keywords:
                 item.add_marker(skip_regression)
+
+    if not config.getoption("--benchmark"):
+        skip_benchmark = pytest.mark.skip(reason="need --benchmark option enabled")
+        for item in items:
+            if 'benchmark' in item.keywords:
+                item.add_marker(skip_benchmark)
 
 def pytest_sessionstart(session: pytest.Session):
     """
