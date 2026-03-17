@@ -191,6 +191,9 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
                 f"(jit={jit_value}, shared_buffers={self.postgres_shared_buffers_mb}MB, "
                 f"work_mem={self.postgres_work_mem_mb}MB)"
             )
+            # shm_size must accommodate shared_buffers + overhead for parallel workers.
+            # Docker defaults to 64MB which is insufficient when shared_buffers > 64MB.
+            shm_size_mb = max(128, self.postgres_shared_buffers_mb * 2)
             self.postgres_container = self.docker_client.containers.create(
                 DEFAULT_POSTGRES_DOCKER_TAG,
                 name=self.postgres_container_name,
@@ -203,6 +206,7 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
                     "-c", f"shared_buffers={self.postgres_shared_buffers_mb}MB",
                     "-c", f"work_mem={self.postgres_work_mem_mb}MB",
                 ],
+                shm_size=f"{shm_size_mb}m",
                 ports={"5432/tcp": self.postgres_port},
                 healthcheck={
                     "test": ["CMD-SHELL", "pg_isready -U postgres"],
