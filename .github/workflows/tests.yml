@@ -25,7 +25,7 @@ on:
 
 env:
   LRR_REPOSITORY: ${{ github.event.inputs.lrr_repository || 'psilabs-dev/LANraragi' }}
-  LRR_REF: ${{ github.event.inputs.lrr_ref || 'bugfix/lock' }}
+  LRR_REF: ${{ github.event.inputs.lrr_ref || 'dev-sql/main' }}
 
 jobs:
 
@@ -101,6 +101,8 @@ jobs:
             --staging "$GITHUB_WORKSPACE/staging" \
             --server-logs "$GITHUB_WORKSPACE/server-logs" \
             --playwright \
+            --docker-api \
+            --postgres \
             --npseed 42
         env:
           DOCKER_HOST: unix:///var/run/docker.sock
