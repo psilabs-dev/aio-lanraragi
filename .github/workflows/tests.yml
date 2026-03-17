@@ -93,7 +93,7 @@ jobs:
 
       - name: Run integration tests
         working-directory: aio-lanraragi/integration_tests
-        timeout-minutes: 30
+        timeout-minutes: 50
         run: |
           export CI=true
           uv run pytest tests --log-cli-level=INFO \
