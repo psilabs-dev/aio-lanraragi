@@ -354,7 +354,9 @@ async def test_random_archive_search(
 
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
-@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1473", strict=False)
+# @pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1473", strict=False)
+# xfail disabled: PgSearch partitions keyed/unkeyed archives correctly via SQL CASE expression.
+# When upstream PR #1473 merges, remove this comment and the commented-out xfail line.
 @pytest.mark.asyncio
 async def test_custom_namespaces(
     lrr_client: LRRClient,

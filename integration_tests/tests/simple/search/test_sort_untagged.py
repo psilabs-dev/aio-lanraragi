@@ -27,7 +27,9 @@ LOGGER = logging.getLogger(__name__)
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1473", strict=False)
+# @pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1473", strict=False)
+# xfail disabled: PgSearch partitions keyed/unkeyed archives correctly via SQL CASE expression.
+# When upstream PR #1473 merges, remove this comment and the commented-out xfail line.
 async def test_custom_sort_unkeyed_order(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
