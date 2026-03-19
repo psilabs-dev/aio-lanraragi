@@ -18,10 +18,12 @@ def test_two_deployment_toggling(request: pytest.FixtureRequest):
     """
     is_lrr_debug_mode: bool = request.config.getoption("--lrr-debug")
 
-    prefix_1 = 'test_1'
-    prefix_2 = 'test_2'
-    env_1 = generate_deployment(request, prefix_1, 10, logger=LOGGER)
-    env_2 = generate_deployment(request, prefix_2, 11, logger=LOGGER)
+    base_offset = request.config.getoption("--port-offset")
+    base_prefix = request.config.getoption("--resource-prefix")
+    prefix_1 = base_prefix + 'test_1'
+    prefix_2 = base_prefix + 'test_2'
+    env_1 = generate_deployment(request, prefix_1, base_offset + 10, logger=LOGGER)
+    env_2 = generate_deployment(request, prefix_2, base_offset + 11, logger=LOGGER)
 
     # configure environments to session
     environments: dict[str, AbstractLRRDeploymentContext] = {
@@ -67,8 +69,10 @@ async def test_two_deployment_basic_api(request: pytest.FixtureRequest):
     This test should confirm that the two instances running are healthy.
     """
     is_lrr_debug_mode: bool = request.config.getoption("--lrr-debug")
-    env_1 = generate_deployment(request, "test_1_", 10)
-    env_2 = generate_deployment(request, "test_2_", 11)
+    base_offset = request.config.getoption("--port-offset")
+    base_prefix = request.config.getoption("--resource-prefix")
+    env_1 = generate_deployment(request, base_prefix + "test_1_", base_offset + 10)
+    env_2 = generate_deployment(request, base_prefix + "test_2_", base_offset + 11)
 
     try:
         env_1.setup(lrr_debug_mode=is_lrr_debug_mode, with_api_key=True)
