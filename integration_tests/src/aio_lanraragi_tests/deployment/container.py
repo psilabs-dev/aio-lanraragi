@@ -671,6 +671,7 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
         # Apply user-provided environment, overriding defaults when keys overlap
         desired_env_map = {
             "LRR_REDIS_ADDRESS": f"{redis_container_name}:{DEFAULT_REDIS_PORT}",
+            "LRR_DATABASE_BACKEND": "redis",
             "LRR_UID": str(self.lrr_uid),
             "LRR_GID": str(self.lrr_gid),
         }
