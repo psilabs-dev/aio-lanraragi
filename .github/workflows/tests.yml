@@ -169,6 +169,14 @@ jobs:
           path: ${{ github.workspace }}\windist\win-dist.zip
           key: ${{ env.WINDIST_KEY }}
 
+      - name: Checkout LANraragi repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LRR_REPOSITORY }}
+          ref: ${{ env.LRR_REF }}
+          submodules: true
+          path: LANraragi
+
       - name: Unzip windist from cache
         if: steps.cache-windist.outputs.cache-hit == 'true'
         shell: pwsh
@@ -177,14 +185,6 @@ jobs:
           New-Item -ItemType Directory -Path $dest -Force | Out-Null
           $zip = Join-Path $env:GITHUB_WORKSPACE "windist\win-dist.zip"
           Expand-Archive -Path $zip -DestinationPath $dest -Force
-
-      - name: Checkout LANraragi repository
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.LRR_REPOSITORY }}
-          ref: ${{ env.LRR_REF }}
-          submodules: true
-          path: LANraragi
 
       - name: Setup MSYS2 UCRT64
         if: steps.cache-windist.outputs.cache-hit != 'true'
