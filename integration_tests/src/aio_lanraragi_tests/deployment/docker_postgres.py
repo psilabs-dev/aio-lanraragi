@@ -231,6 +231,7 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
 
         # inject postgres env vars, then delegate everything else to parent
         pg_env = {
+            "LRR_DATABASE_BACKEND": "postgres",
             "LRR_POSTGRES_HOST": self.postgres_container_name,
             "LRR_POSTGRES_PORT": str(DEFAULT_POSTGRES_PORT),
         }
