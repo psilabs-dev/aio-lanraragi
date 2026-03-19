@@ -69,6 +69,7 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerato
 
 
 @pytest.mark.asyncio
+@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1482", strict=False)
 async def test_bypass_invalid_request(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     With bypass enabled, a malformed arcid that would normally be rejected by
@@ -186,6 +187,7 @@ async def test_bypass_non_ascii_metadata(lrr_client: LRRClient):
 
 
 @pytest.mark.asyncio
+@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1482", strict=False)
 async def test_bypass_via_redis_config(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int):
     """
     Test that OpenAPI bypass can be enabled via Redis config key "disableopenapi"
