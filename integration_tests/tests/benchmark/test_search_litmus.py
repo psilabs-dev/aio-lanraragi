@@ -241,6 +241,17 @@ async def test_search_litmus(
             search_filter="series:series-0",
         ),
 
+        # Exact match (exercises = / LOWER() / CITEXT path in PgSearch)
+        "filter_artist_exact": SearchArchiveIndexRequest(
+            search_filter="artist:artist-0$",
+        ),
+        "filter_series_exact": SearchArchiveIndexRequest(
+            search_filter="series:series-0$",
+        ),
+        "filter_tag_exact": SearchArchiveIndexRequest(
+            search_filter="tag-0$",
+        ),
+
         # Namespace sort with keyed/unkeyed partition (the #1473 pattern)
         "sort_by_artist_asc": SearchArchiveIndexRequest(
             sortby="artist", order="asc",
