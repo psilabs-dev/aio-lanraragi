@@ -10,9 +10,9 @@ class _MetricsApiClient(_ApiClient):
 
     async def get_metrics(self) -> _LRRClientResponse[GetMetricsResponse]:
         """
-        GET /api/metrics
+        GET /api/info/metrics
         """
-        url = self.api_context.build_url("/api/metrics")
+        url = self.api_context.build_url("/api/info/metrics")
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             return (GetMetricsResponse(content=content), None)
