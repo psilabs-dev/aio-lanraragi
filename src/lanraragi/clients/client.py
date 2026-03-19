@@ -3,6 +3,7 @@ from typing import override
 from lanraragi.clients.api_clients.archive import _ArchiveApiClient
 from lanraragi.clients.api_clients.category import _CategoryApiClient
 from lanraragi.clients.api_clients.database import _DatabaseApiClient
+from lanraragi.clients.api_clients.metrics import _MetricsApiClient
 from lanraragi.clients.api_clients.minion import _MinionApiClient
 from lanraragi.clients.api_clients.misc import _MiscApiClient
 from lanraragi.clients.api_clients.search import _SearchApiClient
@@ -33,6 +34,7 @@ class LRRClient(ApiContextManager):
     - archive_api
     - category_api
     - database_api
+    - metrics_api
     - minion_api
     - misc_api
     - shinobu_api
@@ -69,6 +71,15 @@ class LRRClient(ApiContextManager):
     @database_api.setter
     def database_api(self, value: _DatabaseApiClient):
         self._database_api = value
+
+    @property
+    def metrics_api(self) -> _MetricsApiClient:
+        # PR: https://github.com/Difegue/LANraragi/pull/1301
+        return self._metrics_api
+    @metrics_api.setter
+    def metrics_api(self, value: _MetricsApiClient):
+        # PR: https://github.com/Difegue/LANraragi/pull/1301
+        self._metrics_api = value
 
     @property
     def minion_api(self) -> _MinionApiClient:
@@ -125,6 +136,7 @@ class LRRClient(ApiContextManager):
         self._archive_api = _ArchiveApiClient(self)
         self._category_api = _CategoryApiClient(self)
         self._database_api = _DatabaseApiClient(self)
+        self._metrics_api = _MetricsApiClient(self)
         self._minion_api = _MinionApiClient(self)
         self._misc_api = _MiscApiClient(self)
         self._shinobu_api = _ShinobuApiClient(self)
