@@ -159,7 +159,8 @@ jobs:
           $repo = $env:LRR_REPOSITORY
           $ref = $env:LRR_REF
           $sha = gh api "repos/$repo/commits/$ref" --jq '.sha'
-          "WINDIST_KEY=windist-${{ runner.os }}-$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $toolsTreeSha = gh api "repos/$repo/git/trees/$sha" --jq '.tree[] | select(.path == \"tools\") | .sha'
+          "WINDIST_KEY=windist-${{ runner.os }}-$toolsTreeSha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Restore windist cache
         id: cache-windist
@@ -178,7 +179,6 @@ jobs:
           Expand-Archive -Path $zip -DestinationPath $dest -Force
 
       - name: Checkout LANraragi repository
-        if: steps.cache-windist.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ env.LRR_REPOSITORY }}
@@ -232,6 +232,18 @@ jobs:
         with:
           path: ${{ github.workspace }}\windist\win-dist.zip
           key: ${{ env.WINDIST_KEY }}
+
+      - name: Copy app code to windist
+        shell: bash
+        working-directory: LANraragi
+        run: |
+          cp ./package.json ./win-dist
+          cp ./lrr.conf ./win-dist
+          cp -R ./lib ./win-dist
+          cp -R ./public ./win-dist
+          cp -R ./script ./win-dist
+          cp -R ./templates ./win-dist
+          cp -R ./locales ./win-dist
 
       - name: Create staging directory
         run: |
