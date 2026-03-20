@@ -457,6 +457,13 @@ class AbstractLRRDeploymentContext(abc.ABC):
         self.redis_client.select(2)
         self.redis_client.hset("LRR_CONFIG", "localprogress", "0")
 
+    def set_pagesize(self, pagesize: int):
+        """
+        Set the number of archives displayed per datatables page.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "pagesize", str(pagesize))
+
     def test_lrr_connection(self, port: int, test_connection_max_retries: int=4):
         """
         Test the LRR connection with retry and exponential backoff.
