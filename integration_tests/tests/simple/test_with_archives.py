@@ -19,6 +19,7 @@ from lanraragi.models.archive import (
     GetArchiveCategoriesRequest,
     GetArchiveMetadataRequest,
     GetArchiveThumbnailRequest,
+    UpdateArchiveMetadataRequest,
     UpdateArchiveThumbnailRequest,
     UpdateReadingProgressionRequest,
 )
@@ -752,6 +753,58 @@ async def test_excluded_namespaces_stats(lrr_client: LRRClient, semaphore: async
     assert "date_added" in response.excluded_namespaces, "date_added should be in /api/info excluded_namespaces"
     assert "source" in response.excluded_namespaces, "source should be in /api/info excluded_namespaces"
     # <<<<< API INFO EXCLUDED NAMESPACES <<<<<
+
+    # no error logs
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("sql")
+async def test_tag_stats_cache_invalidation(lrr_client: LRRClient, semaphore: asyncio.Semaphore, environment: AbstractLRRDeploymentContext):
+    """
+    Test that tag stats reflect new namespaces after metadata update.
+
+    1. Upload archive with "artist" tag, query stats to warm cache.
+    2. Update archive tags to add "parody" namespace via metadata API.
+    3. Assert "parody" appears in stats (cache was invalidated).
+    """
+    # >>>>> UPLOAD >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        save_path = create_archive_file(tmpdir, "cache_inv_1", 2)
+        response, error = await upload_archive(
+            lrr_client, save_path, save_path.name, semaphore,
+            title="Cache Inv 1", tags="artist:alpha,date_added:12345",
+        )
+        assert not error, f"Upload failed (status {error.status}): {error.error}"
+        arcid = response.arcid
+    # <<<<< UPLOAD <<<<<
+
+    # >>>>> WARM CACHE >>>>>
+    response, error = await lrr_client.database_api.get_database_stats(GetDatabaseStatsRequest())
+    assert not error, f"Failed to get stats (status {error.status}): {error.error}"
+    namespaces_before = {tag.namespace for tag in response.data}
+    assert "artist" in namespaces_before, "artist namespace missing after upload"
+    assert "parody" not in namespaces_before, "parody should not exist yet"
+    del response, error
+    # <<<<< WARM CACHE <<<<<
+
+    # >>>>> UPDATE METADATA >>>>>
+    response, error = await lrr_client.archive_api.update_archive_metadata(
+        UpdateArchiveMetadataRequest(arcid=arcid, tags="artist:alpha,date_added:12345,parody:beta")
+    )
+    assert not error, f"Metadata update failed (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< UPDATE METADATA <<<<<
+
+    # >>>>> VERIFY CACHE INVALIDATED >>>>>
+    response, error = await lrr_client.database_api.get_database_stats(GetDatabaseStatsRequest())
+    assert not error, f"Failed to get stats (status {error.status}): {error.error}"
+    namespaces_after = {tag.namespace for tag in response.data}
+    assert "artist" in namespaces_after, "artist namespace missing after metadata update"
+    assert "parody" in namespaces_after, "parody namespace missing — cache not invalidated"
+    del response, error
+    # <<<<< VERIFY CACHE INVALIDATED <<<<<
 
     # no error logs
     expect_no_error_logs(environment, LOGGER)
