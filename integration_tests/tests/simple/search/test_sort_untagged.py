@@ -27,7 +27,6 @@ LOGGER = logging.getLogger(__name__)
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1473", strict=False)
 async def test_custom_sort_unkeyed_order(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
