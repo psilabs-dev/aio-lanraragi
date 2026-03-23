@@ -46,12 +46,13 @@ async def test_composite_search(
     """
     Composite search API correctness test.
 
-    1. Upload 10 archives with distinct tags.
-    2. Create static categories for grouping.
-    3. Test multi-clause OR with categories and namespace sort.
-    4. Test duplicate clause deduplication.
-    5. Test subset clause absorption.
-    6. Test clause order idempotence.
+    1. Verify composite search returns empty results on empty database.
+    2. Upload 10 archives with distinct tags.
+    3. Create static categories for grouping.
+    4. Test multi-clause OR with categories and namespace sort.
+    5. Test duplicate clause deduplication.
+    6. Test subset clause absorption.
+    7. Test clause order idempotence.
     """
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -65,6 +66,15 @@ async def test_composite_search(
     del response, error
     assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
     # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> EMPTY DATABASE SEARCH >>>>>
+    response, error = await lrr_client.search_api.composite_search(
+        CompositeSearchRequest(clauses=[CompositeSearchClause()])
+    )
+    assert not error, f"Empty database composite search failed (status {error.status}): {error.error}"
+    assert len(response.data) == 0, f"Expected 0 results on empty database, got {len(response.data)}"
+    del response, error
+    # <<<<< EMPTY DATABASE SEARCH <<<<<
 
     # >>>>> ARCHIVE DEFINITION >>>>>
     archive_specs = [
@@ -167,7 +177,7 @@ async def test_composite_search(
 
     # Sort by artist ascending
     response, error = await lrr_client.search_api.composite_search(
-        CompositeSearchRequest(clauses=[clause_a, clause_b], sortby="artist", order="asc", groupby_tanks=False)
+        CompositeSearchRequest(clauses=[clause_a, clause_b], sortby="artist", order="asc", groupby_tanks=True)
     )
     assert not error, f"Composite search failed (status {error.status}): {error.error}"
     result_titles = {r.title for r in response.data}
@@ -181,7 +191,7 @@ async def test_composite_search(
 
     # Sort by artist descending
     response, error = await lrr_client.search_api.composite_search(
-        CompositeSearchRequest(clauses=[clause_a, clause_b], sortby="artist", order="desc", groupby_tanks=False)
+        CompositeSearchRequest(clauses=[clause_a, clause_b], sortby="artist", order="desc", groupby_tanks=True)
     )
     assert not error, f"Composite search desc failed (status {error.status}): {error.error}"
     titles_desc = [r.title for r in response.data]
@@ -197,12 +207,12 @@ async def test_composite_search(
     single_clause = CompositeSearchClause(filter="artist:wada rco")
 
     response_single, error = await lrr_client.search_api.composite_search(
-        CompositeSearchRequest(clauses=[single_clause], groupby_tanks=False)
+        CompositeSearchRequest(clauses=[single_clause], groupby_tanks=True)
     )
     assert not error, f"Single clause search failed (status {error.status}): {error.error}"
 
     response_dup, error = await lrr_client.search_api.composite_search(
-        CompositeSearchRequest(clauses=[single_clause, single_clause], groupby_tanks=False)
+        CompositeSearchRequest(clauses=[single_clause, single_clause], groupby_tanks=True)
     )
     assert not error, f"Duplicate clause search failed (status {error.status}): {error.error}"
 
@@ -222,12 +232,12 @@ async def test_composite_search(
     clause_narrow = CompositeSearchClause(filter="artist:wada rco, character:ereshkigal")
 
     response_broad, error = await lrr_client.search_api.composite_search(
-        CompositeSearchRequest(clauses=[clause_broad], groupby_tanks=False)
+        CompositeSearchRequest(clauses=[clause_broad], groupby_tanks=True)
     )
     assert not error, f"Broad clause search failed (status {error.status}): {error.error}"
 
     response_combined, error = await lrr_client.search_api.composite_search(
-        CompositeSearchRequest(clauses=[clause_broad, clause_narrow], groupby_tanks=False)
+        CompositeSearchRequest(clauses=[clause_broad, clause_narrow], groupby_tanks=True)
     )
     assert not error, f"Combined clause search failed (status {error.status}): {error.error}"
 
@@ -245,12 +255,12 @@ async def test_composite_search(
     clause_y = CompositeSearchClause(filter="artist:shirow masamune")
 
     response_xy, error = await lrr_client.search_api.composite_search(
-        CompositeSearchRequest(clauses=[clause_x, clause_y], sortby="title", order="asc", groupby_tanks=False)
+        CompositeSearchRequest(clauses=[clause_x, clause_y], sortby="title", order="asc", groupby_tanks=True)
     )
     assert not error, f"XY order search failed (status {error.status}): {error.error}"
 
     response_yx, error = await lrr_client.search_api.composite_search(
-        CompositeSearchRequest(clauses=[clause_y, clause_x], sortby="title", order="asc", groupby_tanks=False)
+        CompositeSearchRequest(clauses=[clause_y, clause_x], sortby="title", order="asc", groupby_tanks=True)
     )
     assert not error, f"YX order search failed (status {error.status}): {error.error}"
 
