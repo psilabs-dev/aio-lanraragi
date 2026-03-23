@@ -11,6 +11,7 @@ from lanraragi.models.base import (
 )
 from lanraragi.models.generics import _LRRClientResponse
 from lanraragi.models.search import (
+    CompositeSearchRequest,
     GetRandomArchivesRequest,
     GetRandomArchivesResponse,
     SearchArchiveIndexRequest,
@@ -72,6 +73,40 @@ class _SearchApiClient(_ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers, params=params)
         if status == 200:
             return (_process_get_random_archives_response(content), None)
+        return (None, _build_err_response(content, status))
+
+    async def composite_search(
+            self, request: CompositeSearchRequest
+    ) -> _LRRClientResponse[SearchArchiveIndexResponse]:
+        """
+        POST /api/search/composite
+        """
+        url = self.api_context.build_url("/api/search/composite")
+        body = {}
+        clauses = []
+        for clause in request.clauses:
+            c = {}
+            if clause.filter is not None:
+                c["filter"] = clause.filter
+            if clause.categories:
+                c["categories"] = [{"id": cat.id, "mode": cat.mode} for cat in clause.categories]
+            if clause.newonly is not None:
+                c["newonly"] = clause.newonly
+            if clause.untaggedonly is not None:
+                c["untaggedonly"] = clause.untaggedonly
+            clauses.append(c)
+        body["clauses"] = clauses
+        if request.start is not None:
+            body["start"] = request.start
+        if request.sortby is not None:
+            body["sortby"] = request.sortby
+        if request.order is not None:
+            body["order"] = request.order
+        if request.groupby_tanks is not None:
+            body["groupby_tanks"] = request.groupby_tanks
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, json_data=body)
+        if status == 200:
+            return (_process_search_archive_index_response(content), None)
         return (None, _build_err_response(content, status))
 
     async def discard_search_cache(self) -> _LRRClientResponse[LanraragiResponse]:

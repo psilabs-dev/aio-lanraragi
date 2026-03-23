@@ -47,6 +47,23 @@ class GetRandomArchivesResponse(LanraragiResponse):
     data: list[SearchArchiveIndexResponseRecord] = Field(...)
     records_total: int = Field(..., validation_alias="recordsTotal")
 
+class CompositeSearchCategoryEntry(BaseModel):
+    id: str = Field(...)
+    mode: str = Field(...)
+
+class CompositeSearchClause(BaseModel):
+    filter: str | None = Field(None)
+    categories: list[CompositeSearchCategoryEntry] = Field(default_factory=list)
+    newonly: bool | None = Field(None)
+    untaggedonly: bool | None = Field(None)
+
+class CompositeSearchRequest(LanraragiRequest):
+    clauses: list[CompositeSearchClause] = Field(...)
+    start: int | None = Field(None)
+    sortby: str | None = Field(None)
+    order: str | None = Field(None)
+    groupby_tanks: bool | None = Field(None)
+
 # <<<<< SEARCH <<<<<
 
 __all__ = [
@@ -55,4 +72,7 @@ __all__ = [
     "SearchArchiveIndexResponse",
     "GetRandomArchivesRequest",
     "GetRandomArchivesResponse",
+    "CompositeSearchCategoryEntry",
+    "CompositeSearchClause",
+    "CompositeSearchRequest",
 ]
