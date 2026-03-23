@@ -249,6 +249,67 @@ async def test_composite_search(
     LOGGER.debug("Subset clause absorption test passed.")
     # <<<<< TEST: SUBSET CLAUSE ABSORPTION <<<<<
 
+    # >>>>> TEST: TAGGED NON-NEW ARCHIVES >>>>>
+    # newonly=-1 excludes new, untaggedonly=-1 excludes untagged
+    # LRR "untagged" means only having tags in excluded namespaces (artist, series, etc.)
+    # Cool 1-3 (series:cool + artist:*) and Untagged Archive are "untagged"; New Release is new
+    # Result: 10 - 4 untagged - 1 new = 5
+    clause_tagged_nonnew = CompositeSearchClause(newonly=-1, untaggedonly=-1)
+
+    response, error = await lrr_client.search_api.composite_search(
+        CompositeSearchRequest(clauses=[clause_tagged_nonnew], groupby_tanks=False)
+    )
+    assert not error, f"Tagged non-new search failed (status {error.status}): {error.error}"
+    result_titles = {r.title for r in response.data}
+    assert "New Release" not in result_titles, f"Tagged non-new should exclude New Release: {result_titles}"
+    assert "Untagged Archive" not in result_titles, f"Tagged non-new should exclude Untagged Archive: {result_titles}"
+    for cool_title in ["Cool Collection 1", "Cool Collection 2", "Cool Collection 3"]:
+        assert cool_title not in result_titles, f"Tagged non-new should exclude {cool_title}: {result_titles}"
+    assert len(response.data) == 5, f"Tagged non-new should return 5 archives, got {len(response.data)}"
+
+    LOGGER.debug("Tagged non-new archives test passed.")
+    # <<<<< TEST: TAGGED NON-NEW ARCHIVES <<<<<
+
+    # >>>>> TEST: TAGGED OR IN-CATEGORY >>>>>
+    # Clause A: tagged archives (untaggedonly=-1) — 6 archives
+    # Clause B: archives in "Cool" category (Cool 1-3, which are "untagged")
+    # Union should be: 6 tagged + 3 Cool = 9 (Cool archives not in tagged set)
+    clause_tagged = CompositeSearchClause(untaggedonly=-1)
+    clause_in_cool = CompositeSearchClause(
+        categories=[CompositeSearchCategoryEntry(id=cool_category_id, mode="include")],
+    )
+
+    response, error = await lrr_client.search_api.composite_search(
+        CompositeSearchRequest(clauses=[clause_tagged, clause_in_cool], groupby_tanks=False)
+    )
+    assert not error, f"Tagged OR in-category search failed (status {error.status}): {error.error}"
+    result_titles = {r.title for r in response.data}
+    for cool_title in ["Cool Collection 1", "Cool Collection 2", "Cool Collection 3"]:
+        assert cool_title in result_titles, f"Should contain {cool_title}: {result_titles}"
+    assert "Untagged Archive" not in result_titles, f"Should not contain Untagged Archive: {result_titles}"
+    assert len(response.data) == 9, f"Tagged OR in-category should return 9 archives, got {len(response.data)}"
+
+    LOGGER.debug("Tagged OR in-category test passed.")
+    # <<<<< TEST: TAGGED OR IN-CATEGORY <<<<<
+
+    # >>>>> TEST: NOT CATEGORY >>>>>
+    # Exclude "Saturn" category from all archives
+    clause_not_saturn = CompositeSearchClause(
+        categories=[CompositeSearchCategoryEntry(id=saturn_category_id, mode="exclude")],
+    )
+
+    response, error = await lrr_client.search_api.composite_search(
+        CompositeSearchRequest(clauses=[clause_not_saturn], groupby_tanks=False)
+    )
+    assert not error, f"NOT category search failed (status {error.status}): {error.error}"
+    result_titles = {r.title for r in response.data}
+    assert "Saturn Japanese Manual" not in result_titles, f"NOT category should exclude Saturn JP: {result_titles}"
+    assert "Saturn American Manual" not in result_titles, f"NOT category should exclude Saturn US: {result_titles}"
+    assert len(response.data) == 8, f"NOT category should return 8 archives, got {len(response.data)}"
+
+    LOGGER.debug("NOT category test passed.")
+    # <<<<< TEST: NOT CATEGORY <<<<<
+
     # >>>>> TEST: CLAUSE ORDER IDEMPOTENCE >>>>>
     # [clause_a, clause_b] and [clause_b, clause_a] should produce identical results
     clause_x = CompositeSearchClause(filter="artist:wada rco")

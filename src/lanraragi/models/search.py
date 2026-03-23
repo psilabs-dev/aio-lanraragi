@@ -54,8 +54,8 @@ class CompositeSearchCategoryEntry(BaseModel):
 class CompositeSearchClause(BaseModel):
     filter: str | None = Field(None)
     categories: list[CompositeSearchCategoryEntry] = Field(default_factory=list)
-    newonly: bool | None = Field(None)
-    untaggedonly: bool | None = Field(None)
+    newonly: int | None = Field(None)
+    untaggedonly: int | None = Field(None)
 
 class CompositeSearchRequest(LanraragiRequest):
     clauses: list[CompositeSearchClause] = Field(...)
