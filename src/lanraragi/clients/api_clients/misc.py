@@ -9,7 +9,7 @@ from lanraragi.clients.res_processors.misc import (
     _process_get_server_info_response,
 )
 from lanraragi.clients.utils import _build_err_response
-from lanraragi.models.base import LanraragiErrorResponse
+from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
 from lanraragi.models.generics import _LRRClientResponse
 from lanraragi.models.misc import (
     CleanTempFolderResponse,
@@ -17,11 +17,18 @@ from lanraragi.models.misc import (
     GetAvailablePluginsResponse,
     GetOpdsCatalogRequest,
     GetOpdsCatalogResponse,
+    GetRegistryResponse,
     GetServerInfoResponse,
+    InstallPluginRequest,
+    InstallPluginResponse,
     QueueUrlDownloadRequest,
     QueueUrlDownloadResponse,
+    RefreshRegistryResponse,
     RegenerateThumbnailRequest,
     RegenerateThumbnailResponse,
+    RegistryConfig,
+    SetRegistryRequest,
+    SetRegistryResponse,
     UsePluginAsyncRequest,
     UsePluginAsyncResponse,
     UsePluginRawResponse,
@@ -149,7 +156,119 @@ class _MiscApiClient(_ApiClient):
             job = response_j.get("job")
             return (RegenerateThumbnailResponse(job=job), None)
         return (None, _build_err_response(content, status))
-    pass
+
+    async def get_registry(self) -> _LRRClientResponse[GetRegistryResponse]:
+        """
+        GET /api/plugins/registry
+        """
+        url = self.api_context.build_url("/api/plugins/registry")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
+        if status == 200:
+            response_j = json.loads(content)
+            registry_data = response_j.get("registry")
+            registry = RegistryConfig.model_validate(registry_data) if registry_data else None
+            return (GetRegistryResponse(registry=registry), None)
+        return (None, _build_err_response(content, status))
+
+    async def set_registry(self, request: SetRegistryRequest) -> _LRRClientResponse[SetRegistryResponse]:
+        """
+        PUT /api/plugins/registry
+        """
+        url = self.api_context.build_url("/api/plugins/registry")
+        body = {"type": request.type}
+        if request.url:
+            body["url"] = request.url
+        if request.ref:
+            body["ref"] = request.ref
+        if request.path:
+            body["path"] = request.path
+        status, content = await self.api_context.handle_request(
+            http.HTTPMethod.PUT, url, self.headers, json_data=body
+        )
+        if status == 200:
+            response_j = json.loads(content)
+            if response_j.get("success") == 0:
+                return (None, LanraragiErrorResponse(error=response_j.get("error", ""), status=status))
+            registry_data = response_j.get("registry")
+            registry = RegistryConfig.model_validate(registry_data) if registry_data else None
+            return (SetRegistryResponse(registry=registry), None)
+        return (None, _build_err_response(content, status))
+
+    async def delete_registry(self) -> _LRRClientResponse[LanraragiResponse]:
+        """
+        DELETE /api/plugins/registry
+        """
+        url = self.api_context.build_url("/api/plugins/registry")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
+        if status == 200:
+            return (LanraragiResponse(), None)
+        return (None, _build_err_response(content, status))
+
+    async def refresh_registry(self) -> _LRRClientResponse[RefreshRegistryResponse]:
+        """
+        POST /api/plugins/registry/refresh
+        """
+        url = self.api_context.build_url("/api/plugins/registry/refresh")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers)
+        if status == 200:
+            response_j = json.loads(content)
+            if response_j.get("success") == 0:
+                return (None, LanraragiErrorResponse(error=response_j.get("error", ""), status=status))
+            return (RefreshRegistryResponse(index=response_j.get("index")), None)
+        return (None, _build_err_response(content, status))
+
+    async def install_plugin(self, request: InstallPluginRequest) -> _LRRClientResponse[InstallPluginResponse]:
+        """
+        POST /api/plugins/install
+        """
+        url = self.api_context.build_url("/api/plugins/install")
+        body = {"namespace": request.namespace}
+        status, content = await self.api_context.handle_request(
+            http.HTTPMethod.POST, url, self.headers, json_data=body
+        )
+        if status == 200:
+            response_j = json.loads(content)
+            if response_j.get("success") == 0:
+                return (None, LanraragiErrorResponse(error=response_j.get("error", ""), status=status))
+            return (InstallPluginResponse(
+                name=response_j.get("name"),
+                namespace=response_j.get("namespace"),
+                version=response_j.get("version"),
+            ), None)
+        return (None, _build_err_response(content, status))
+
+    async def uninstall_plugin(self, namespace: str) -> _LRRClientResponse[LanraragiResponse]:
+        """
+        DELETE /api/plugins/{namespace}
+        """
+        url = self.api_context.build_url(f"/api/plugins/installed/{namespace}")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
+        if status == 200:
+            response_j = json.loads(content)
+            if response_j.get("success") == 0:
+                return (None, LanraragiErrorResponse(error=response_j.get("error", ""), status=status))
+            return (LanraragiResponse(), None)
+        return (None, _build_err_response(content, status))
+
+    async def hide_plugin(self, namespace: str) -> _LRRClientResponse[LanraragiResponse]:
+        """
+        PUT /api/plugins/{namespace}/hidden
+        """
+        url = self.api_context.build_url(f"/api/plugins/installed/{namespace}/hidden")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers)
+        if status == 200:
+            return (LanraragiResponse(), None)
+        return (None, _build_err_response(content, status))
+
+    async def unhide_plugin(self, namespace: str) -> _LRRClientResponse[LanraragiResponse]:
+        """
+        DELETE /api/plugins/{namespace}/hidden
+        """
+        url = self.api_context.build_url(f"/api/plugins/installed/{namespace}/hidden")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
+        if status == 200:
+            return (LanraragiResponse(), None)
+        return (None, _build_err_response(content, status))
 
 __all__ = [
     "_MiscApiClient"
