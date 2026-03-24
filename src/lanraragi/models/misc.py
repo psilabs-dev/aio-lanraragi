@@ -43,6 +43,7 @@ class GetAvailablePluginsResponsePlugin(BaseModel):
     parameters: list[dict[str, str]] | None = Field(None)
     type: Literal["login", "metadata", "script", "download", "all"] = Field(...)
     version: str = Field(...)
+    hidden: bool = Field(False)
 
 class GetAvailablePluginsResponse(LanraragiResponse):
     plugins: list[GetAvailablePluginsResponsePlugin] = Field(...)
@@ -88,6 +89,35 @@ class RegenerateThumbnailRequest(LanraragiRequest):
 class RegenerateThumbnailResponse(LanraragiResponse):
     job: int = Field(...)
 
+class RegistryConfig(BaseModel):
+    type: Literal["git", "local"] = Field(...)
+    url: str | None = Field(None)
+    ref: str | None = Field(None)
+    path: str | None = Field(None)
+
+class SetRegistryRequest(LanraragiRequest):
+    type: Literal["git", "local"] = Field(...)
+    url: str | None = Field(None)
+    ref: str | None = Field(None)
+    path: str | None = Field(None)
+
+class GetRegistryResponse(LanraragiResponse):
+    registry: RegistryConfig | None = Field(None)
+
+class SetRegistryResponse(LanraragiResponse):
+    registry: RegistryConfig | None = Field(None)
+
+class RefreshRegistryResponse(LanraragiResponse):
+    index: dict[str, Any] | None = Field(None)
+
+class InstallPluginRequest(LanraragiRequest):
+    namespace: str = Field(...)
+
+class InstallPluginResponse(LanraragiResponse):
+    name: str = Field(...)
+    namespace: str = Field(...)
+    version: str = Field(...)
+
 __all__ = [
     "GetServerInfoResponse",
     "GetOpdsCatalogRequest",
@@ -105,4 +135,11 @@ __all__ = [
     "QueueUrlDownloadResponse",
     "RegenerateThumbnailRequest",
     "RegenerateThumbnailResponse",
+    "RegistryConfig",
+    "SetRegistryRequest",
+    "GetRegistryResponse",
+    "SetRegistryResponse",
+    "RefreshRegistryResponse",
+    "InstallPluginRequest",
+    "InstallPluginResponse",
 ]
