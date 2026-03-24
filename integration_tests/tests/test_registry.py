@@ -76,6 +76,7 @@ async def test_registry_crud(lrr_client: LRRClient, environment: AbstractLRRDepl
     response, error = await lrr_client.misc_api.set_registry(
         SetRegistryRequest(
             type="git",
+            provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
         )
@@ -157,7 +158,7 @@ async def test_registry_overwrite(lrr_client: LRRClient, environment: AbstractLR
 
     # >>>>> SET GIT REGISTRY >>>>>
     response, error = await lrr_client.misc_api.set_registry(
-        SetRegistryRequest(type="git", url="https://github.com/example/repo.git", ref="dev")
+        SetRegistryRequest(type="git", provider="github", url="https://github.com/example/repo.git", ref="dev")
     )
     assert not error, f"Failed to set git registry (status {error.status}): {error.error}"
     # <<<<< SET GIT REGISTRY <<<<<
@@ -198,6 +199,7 @@ async def test_registry_refresh(lrr_client: LRRClient, environment: AbstractLRRD
     response, error = await lrr_client.misc_api.set_registry(
         SetRegistryRequest(
             type="git",
+            provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
         )
@@ -240,6 +242,7 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     response, error = await lrr_client.misc_api.set_registry(
         SetRegistryRequest(
             type="git",
+            provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
         )
@@ -292,6 +295,7 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     response, error = await lrr_client.misc_api.set_registry(
         SetRegistryRequest(
             type="git",
+            provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
         )

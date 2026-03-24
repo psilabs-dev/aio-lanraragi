@@ -176,6 +176,8 @@ class _MiscApiClient(_ApiClient):
         """
         url = self.api_context.build_url("/api/plugins/registry")
         body = {"type": request.type}
+        if request.provider:
+            body["provider"] = request.provider
         if request.url:
             body["url"] = request.url
         if request.ref:
