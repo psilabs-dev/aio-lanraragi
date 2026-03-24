@@ -771,9 +771,11 @@ async def test_toc_reader(
             await page.get_by_role("textbox").fill("Chapter 1 Renamed")
             await page.get_by_role("button", name="OK").click()
 
-            # overlay reopens only after PUT + metadata reload completes
+            # overlay reopens immediately; wait for the PUT + reload cycle
+            # to complete by checking the dropdown reflects the rename
             await page.locator("#archivePagesOverlay").wait_for(state="hidden")
             await page.locator("#archivePagesOverlay").wait_for(state="visible")
+            await page.locator("#chapter-select option:first-child:has-text('Chapter 1 Renamed')").wait_for(timeout=5000)
 
             # verify via API that the rename took effect
             response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
