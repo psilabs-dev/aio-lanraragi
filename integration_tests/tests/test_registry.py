@@ -3,7 +3,9 @@ Plugin registry integration tests.
 """
 
 import logging
+import tempfile
 from collections.abc import AsyncGenerator, Generator
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -342,5 +344,72 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     else:
         pytest.fail("Plugin sample-metadata not found in list after unhide")
     # <<<<< UNHIDE PLUGIN <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+async def test_plugin_install_conflict(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test that installing a plugin with a conflicting package name is rejected,
+    while non-conflicting installs and upgrades succeed.
+
+    1. Write a .pm file declaring the same package as sample-metadata.
+    2. Setup environment with the conflicting plugin via plugin_paths.
+    3. Configure registry and refresh index.
+    4. Install sample-metadata, expect conflict error.
+    5. Install sample-downloader (no conflict), expect success.
+    6. Reinstall sample-downloader (upgrade), expect success.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        conflict_path = Path(tmpdir) / "SampleMetadata.pm"
+        conflict_path.write_text(
+            'package LANraragi::Plugin::Metadata::SampleMetadata;\n'
+            'sub plugin_info { return ( name => "Conflict" ); }\n'
+            '1;\n'
+        )
+        environment.setup(
+            with_api_key=True,
+            plugin_paths={"Metadata": [str(conflict_path)]},
+        )
+
+    # >>>>> SETUP REGISTRY >>>>>
+    response, error = await lrr_client.misc_api.set_registry(
+        SetRegistryRequest(
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to set registry (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.refresh_registry()
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+    # <<<<< SETUP REGISTRY <<<<<
+
+    # >>>>> INSTALL WITH CONFLICT >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-metadata")
+    )
+    assert error is not None, "Expected error when installing plugin with package conflict"
+    assert "already declared" in error.error, f"Expected 'already declared' in error, got: {error.error}"
+    # <<<<< INSTALL WITH CONFLICT <<<<<
+
+    # >>>>> INSTALL WITHOUT CONFLICT >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-downloader")
+    )
+    assert not error, f"Failed to install non-conflicting plugin (status {error.status}): {error.error}"
+    assert response.namespace == "sample-downloader"
+    # <<<<< INSTALL WITHOUT CONFLICT <<<<<
+
+    # >>>>> UPGRADE (REINSTALL) >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-downloader")
+    )
+    assert not error, f"Failed to reinstall/upgrade plugin (status {error.status}): {error.error}"
+    # <<<<< UPGRADE (REINSTALL) <<<<<
 
     expect_no_error_logs(environment, LOGGER)
