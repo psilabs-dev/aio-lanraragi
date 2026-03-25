@@ -14,6 +14,7 @@ from lanraragi.models.misc import (
     GetAvailablePluginsRequest,
     InstallPluginRequest,
     SetRegistryRequest,
+    UpdatePluginConfigRequest,
 )
 
 from aio_lanraragi_tests.common import DEFAULT_API_KEY
@@ -314,8 +315,10 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     # <<<<< SETUP AND INSTALL <<<<<
 
     # >>>>> HIDE PLUGIN >>>>>
-    response, error = await lrr_client.misc_api.hide_plugin("sample-metadata")
-    assert not error, f"Failed to hide plugin (status {error.status}): {error.error}"
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "sample-metadata", UpdatePluginConfigRequest(hidden=True)
+    )
+    assert not error, f"Failed to update plugin config (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.get_available_plugins(
         GetAvailablePluginsRequest(type="metadata")
@@ -330,8 +333,10 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     # <<<<< HIDE PLUGIN <<<<<
 
     # >>>>> UNHIDE PLUGIN >>>>>
-    response, error = await lrr_client.misc_api.unhide_plugin("sample-metadata")
-    assert not error, f"Failed to unhide plugin (status {error.status}): {error.error}"
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "sample-metadata", UpdatePluginConfigRequest(hidden=False)
+    )
+    assert not error, f"Failed to update plugin config (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.get_available_plugins(
         GetAvailablePluginsRequest(type="metadata")
