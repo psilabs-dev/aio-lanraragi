@@ -355,18 +355,18 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
     Test that installing a plugin with a conflicting package name is rejected,
     while non-conflicting installs and upgrades succeed.
 
-    1. Write a .pm file declaring the same package as sample-metadata.
+    1. Write a .pm file declaring the same namespace as sample-metadata.
     2. Setup environment with the conflicting plugin via plugin_paths.
     3. Configure registry and refresh index.
-    4. Install sample-metadata, expect conflict error.
+    4. Install sample-metadata, expect namespace conflict error.
     5. Install sample-downloader (no conflict), expect success.
     6. Reinstall sample-downloader (upgrade), expect success.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         conflict_path = Path(tmpdir) / "SampleMetadata.pm"
         conflict_path.write_text(
-            'package LANraragi::Plugin::Metadata::SampleMetadata;\n'
-            'sub plugin_info { return ( name => "Conflict" ); }\n'
+            'package LANraragi::Plugin::Metadata::Testing::SampleMetadata;\n'
+            'sub plugin_info { return ( name => "Conflict", namespace => "sample-metadata" ); }\n'
             '1;\n'
         )
         environment.setup(
