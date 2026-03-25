@@ -118,6 +118,9 @@ class SetRegistryResponse(LanraragiResponse):
 class RefreshRegistryResponse(LanraragiResponse):
     index: dict[str, Any] | None = Field(None)
 
+class UpdatePluginConfigRequest(LanraragiRequest):
+    hidden: bool | None = Field(None)
+
 class InstallPluginRequest(LanraragiRequest):
     namespace: str = Field(...)
 
@@ -148,6 +151,7 @@ __all__ = [
     "GetRegistryResponse",
     "SetRegistryResponse",
     "RefreshRegistryResponse",
+    "UpdatePluginConfigRequest",
     "InstallPluginRequest",
     "InstallPluginResponse",
 ]

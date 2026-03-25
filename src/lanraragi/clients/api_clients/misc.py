@@ -29,6 +29,7 @@ from lanraragi.models.misc import (
     RegistryConfig,
     SetRegistryRequest,
     SetRegistryResponse,
+    UpdatePluginConfigRequest,
     UsePluginAsyncRequest,
     UsePluginAsyncResponse,
     UsePluginRawResponse,
@@ -252,22 +253,15 @@ class _MiscApiClient(_ApiClient):
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))
 
-    async def hide_plugin(self, namespace: str) -> _LRRClientResponse[LanraragiResponse]:
+    async def update_plugin_config(self, namespace: str, request: UpdatePluginConfigRequest) -> _LRRClientResponse[LanraragiResponse]:
         """
-        PUT /api/plugins/{namespace}/hidden
+        PUT /api/plugins/installed/{namespace}/config
         """
-        url = self.api_context.build_url(f"/api/plugins/installed/{namespace}/hidden")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers)
-        if status == 200:
-            return (LanraragiResponse(), None)
-        return (None, _build_err_response(content, status))
-
-    async def unhide_plugin(self, namespace: str) -> _LRRClientResponse[LanraragiResponse]:
-        """
-        DELETE /api/plugins/{namespace}/hidden
-        """
-        url = self.api_context.build_url(f"/api/plugins/installed/{namespace}/hidden")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
+        url = self.api_context.build_url(f"/api/plugins/installed/{namespace}/config")
+        body = {}
+        if request.hidden is not None:
+            body["hidden"] = request.hidden
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers, json_data=body)
         if status == 200:
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))
