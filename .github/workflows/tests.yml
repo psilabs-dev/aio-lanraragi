@@ -101,6 +101,7 @@ jobs:
             --staging "$GITHUB_WORKSPACE/staging" \
             --server-logs "$GITHUB_WORKSPACE/server-logs" \
             --playwright \
+            --no-rate-limit \
             --npseed 42
         env:
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -260,6 +261,7 @@ jobs:
           --staging "$env:GITHUB_WORKSPACE\staging" `
           --server-logs "$env:GITHUB_WORKSPACE\server-logs" `
           --playwright `
+          --no-rate-limit `
           --npseed 42
 
       - name: Upload server logs
