@@ -90,24 +90,45 @@ class RegenerateThumbnailResponse(LanraragiResponse):
     job: int = Field(...)
 
 class RegistryConfig(BaseModel):
+    id: str = Field(...)
+    name: str = Field(...)
     type: Literal["git", "local"] = Field(...)
     provider: Literal["github", "gitlab", "gitea"] | None = Field(None)
     url: str | None = Field(None)
     ref: str | None = Field(None)
     path: str | None = Field(None)
 
-class SetRegistryRequest(LanraragiRequest):
+class CreateRegistryRequest(LanraragiRequest):
+    name: str = Field(...)
     type: Literal["git", "local"] = Field(...)
     provider: Literal["github", "gitlab", "gitea"] | None = Field(None)
     url: str | None = Field(None)
     ref: str | None = Field(None)
     path: str | None = Field(None)
+
+class CreateRegistryResponse(LanraragiResponse):
+    id: str = Field(...)
+    registry: RegistryConfig = Field(...)
+
+class UpdateRegistryRequest(LanraragiRequest):
+    name: str | None = Field(None)
+    type: Literal["git", "local"] | None = Field(None)
+    provider: Literal["github", "gitlab", "gitea"] | None = Field(None)
+    url: str | None = Field(None)
+    ref: str | None = Field(None)
+    path: str | None = Field(None)
+
+class UpdateRegistryResponse(LanraragiResponse):
+    id: str = Field(...)
+    registry: RegistryConfig = Field(...)
+    index_cleared: bool = Field(...)
 
 class GetRegistryResponse(LanraragiResponse):
-    registry: RegistryConfig | None = Field(None)
+    id: str = Field(...)
+    registry: RegistryConfig = Field(...)
 
-class SetRegistryResponse(LanraragiResponse):
-    registry: RegistryConfig | None = Field(None)
+class ListRegistriesResponse(LanraragiResponse):
+    registries: list[RegistryConfig] = Field(...)
 
 class RefreshRegistryResponse(LanraragiResponse):
     index: dict[str, Any] | None = Field(None)
@@ -117,11 +138,14 @@ class UpdatePluginConfigRequest(LanraragiRequest):
 
 class InstallPluginRequest(LanraragiRequest):
     namespace: str = Field(...)
+    registry: str | None = Field(None)
+    force: bool | None = Field(None)
 
 class InstallPluginResponse(LanraragiResponse):
     name: str = Field(...)
     namespace: str = Field(...)
     version: str = Field(...)
+    registry: str = Field(...)
 
 __all__ = [
     "GetServerInfoResponse",
@@ -141,9 +165,12 @@ __all__ = [
     "RegenerateThumbnailRequest",
     "RegenerateThumbnailResponse",
     "RegistryConfig",
-    "SetRegistryRequest",
+    "CreateRegistryRequest",
+    "CreateRegistryResponse",
+    "UpdateRegistryRequest",
+    "UpdateRegistryResponse",
     "GetRegistryResponse",
-    "SetRegistryResponse",
+    "ListRegistriesResponse",
     "RefreshRegistryResponse",
     "UpdatePluginConfigRequest",
     "InstallPluginRequest",
