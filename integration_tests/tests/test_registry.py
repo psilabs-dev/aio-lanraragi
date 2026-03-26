@@ -173,6 +173,7 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
+@pytest.mark.ratelimit
 async def test_registry_update_relink(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test that updating source fields clears the cached index.
@@ -222,6 +223,7 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
+@pytest.mark.ratelimit
 async def test_registry_refresh(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test refreshing the registry index.
@@ -270,6 +272,7 @@ async def test_registry_refresh(lrr_client: LRRClient, environment: AbstractLRRD
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
+@pytest.mark.ratelimit
 async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test installing and uninstalling a plugin from the registry.
@@ -328,6 +331,7 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
+@pytest.mark.ratelimit
 async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test hiding and unhiding a plugin.
@@ -401,6 +405,7 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
+@pytest.mark.ratelimit
 async def test_plugin_install_conflict(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test plugin install conflict detection and upgrade behavior.
