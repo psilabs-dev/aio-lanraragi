@@ -74,6 +74,9 @@ def pytest_addoption(parser: pytest.Parser):
     benchmark : `bool = False`
         Run benchmark tests.
 
+    no-rate-limit : `bool = False`
+        Skip tests that depend on rate-limited external resources.
+
     npseed : `int = 42`
         Seed (in numpy) to set for any randomized behavior.
 
@@ -107,6 +110,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--benchmark", action="store_true", default=False, help="Run benchmark tests.")
     parser.addoption("--benchmark-output", action="store", default=None, help="Path to write benchmark results JSON.")
     parser.addoption("--benchmark-label", action="store", default=None, help="Label for this benchmark run (e.g. c0-r0).")
+    parser.addoption("--no-rate-limit", action="store_true", default=False, help="Skip tests that depend on rate-limited external resources (e.g. raw.githubusercontent.com).")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
     parser.addoption("--cache-backend", action="store", default="redis", choices=["redis", "valkey", "valkey8"], help="Cache backend for Docker deployments. Default: redis.")
     parser.addoption("--port-offset", type=int, action="store", default=0, help="Session-wide base port offset added to per-module offsets. Use to avoid conflicts between parallel sessions.")
@@ -132,6 +136,10 @@ def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
         "markers",
         "benchmark: Benchmarking tests will be skipped by default."
+    )
+    config.addinivalue_line(
+        "markers",
+        "ratelimit: Tests that depend on rate-limited external resources."
     )
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]):
@@ -193,6 +201,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         for item in items:
             if 'benchmark' in item.keywords:
                 item.add_marker(skip_benchmark)
+
+    if config.getoption("--no-rate-limit"):
+        skip_ratelimit = pytest.mark.skip(reason="--no-rate-limit excludes rate-limited tests")
+        for item in items:
+            if 'ratelimit' in item.keywords:
+                item.add_marker(skip_ratelimit)
 
 def pytest_sessionstart(session: pytest.Session):
     """
