@@ -775,7 +775,8 @@ async def test_toc_reader(
             # to complete by checking the dropdown reflects the rename
             await page.locator("#archivePagesOverlay").wait_for(state="hidden")
             await page.locator("#archivePagesOverlay").wait_for(state="visible")
-            await page.locator("#chapter-select option:first-child:has-text('Chapter 1 Renamed')").wait_for(timeout=5000)
+            first_option_text = await page.locator("#chapter-select option").first.text_content()
+            assert first_option_text == "Chapter 1 Renamed", f"Expected renamed chapter in dropdown, got {first_option_text!r}"
 
             # verify via API that the rename took effect
             response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
