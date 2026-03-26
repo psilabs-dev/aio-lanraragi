@@ -17,15 +17,15 @@ on:
       lrr_repository:
         description: 'LANraragi repository path'
         required: true
-        default: 'difegue/LANraragi'
+        default: 'psilabs-dev/LANraragi'
       lrr_ref:
         description: 'LANraragi ref (branch, tag, or commit SHA)'
         required: true
-        default: 'dev'
+        default: 'dev-registry/main'
 
 env:
-  LRR_REPOSITORY: ${{ github.event.inputs.lrr_repository || 'difegue/LANraragi' }}
-  LRR_REF: ${{ github.event.inputs.lrr_ref || 'dev' }}
+  LRR_REPOSITORY: ${{ github.event.inputs.lrr_repository || 'psilabs-dev/LANraragi' }}
+  LRR_REF: ${{ github.event.inputs.lrr_ref || 'dev-registry/main' }}
 
 jobs:
 
