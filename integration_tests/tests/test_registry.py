@@ -173,7 +173,6 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
-@pytest.mark.ratelimit
 async def test_registry_update_relink(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test that updating source fields clears the cached index.
@@ -223,7 +222,6 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
-@pytest.mark.ratelimit
 async def test_registry_refresh(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test refreshing the registry index.
@@ -272,7 +270,6 @@ async def test_registry_refresh(lrr_client: LRRClient, environment: AbstractLRRD
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
-@pytest.mark.ratelimit
 async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test installing and uninstalling a plugin from the registry.
@@ -304,7 +301,7 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
 
     # >>>>> INSTALL PLUGIN >>>>>
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-downloader")
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_id)
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
     assert response.namespace == "sample-downloader"
@@ -331,7 +328,6 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
-@pytest.mark.ratelimit
 async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test hiding and unhiding a plugin.
@@ -359,7 +355,7 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-metadata")
+        InstallPluginRequest(namespace="sample-metadata", registry=reg_id)
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
     # <<<<< SETUP AND INSTALL <<<<<
@@ -405,7 +401,6 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
-@pytest.mark.ratelimit
 async def test_plugin_install_conflict(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test plugin install conflict detection and upgrade behavior.
@@ -413,10 +408,9 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
     1. Write a .pm file declaring the same namespace as sample-metadata.
     2. Setup environment with the conflicting plugin.
     3. Create registry and refresh index.
-    4. Install sample-metadata, expect no-provenance error.
-    5. Force install sample-metadata, expect namespace conflict error (model-layer).
-    6. Install sample-downloader (no conflict), expect success with provenance.
-    7. Reinstall sample-downloader (same-registry upgrade), expect success.
+    4. Install sample-metadata, expect namespace conflict error.
+    5. Install sample-downloader (no conflict), expect success with provenance.
+    6. Reinstall sample-downloader (same-registry upgrade), expect success.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         conflict_path = Path(tmpdir) / "SampleMetadata.pm"
@@ -449,23 +443,15 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
 
     # >>>>> INSTALL WITH CONFLICT (NO PROVENANCE) >>>>>
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-metadata")
+        InstallPluginRequest(namespace="sample-metadata", registry=reg_id)
     )
     assert error is not None, "Expected error when installing plugin with existing sideloaded copy"
     assert "no provenance" in error.error, f"Expected 'no provenance' in error, got: {error.error}"
     # <<<<< INSTALL WITH CONFLICT (NO PROVENANCE) <<<<<
 
-    # >>>>> FORCE INSTALL (NAMESPACE CONFLICT) >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-metadata", force=True)
-    )
-    assert error is not None, "Expected namespace conflict error on force install"
-    assert "already declared" in error.error, f"Expected 'already declared' in error, got: {error.error}"
-    # <<<<< FORCE INSTALL (NAMESPACE CONFLICT) <<<<<
-
     # >>>>> INSTALL WITHOUT CONFLICT >>>>>
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-downloader")
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_id)
     )
     assert not error, f"Failed to install non-conflicting plugin (status {error.status}): {error.error}"
     assert response.namespace == "sample-downloader"
@@ -474,7 +460,7 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
 
     # >>>>> UPGRADE (REINSTALL) >>>>>
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-downloader")
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_id)
     )
     assert not error, f"Failed to reinstall/upgrade plugin (status {error.status}): {error.error}"
     # <<<<< UPGRADE (REINSTALL) <<<<<

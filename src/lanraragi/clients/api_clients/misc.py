@@ -170,7 +170,7 @@ class _MiscApiClient(_ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
-            registries = [RegistryConfig.model_validate(r) for r in response_j["registries"]]
+            registries = [RegistryConfig.model_validate(r) for r in response_j.get("registries", [])]
             return (ListRegistriesResponse(registries=registries), None)
         return (None, _build_err_response(content, status))
 
@@ -193,7 +193,7 @@ class _MiscApiClient(_ApiClient):
         )
         if status == 200:
             response_j = json.loads(content)
-            registry = RegistryConfig.model_validate(response_j["registry"])
+            registry = RegistryConfig.model_validate(response_j.get("registry"))
             return (CreateRegistryResponse(id=response_j["id"], registry=registry), None)
         return (None, _build_err_response(content, status))
 
@@ -205,7 +205,7 @@ class _MiscApiClient(_ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
-            registry = RegistryConfig.model_validate(response_j["registry"])
+            registry = RegistryConfig.model_validate(response_j.get("registry"))
             return (GetRegistryResponse(id=response_j["id"], registry=registry), None)
         return (None, _build_err_response(content, status))
 
@@ -232,11 +232,11 @@ class _MiscApiClient(_ApiClient):
         )
         if status == 200:
             response_j = json.loads(content)
-            registry = RegistryConfig.model_validate(response_j["registry"])
+            registry = RegistryConfig.model_validate(response_j.get("registry"))
             return (UpdateRegistryResponse(
                 id=response_j["id"],
                 registry=registry,
-                index_cleared=response_j["index_cleared"],
+                index_cleared=response_j.get("index_cleared", False),
             ), None)
         return (None, _build_err_response(content, status))
 
@@ -258,7 +258,7 @@ class _MiscApiClient(_ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
-            return (RefreshRegistryResponse(index=response_j["index"]), None)
+            return (RefreshRegistryResponse(index=response_j.get("index")), None)
         return (None, _build_err_response(content, status))
 
     async def install_plugin(self, request: InstallPluginRequest) -> _LRRClientResponse[InstallPluginResponse]:
@@ -266,9 +266,7 @@ class _MiscApiClient(_ApiClient):
         POST /api/plugins/install
         """
         url = self.api_context.build_url("/api/plugins/install")
-        body: dict[str, Any] = {"namespace": request.namespace}
-        if request.registry is not None:
-            body["registry"] = request.registry
+        body: dict[str, Any] = {"namespace": request.namespace, "registry": request.registry}
         if request.force is not None:
             body["force"] = request.force
         status, content = await self.api_context.handle_request(
