@@ -138,7 +138,7 @@ class UpdatePluginConfigRequest(LanraragiRequest):
 
 class InstallPluginRequest(LanraragiRequest):
     namespace: str = Field(...)
-    registry: str | None = Field(None)
+    registry: str = Field(...)
     force: bool | None = Field(None)
 
 class InstallPluginResponse(LanraragiResponse):
