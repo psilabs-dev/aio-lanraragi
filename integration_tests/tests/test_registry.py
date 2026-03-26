@@ -11,10 +11,11 @@ import pytest
 import pytest_asyncio
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.misc import (
+    CreateRegistryRequest,
     GetAvailablePluginsRequest,
     InstallPluginRequest,
-    SetRegistryRequest,
     UpdatePluginConfigRequest,
+    UpdateRegistryRequest,
 )
 
 from aio_lanraragi_tests.common import DEFAULT_API_KEY
@@ -59,170 +60,210 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerato
 @pytest.mark.dev("registry")
 async def test_registry_crud(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
-    Test registry configuration CRUD operations.
+    Test registry CRUD operations with REG_ pattern.
 
-    1. Get registry when none is configured.
-    2. Set a git registry, verify it persists.
-    3. Get the registry, verify fields match.
-    4. Delete the registry, verify it is removed.
-    5. Set a local registry, verify it persists.
+    1. List registries when none configured.
+    2. Create a git registry, verify ID returned.
+    3. Get registry by ID, verify fields.
+    4. Update registry name, verify no index cleared.
+    5. Delete registry by ID, verify list is empty.
+    6. Create a local registry, verify fields.
     """
     environment.setup(with_api_key=True)
 
-    # >>>>> GET EMPTY REGISTRY >>>>>
-    response, error = await lrr_client.misc_api.get_registry()
-    assert not error, f"Failed to get registry (status {error.status}): {error.error}"
-    assert response.registry is None, f"Expected no registry, got: {response.registry}"
-    # <<<<< GET EMPTY REGISTRY <<<<<
+    # >>>>> LIST EMPTY >>>>>
+    response, error = await lrr_client.misc_api.list_registries()
+    assert not error, f"Failed to list registries (status {error.status}): {error.error}"
+    assert len(response.registries) == 0, f"Expected empty list, got: {response.registries}"
+    # <<<<< LIST EMPTY <<<<<
 
-    # >>>>> SET GIT REGISTRY >>>>>
-    response, error = await lrr_client.misc_api.set_registry(
-        SetRegistryRequest(
+    # >>>>> CREATE GIT REGISTRY >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo plugins",
             type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
         )
     )
-    assert not error, f"Failed to set registry (status {error.status}): {error.error}"
-    assert response.registry is not None, "Expected registry in response"
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+    assert reg_id.startswith("REG_"), f"Expected REG_ prefix, got: {reg_id}"
+    assert len(reg_id) == 14, f"Expected 14 char ID, got {len(reg_id)}: {reg_id}"
+    assert response.registry.name == "demo plugins"
     assert response.registry.type == "git"
     assert response.registry.url == "https://github.com/psilabs-dev/lrr-plugins-demo.git"
-    assert response.registry.ref == "main"
-    # <<<<< SET GIT REGISTRY <<<<<
+    # <<<<< CREATE GIT REGISTRY <<<<<
 
-    # >>>>> GET GIT REGISTRY >>>>>
-    response, error = await lrr_client.misc_api.get_registry()
+    # >>>>> GET BY ID >>>>>
+    response, error = await lrr_client.misc_api.get_registry(reg_id)
     assert not error, f"Failed to get registry (status {error.status}): {error.error}"
-    assert response.registry is not None, "Expected registry after set"
+    assert response.registry.name == "demo plugins"
     assert response.registry.type == "git"
     assert response.registry.url == "https://github.com/psilabs-dev/lrr-plugins-demo.git"
     assert response.registry.ref == "main"
-    # <<<<< GET GIT REGISTRY <<<<<
+    # <<<<< GET BY ID <<<<<
 
-    # >>>>> DELETE REGISTRY >>>>>
-    response, error = await lrr_client.misc_api.delete_registry()
+    # >>>>> UPDATE NAME ONLY >>>>>
+    response, error = await lrr_client.misc_api.update_registry(
+        reg_id, UpdateRegistryRequest(name="renamed plugins")
+    )
+    assert not error, f"Failed to update registry (status {error.status}): {error.error}"
+    assert response.registry.name == "renamed plugins"
+    assert response.index_cleared is False, "Name-only update should not clear index"
+    # <<<<< UPDATE NAME ONLY <<<<<
+
+    # >>>>> DELETE >>>>>
+    response, error = await lrr_client.misc_api.delete_registry(reg_id)
     assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.get_registry()
-    assert not error, f"Failed to get registry after delete (status {error.status}): {error.error}"
-    assert response.registry is None, f"Expected no registry after delete, got: {response.registry}"
-    # <<<<< DELETE REGISTRY <<<<<
+    response, error = await lrr_client.misc_api.list_registries()
+    assert not error, f"Failed to list registries after delete (status {error.status}): {error.error}"
+    assert len(response.registries) == 0, f"Expected empty list after delete, got: {response.registries}"
+    # <<<<< DELETE <<<<<
 
-    # >>>>> SET LOCAL REGISTRY >>>>>
-    response, error = await lrr_client.misc_api.set_registry(
-        SetRegistryRequest(type="local", path="/home/koyomi/plugins")
+    # >>>>> CREATE LOCAL REGISTRY >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(name="local plugins", type="local", path="/home/koyomi/plugins")
     )
-    assert not error, f"Failed to set local registry (status {error.status}): {error.error}"
-    assert response.registry is not None, "Expected registry in response"
+    assert not error, f"Failed to create local registry (status {error.status}): {error.error}"
     assert response.registry.type == "local"
     assert response.registry.path == "/home/koyomi/plugins"
-    # <<<<< SET LOCAL REGISTRY <<<<<
+    local_reg_id = response.id
+
+    response, error = await lrr_client.misc_api.delete_registry(local_reg_id)
+    assert not error, f"Failed to delete local registry (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.list_registries()
+    assert not error, f"Failed to list registries after local delete (status {error.status}): {error.error}"
+    assert len(response.registries) == 0, f"Expected empty list after local delete, got: {response.registries}"
+    # <<<<< CREATE LOCAL REGISTRY <<<<<
 
     expect_no_error_logs(environment, LOGGER)
 
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
-async def test_registry_set_validation(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+async def test_registry_create_validation(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
-    Test registry set validation rejects invalid configurations.
+    Test registry create validation rejects invalid configurations.
 
-    1. Set git registry without url, expect error.
-    2. Set local registry without path, expect error.
+    1. Create git registry without url, expect error.
+    2. Create local registry without path, expect error.
     """
     environment.setup(with_api_key=True)
 
     # >>>>> MISSING URL FOR GIT >>>>>
-    response, error = await lrr_client.misc_api.set_registry(
-        SetRegistryRequest(type="git")
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(name="bad git", type="git")
     )
     assert error is not None, "Expected error for git registry without url"
     # <<<<< MISSING URL FOR GIT <<<<<
 
     # >>>>> MISSING PATH FOR LOCAL >>>>>
-    response, error = await lrr_client.misc_api.set_registry(
-        SetRegistryRequest(type="local")
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(name="bad local", type="local")
     )
     assert error is not None, "Expected error for local registry without path"
     # <<<<< MISSING PATH FOR LOCAL <<<<<
 
-
-@pytest.mark.asyncio
-@pytest.mark.dev("registry")
-async def test_registry_overwrite(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
-    """
-    Test that setting a new registry overwrites the previous one.
-
-    1. Set a git registry.
-    2. Set a local registry, verify git fields are gone.
-    """
-    environment.setup(with_api_key=True)
-
-    # >>>>> SET GIT REGISTRY >>>>>
-    response, error = await lrr_client.misc_api.set_registry(
-        SetRegistryRequest(type="git", provider="github", url="https://github.com/example/repo.git", ref="dev")
-    )
-    assert not error, f"Failed to set git registry (status {error.status}): {error.error}"
-    # <<<<< SET GIT REGISTRY <<<<<
-
-    # >>>>> OVERWRITE WITH LOCAL >>>>>
-    response, error = await lrr_client.misc_api.set_registry(
-        SetRegistryRequest(type="local", path="/opt/plugins")
-    )
-    assert not error, f"Failed to set local registry (status {error.status}): {error.error}"
-
-    response, error = await lrr_client.misc_api.get_registry()
-    assert not error, f"Failed to get registry (status {error.status}): {error.error}"
-    assert response.registry.type == "local"
-    assert response.registry.path == "/opt/plugins"
-    assert response.registry.url is None, f"Expected no url after overwrite, got: {response.registry.url}"
-    # <<<<< OVERWRITE WITH LOCAL <<<<<
+    expect_no_error_logs(environment, LOGGER)
 
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
-async def test_registry_refresh(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+async def test_registry_update_relink(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
-    Test refreshing the registry index from a remote source.
+    Test that updating source fields clears the cached index.
 
-    1. Refresh without a registry configured, expect error.
-    2. Configure the lrr-plugins-demo registry.
-    3. Refresh, verify the index is returned with plugins.
-    4. Delete registry, verify index is also cleared.
+    1. Create a git registry and refresh.
+    2. Update the URL, verify index_cleared is true.
+    3. Update name only, verify index_cleared is false.
     """
     environment.setup(with_api_key=True)
 
-    # >>>>> REFRESH WITHOUT REGISTRY >>>>>
-    response, error = await lrr_client.misc_api.refresh_registry()
-    assert error is not None, "Expected error when refreshing without a registry"
-    # <<<<< REFRESH WITHOUT REGISTRY <<<<<
-
-    # >>>>> SET REGISTRY AND REFRESH >>>>>
-    response, error = await lrr_client.misc_api.set_registry(
-        SetRegistryRequest(
+    # >>>>> CREATE AND REFRESH >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
             type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
         )
     )
-    assert not error, f"Failed to set registry (status {error.status}): {error.error}"
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
 
-    response, error = await lrr_client.misc_api.refresh_registry()
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+    assert response.index is not None, "Expected index after refresh"
+    # <<<<< CREATE AND REFRESH <<<<<
+
+    # >>>>> UPDATE URL (SOURCE CHANGE) >>>>>
+    response, error = await lrr_client.misc_api.update_registry(
+        reg_id, UpdateRegistryRequest(url="https://github.com/example/other-repo.git")
+    )
+    assert not error, f"Failed to update registry (status {error.status}): {error.error}"
+    assert response.index_cleared is True, "URL change should clear index"
+    # <<<<< UPDATE URL (SOURCE CHANGE) <<<<<
+
+    # >>>>> UPDATE NAME ONLY >>>>>
+    response, error = await lrr_client.misc_api.update_registry(
+        reg_id, UpdateRegistryRequest(name="renamed")
+    )
+    assert not error, f"Failed to update registry name (status {error.status}): {error.error}"
+    assert response.index_cleared is False, "Name change should not clear index"
+    # <<<<< UPDATE NAME ONLY <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+async def test_registry_refresh(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test refreshing the registry index.
+
+    1. Refresh nonexistent registry, expect error.
+    2. Create registry and refresh, verify index returned with plugins.
+    3. Delete registry, verify refresh fails.
+    """
+    environment.setup(with_api_key=True)
+
+    # >>>>> REFRESH NONEXISTENT >>>>>
+    response, error = await lrr_client.misc_api.refresh_registry("REG_0000000000")
+    assert error is not None, "Expected error when refreshing nonexistent registry"
+    # <<<<< REFRESH NONEXISTENT <<<<<
+
+    # >>>>> CREATE AND REFRESH >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     assert response.index is not None, "Expected index in refresh response"
     assert response.index.get("version") is not None, "Expected version in index"
     plugins = response.index.get("plugins", {})
     assert len(plugins) > 0, "Expected at least one plugin in index"
     assert "sample-downloader" in plugins, f"Expected sample-downloader in plugins, got: {list(plugins.keys())}"
-    # <<<<< SET REGISTRY AND REFRESH <<<<<
+    # <<<<< CREATE AND REFRESH <<<<<
 
     # >>>>> DELETE CLEARS INDEX >>>>>
-    response, error = await lrr_client.misc_api.delete_registry()
+    response, error = await lrr_client.misc_api.delete_registry(reg_id)
     assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.refresh_registry()
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert error is not None, "Expected error refreshing after registry deleted"
     # <<<<< DELETE CLEARS INDEX <<<<<
 
@@ -233,8 +274,8 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     """
     Test installing and uninstalling a plugin from the registry.
 
-    1. Configure registry and refresh index.
-    2. Install sample-downloader plugin.
+    1. Create registry and refresh index.
+    2. Install sample-downloader plugin (sole registry fallback).
     3. Verify plugin appears in plugin list.
     4. Uninstall the plugin.
     5. Verify plugin is no longer listed.
@@ -242,17 +283,19 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     environment.setup(with_api_key=True)
 
     # >>>>> SETUP REGISTRY >>>>>
-    response, error = await lrr_client.misc_api.set_registry(
-        SetRegistryRequest(
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
             type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
         )
     )
-    assert not error, f"Failed to set registry (status {error.status}): {error.error}"
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
 
-    response, error = await lrr_client.misc_api.refresh_registry()
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     # <<<<< SETUP REGISTRY <<<<<
 
@@ -263,6 +306,7 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
     assert response.namespace == "sample-downloader"
     assert response.name == "Sample Downloader"
+    assert response.registry == reg_id, f"Expected provenance {reg_id}, got: {response.registry}"
     # <<<<< INSTALL PLUGIN <<<<<
 
     # >>>>> VERIFY INSTALLED >>>>>
@@ -295,17 +339,19 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     environment.setup(with_api_key=True)
 
     # >>>>> SETUP AND INSTALL >>>>>
-    response, error = await lrr_client.misc_api.set_registry(
-        SetRegistryRequest(
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
             type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
         )
     )
-    assert not error, f"Failed to set registry (status {error.status}): {error.error}"
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
 
-    response, error = await lrr_client.misc_api.refresh_registry()
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.install_plugin(
@@ -357,15 +403,15 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
 @pytest.mark.dev("registry")
 async def test_plugin_install_conflict(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
-    Test that installing a plugin with a conflicting package name is rejected,
-    while non-conflicting installs and upgrades succeed.
+    Test plugin install conflict detection and upgrade behavior.
 
     1. Write a .pm file declaring the same namespace as sample-metadata.
-    2. Setup environment with the conflicting plugin via plugin_paths.
-    3. Configure registry and refresh index.
-    4. Install sample-metadata, expect namespace conflict error.
-    5. Install sample-downloader (no conflict), expect success.
-    6. Reinstall sample-downloader (upgrade), expect success.
+    2. Setup environment with the conflicting plugin.
+    3. Create registry and refresh index.
+    4. Install sample-metadata, expect no-provenance error.
+    5. Force install sample-metadata, expect namespace conflict error (model-layer).
+    6. Install sample-downloader (no conflict), expect success with provenance.
+    7. Reinstall sample-downloader (same-registry upgrade), expect success.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         conflict_path = Path(tmpdir) / "SampleMetadata.pm"
@@ -380,27 +426,37 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
         )
 
     # >>>>> SETUP REGISTRY >>>>>
-    response, error = await lrr_client.misc_api.set_registry(
-        SetRegistryRequest(
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
             type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
         )
     )
-    assert not error, f"Failed to set registry (status {error.status}): {error.error}"
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
 
-    response, error = await lrr_client.misc_api.refresh_registry()
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     # <<<<< SETUP REGISTRY <<<<<
 
-    # >>>>> INSTALL WITH CONFLICT >>>>>
+    # >>>>> INSTALL WITH CONFLICT (NO PROVENANCE) >>>>>
     response, error = await lrr_client.misc_api.install_plugin(
         InstallPluginRequest(namespace="sample-metadata")
     )
-    assert error is not None, "Expected error when installing plugin with package conflict"
+    assert error is not None, "Expected error when installing plugin with existing sideloaded copy"
+    assert "no provenance" in error.error, f"Expected 'no provenance' in error, got: {error.error}"
+    # <<<<< INSTALL WITH CONFLICT (NO PROVENANCE) <<<<<
+
+    # >>>>> FORCE INSTALL (NAMESPACE CONFLICT) >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-metadata", force=True)
+    )
+    assert error is not None, "Expected namespace conflict error on force install"
     assert "already declared" in error.error, f"Expected 'already declared' in error, got: {error.error}"
-    # <<<<< INSTALL WITH CONFLICT <<<<<
+    # <<<<< FORCE INSTALL (NAMESPACE CONFLICT) <<<<<
 
     # >>>>> INSTALL WITHOUT CONFLICT >>>>>
     response, error = await lrr_client.misc_api.install_plugin(
@@ -408,6 +464,7 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
     )
     assert not error, f"Failed to install non-conflicting plugin (status {error.status}): {error.error}"
     assert response.namespace == "sample-downloader"
+    assert response.registry == reg_id, f"Expected provenance {reg_id}, got: {response.registry}"
     # <<<<< INSTALL WITHOUT CONFLICT <<<<<
 
     # >>>>> UPGRADE (REINSTALL) >>>>>
