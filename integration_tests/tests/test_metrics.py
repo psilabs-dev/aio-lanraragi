@@ -55,7 +55,6 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerato
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("metrics")
 async def test_metrics_endpoint(lrr_client: LRRClient):
     """
     Test metrics endpoint returns valid Prometheus exposition data after API activity.
