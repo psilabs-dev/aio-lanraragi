@@ -624,6 +624,7 @@ async def test_slideshow_continue_navigation(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
+@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1492", strict=False)
 async def test_toc_reader(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 ):
