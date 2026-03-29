@@ -11,6 +11,7 @@ class SearchArchiveIndexRequest(LanraragiRequest):
     order: str | None = Field(None)
     newonly: bool | None = Field(None)
     untaggedonly: bool | None = Field(None)
+    hidecompleted: bool | None = Field(None)
     groupby_tanks: bool = Field("true")
 
 class SearchArchiveIndexResponseRecord(BaseModel):
@@ -41,6 +42,7 @@ class GetRandomArchivesRequest(LanraragiRequest):
     count: int = Field(5)
     newonly: bool | None = Field(None)
     untaggedonly: bool | None = Field(None)
+    hidecompleted: bool | None = Field(None)
     groupby_tanks: bool = Field("true")
 
 class GetRandomArchivesResponse(LanraragiResponse):

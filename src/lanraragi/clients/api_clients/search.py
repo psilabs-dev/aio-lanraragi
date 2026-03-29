@@ -37,6 +37,7 @@ class _SearchApiClient(_ApiClient):
             ("order", request.order),
             ("newonly", request.newonly),
             ("untaggedonly", request.untaggedonly),
+            ("hidecompleted", request.hidecompleted),
             ("groupby_tanks", request.groupby_tanks),
         ]:
             if value:
@@ -63,6 +64,7 @@ class _SearchApiClient(_ApiClient):
             ("count", request.count),
             ("newonly", request.newonly),
             ("untaggedonly", request.untaggedonly),
+            ("hidecompleted", request.hidecompleted),
             ("groupby_tanks", request.groupby_tanks),
         ]:
             if value:
