@@ -11,6 +11,7 @@ class SearchArchiveIndexRequest(LanraragiRequest):
     order: str | None = Field(None)
     newonly: bool | None = Field(None)
     untaggedonly: bool | None = Field(None)
+    hidecompleted: bool | None = Field(None)
     groupby_tanks: bool = Field("true")
 
 class SearchArchiveIndexResponseRecord(BaseModel):
@@ -41,11 +42,29 @@ class GetRandomArchivesRequest(LanraragiRequest):
     count: int = Field(5)
     newonly: bool | None = Field(None)
     untaggedonly: bool | None = Field(None)
+    hidecompleted: bool | None = Field(None)
     groupby_tanks: bool = Field("true")
 
 class GetRandomArchivesResponse(LanraragiResponse):
     data: list[SearchArchiveIndexResponseRecord] = Field(...)
     records_total: int = Field(..., validation_alias="recordsTotal")
+
+class CompositeSearchCategoryEntry(BaseModel):
+    id: str = Field(...)
+    mode: str = Field(...)
+
+class CompositeSearchClause(BaseModel):
+    filter: str | None = Field(None)
+    categories: list[CompositeSearchCategoryEntry] = Field(default_factory=list)
+    newonly: int | None = Field(None)
+    untaggedonly: int | None = Field(None)
+
+class CompositeSearchRequest(LanraragiRequest):
+    clauses: list[CompositeSearchClause] = Field(...)
+    start: int | None = Field(None)
+    sortby: str | None = Field(None)
+    order: str | None = Field(None)
+    groupby_tanks: bool | None = Field(None)
 
 # <<<<< SEARCH <<<<<
 
@@ -55,4 +74,7 @@ __all__ = [
     "SearchArchiveIndexResponse",
     "GetRandomArchivesRequest",
     "GetRandomArchivesResponse",
+    "CompositeSearchCategoryEntry",
+    "CompositeSearchClause",
+    "CompositeSearchRequest",
 ]

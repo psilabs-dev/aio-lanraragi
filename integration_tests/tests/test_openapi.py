@@ -16,6 +16,8 @@ import tempfile
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
+import playwright.async_api
+import playwright.async_api._generated
 import pytest
 import pytest_asyncio
 from lanraragi.clients.client import LRRClient
@@ -28,18 +30,22 @@ from aio_lanraragi_tests.deployment.base import (
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.log_parse import parse_lrr_logs
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
+from aio_lanraragi_tests.utils.playwright import (
+    assert_browser_responses_ok,
+    assert_console_logs_ok,
+)
 
 LOGGER = logging.getLogger(__name__)
 
 
 @pytest.fixture
-def resource_prefix() -> Generator[str, None, None]:
-    yield "test_"
+def resource_prefix(request: pytest.FixtureRequest) -> Generator[str, None, None]:
+    yield request.config.getoption("--resource-prefix") + "test_"
 
 
 @pytest.fixture
-def port_offset() -> Generator[int, None, None]:
-    yield 10
+def port_offset(request: pytest.FixtureRequest) -> Generator[int, None, None]:
+    yield request.config.getoption("--port-offset") + 10
 
 
 @pytest.fixture
@@ -241,5 +247,74 @@ async def test_bypass_via_redis_config(request: pytest.FixtureRequest, resource_
             await client.close()
 
         expect_no_error_logs(env, LOGGER)
+    finally:
+        env.teardown(remove_data=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.xfail(reason="category= empty string violates minLength:14 in openapi.yaml", strict=False)
+async def test_validation_carousel_search(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int):
+    """
+    Reproduce the browser's inbox carousel request that fails when OpenAPI
+    validation is enabled. The index page JS constructs:
+    /api/search?filter=&category=&newonly=true&sortby=date_added&order=desc&start=-1
+
+    The empty "category=" param violates the schema's minLength:14 constraint.
+
+    1. Start LRR with validation enabled (no bypass).
+    2. Open index page with carousel type set to "inbox".
+    3. Assert the /api/search carousel response returns 200.
+    """
+    env: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
+    try:
+        env.setup(with_api_key=True)
+        request.session.lrr_environments = {resource_prefix: env}
+
+        client = env.lrr_client()
+        try:
+            _, error = await client.misc_api.get_server_info()
+            assert not error, f"Failed to connect (status {error.status}): {error.error}"
+
+            async with playwright.async_api.async_playwright() as p:
+                browser = await p.chromium.launch()
+                bc = await browser.new_context()
+                await bc.add_init_script(
+                    "localStorage.setItem('carouselType', 'inbox');"
+                    "localStorage.setItem('carouselOpen', '1');"
+                )
+
+                try:
+                    page = await bc.new_page()
+                    responses: list[playwright.async_api._generated.Response] = []
+                    console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+
+                    page.on("response", lambda r: responses.append(r))
+                    page.on("console", lambda m: console_evts.append(m))
+
+                    await page.goto(f"{client.lrr_base_url}/")
+                    await page.wait_for_load_state("networkidle")
+
+                    # Find carousel search responses (not /random, not /cache)
+                    search_responses = [
+                        r for r in responses
+                        if "/api/search" in r.url and "random" not in r.url and "cache" not in r.url
+                    ]
+                    assert len(search_responses) > 0, "No /api/search response captured from carousel"
+
+                    for r in search_responses:
+                        assert r.status == 200, (
+                            f"Carousel search returned {r.status}, expected 200. URL: {r.url}"
+                        )
+
+                    await assert_browser_responses_ok(responses, client, logger=LOGGER)
+                    await assert_console_logs_ok(console_evts, client.lrr_base_url)
+                finally:
+                    await bc.close()
+                    await browser.close()
+
+            expect_no_error_logs(env, LOGGER)
+        finally:
+            await client.close()
     finally:
         env.teardown(remove_data=True)

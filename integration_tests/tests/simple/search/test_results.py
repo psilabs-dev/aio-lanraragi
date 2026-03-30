@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.archive import UpdateReadingProgressionRequest
 from lanraragi.models.search import GetRandomArchivesRequest, SearchArchiveIndexRequest
 
 from aio_lanraragi_tests.common import compute_archive_id
@@ -354,7 +355,6 @@ async def test_random_archive_search(
 
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
-@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1473", strict=False)
 @pytest.mark.asyncio
 async def test_custom_namespaces(
     lrr_client: LRRClient,
@@ -480,6 +480,101 @@ async def test_custom_namespaces(
     assert len(response.data) == 7, f"Expected 7 archives, got {len(response.data)}"
     LOGGER.debug("Sort by nonexistent namespace test passed.")
     # <<<<< NAMESPACE SORT TESTS: NON-EXISTENT NAMESPACE <<<<<
+
+    # no error logs
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    reason="hidecompleted Lua path crashes with empty cjson result when all archives are completed",
+    strict=False,
+)
+async def test_hidecompleted(
+    lrr_client: LRRClient,
+    semaphore: asyncio.Semaphore,
+    environment: AbstractLRRDeploymentContext
+):
+    """
+    Test hidecompleted search filter.
+
+    1. Upload 3 archives with 10 pages each.
+    2. Set all 3 to >85% progress (page 9 of 10).
+    3. Search with hidecompleted=true, expect 0 results (not a 500).
+    4. Search without hidecompleted, expect all 3 returned.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+    assert len(response.data) == 0, "Server contains archives!"
+    del response, error
+    assert not any(environment.archives_dir.iterdir()), "Archive directory is not empty!"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> ARCHIVE DEFINITION >>>>>
+    num_pages = 10
+    archive_specs = [
+        {"name": "hc_archive_01", "title": "HC Test 01", "tags": "series:hidecompleted_test"},
+        {"name": "hc_archive_02", "title": "HC Test 02", "tags": "series:hidecompleted_test"},
+        {"name": "hc_archive_03", "title": "HC Test 03", "tags": "series:hidecompleted_test"},
+    ]
+    # <<<<< ARCHIVE DEFINITION <<<<<
+
+    # >>>>> CREATE & UPLOAD ARCHIVES >>>>>
+    arcids: list[str] = []
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        for spec in archive_specs:
+            save_path = create_archive_file(tmpdir, spec["name"], num_pages)
+            arcid = compute_archive_id(save_path)
+            response, error = await upload_archive(
+                lrr_client, save_path, save_path.name, semaphore,
+                title=spec["title"], tags=spec["tags"]
+            )
+            assert not error, f"Failed to upload {spec['title']} (status {error.status}): {error.error}"
+            assert response.arcid == arcid
+            arcids.append(arcid)
+            LOGGER.debug(f"Uploaded {spec['title']} with arcid {arcid}")
+    # <<<<< CREATE & UPLOAD ARCHIVES <<<<<
+
+    # >>>>> SET READING PROGRESS >>>>>
+    # Set all archives to page 9 of 10 (90% > 85% threshold)
+    for arcid in arcids:
+        response, error = await lrr_client.archive_api.update_reading_progression(
+            UpdateReadingProgressionRequest(arcid=arcid, page=9)
+        )
+        assert not error, f"Failed to set progress for {arcid} (status {error.status}): {error.error}"
+        LOGGER.debug(f"Set progress for {arcid} to page 9/{num_pages}")
+    # <<<<< SET READING PROGRESS <<<<<
+
+    # >>>>> DISCARD SEARCH CACHE >>>>>
+    response, error = await lrr_client.search_api.discard_search_cache()
+    assert not error, f"Failed to discard search cache (status {error.status}): {error.error}"
+    # <<<<< DISCARD SEARCH CACHE <<<<<
+
+    # >>>>> HIDECOMPLETED SEARCH >>>>>
+    # All 3 archives are >85% complete; hidecompleted should return 0 results
+    response, error = await lrr_client.search_api.search_archive_index(
+        SearchArchiveIndexRequest(hidecompleted=True, groupby_tanks=False)
+    )
+    assert not error, f"hidecompleted search failed (status {error.status}): {error.error}"
+    assert response.records_filtered == 0, f"Expected 0 filtered records, got {response.records_filtered}"
+    # <<<<< HIDECOMPLETED SEARCH <<<<<
+
+    # >>>>> BASELINE SEARCH >>>>>
+    # Without hidecompleted, all 3 should be returned
+    response, error = await lrr_client.search_api.search_archive_index(
+        SearchArchiveIndexRequest(groupby_tanks=False)
+    )
+    assert not error, f"Baseline search failed (status {error.status}): {error.error}"
+    assert response.records_filtered == 3, f"Expected 3 filtered records, got {response.records_filtered}"
+    # <<<<< BASELINE SEARCH <<<<<
 
     # no error logs
     expect_no_error_logs(environment, LOGGER)
