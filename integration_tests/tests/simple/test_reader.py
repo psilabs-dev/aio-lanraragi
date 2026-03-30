@@ -765,6 +765,11 @@ async def test_toc_reader(
             # <<<<< ADD CHAPTER VIA UI <<<<<
 
             # >>>>> EDIT CHAPTER VIA UI >>>>>
+            # After the add step, the reader navigated to page 2 (the added chapter's page).
+            # Navigate back to Chapter 1 via dropdown so the edit targets Chapter 1.
+            await chapter_select.select_option(value="1")
+            await page.wait_for_timeout(500)
+
             LOGGER.debug("Editing chapter title via UI.")
             edit_icon = page.locator(".edit-toc").first
             await edit_icon.click()
@@ -772,8 +777,7 @@ async def test_toc_reader(
             await page.get_by_role("textbox").fill("Chapter 1 Renamed")
             await page.get_by_role("button", name="OK").click()
 
-            # overlay reopens immediately; wait for the PUT + reload cycle
-            # to complete by checking the dropdown reflects the rename
+            # overlay reopens only after PUT + metadata reload completes
             await page.locator("#archivePagesOverlay").wait_for(state="hidden")
             await page.locator("#archivePagesOverlay").wait_for(state="visible")
             first_option_text = await page.locator("#chapter-select option").first.text_content()
@@ -793,6 +797,11 @@ async def test_toc_reader(
             # <<<<< EDIT CHAPTER VIA UI <<<<<
 
             # >>>>> DELETE CHAPTER VIA UI >>>>>
+            # After the edit, goToPage moved to page 2 (Chapter 1.5).
+            # Navigate back to Chapter 1 Renamed so the delete targets it.
+            await chapter_select.select_option(value="1")
+            await page.wait_for_timeout(500)
+
             LOGGER.debug("Deleting chapter via UI.")
             delete_icon = page.locator(".remove-toc").first
             await delete_icon.click()
