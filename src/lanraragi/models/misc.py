@@ -44,6 +44,7 @@ class GetAvailablePluginsResponsePlugin(BaseModel):
     type: Literal["login", "metadata", "script", "download", "all"] = Field(...)
     version: str = Field(...)
     hidden: bool = Field(False)
+    registry: str | None = Field(None)
 
 class GetAvailablePluginsResponse(LanraragiResponse):
     plugins: list[GetAvailablePluginsResponsePlugin] = Field(...)
