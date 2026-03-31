@@ -466,3 +466,101 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
     # <<<<< UPGRADE (REINSTALL) <<<<<
 
     expect_no_error_logs(environment, LOGGER)
+
+
+# # TODO: not needed, served its purpose.
+# @pytest.mark.asyncio
+# @pytest.mark.dev("registry")
+# async def test_plugin_config_nonexistent(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+#     """
+#     Test that updating config for a nonexistent plugin returns 404.
+
+#     1. Setup environment with API key.
+#     2. Call update_plugin_config on a namespace that was never installed.
+#     3. Verify the server returns an error (404).
+#     """
+#     environment.setup(with_api_key=True)
+
+#     # >>>>> UPDATE NONEXISTENT PLUGIN >>>>>
+#     response, error = await lrr_client.misc_api.update_plugin_config(
+#         "nonexistent-plugin-xyz", UpdatePluginConfigRequest(hidden=True)
+#     )
+#     assert error is not None, "Expected error when updating config for nonexistent plugin"
+#     assert error.status == 404, f"Expected 404 status, got: {error.status}"
+#     # <<<<< UPDATE NONEXISTENT PLUGIN <<<<<
+
+#     expect_no_error_logs(environment, LOGGER)
+
+
+# # TODO: not needed, served its purpose.
+# @pytest.mark.asyncio
+# @pytest.mark.dev("registry")
+# async def test_plugin_config_survives_restart(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+#     """
+#     Test that plugin configuration persists across server restart.
+
+#     1. Create registry, refresh, install a plugin.
+#     2. Hide the plugin via update_plugin_config.
+#     3. Restart the server.
+#     4. Verify the plugin is still hidden after restart.
+#     """
+#     environment.setup(with_api_key=True)
+
+#     # >>>>> SETUP AND INSTALL >>>>>
+#     response, error = await lrr_client.misc_api.create_registry(
+#         CreateRegistryRequest(
+#             name="demo",
+#             type="git",
+#             provider="github",
+#             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+#             ref="main",
+#         )
+#     )
+#     assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+#     reg_id = response.id
+
+#     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+#     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+
+#     response, error = await lrr_client.misc_api.install_plugin(
+#         InstallPluginRequest(namespace="sample-metadata", registry=reg_id)
+#     )
+#     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
+#     # <<<<< SETUP AND INSTALL <<<<<
+
+#     # >>>>> HIDE PLUGIN >>>>>
+#     response, error = await lrr_client.misc_api.update_plugin_config(
+#         "sample-metadata", UpdatePluginConfigRequest(hidden=True)
+#     )
+#     assert not error, f"Failed to hide plugin (status {error.status}): {error.error}"
+
+#     response, error = await lrr_client.misc_api.get_available_plugins(
+#         GetAvailablePluginsRequest(type="metadata")
+#     )
+#     assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
+#     for plugin in response.plugins:
+#         if plugin.namespace == "sample-metadata":
+#             assert plugin.hidden is True, f"Expected hidden=True before restart, got {plugin.hidden}"
+#             break
+#     else:
+#         pytest.fail("Plugin sample-metadata not found before restart")
+#     # <<<<< HIDE PLUGIN <<<<<
+
+#     # >>>>> RESTART >>>>>
+#     environment.restart()
+#     # <<<<< RESTART <<<<<
+
+#     # >>>>> VERIFY AFTER RESTART >>>>>
+#     response, error = await lrr_client.misc_api.get_available_plugins(
+#         GetAvailablePluginsRequest(type="metadata")
+#     )
+#     assert not error, f"Failed to list plugins after restart (status {error.status}): {error.error}"
+#     for plugin in response.plugins:
+#         if plugin.namespace == "sample-metadata":
+#             assert plugin.hidden is True, f"Expected hidden=True after restart, got {plugin.hidden}"
+#             break
+#     else:
+#         pytest.fail("Plugin sample-metadata not found after restart")
+#     # <<<<< VERIFY AFTER RESTART <<<<<
+
+#     expect_no_error_logs(environment, LOGGER)
