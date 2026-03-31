@@ -303,6 +303,8 @@ class _MiscApiClient(_ApiClient):
         body = {}
         if request.hidden is not None:
             body["hidden"] = request.hidden
+        if request.priority is not None:
+            body["priority"] = request.priority
         status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers, json_data=body)
         if status == 200:
             return (LanraragiResponse(), None)
