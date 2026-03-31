@@ -401,6 +401,117 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
+async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test plugin priority via update_plugin_config.
+
+    1. Create registry, refresh, install sample-metadata.
+    2. Verify default priority is 0.
+    3. Set priority to 5, verify it persists in plugin list.
+    4. Set distinct priorities on sample-metadata and a default metadata plugin, verify both.
+    5. Set priority on a non-metadata plugin, verify it is stored.
+    """
+    environment.setup(with_api_key=True)
+
+    # >>>>> SETUP AND INSTALL >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-metadata", registry=reg_id)
+    )
+    assert not error, f"Failed to install sample-metadata (status {error.status}): {error.error}"
+    # <<<<< SETUP AND INSTALL <<<<<
+
+    # >>>>> VERIFY DEFAULT PRIORITY >>>>>
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
+    for plugin in response.plugins:
+        if plugin.namespace == "sample-metadata":
+            assert plugin.priority == 0, f"Expected default priority 0, got {plugin.priority}"
+            break
+    else:
+        pytest.fail("sample-metadata not found in plugin list")
+    # <<<<< VERIFY DEFAULT PRIORITY <<<<<
+
+    # >>>>> SET PRIORITY >>>>>
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "sample-metadata", UpdatePluginConfigRequest(priority=5)
+    )
+    assert not error, f"Failed to set priority (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
+    for plugin in response.plugins:
+        if plugin.namespace == "sample-metadata":
+            assert plugin.priority == 5, f"Expected priority 5, got {plugin.priority}"
+            break
+    else:
+        pytest.fail("sample-metadata not found in plugin list after priority set")
+    # <<<<< SET PRIORITY <<<<<
+
+    # >>>>> DISTINCT PRIORITIES ON TWO METADATA PLUGINS >>>>>
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "copytags", UpdatePluginConfigRequest(priority=3)
+    )
+    assert not error, f"Failed to set copytags priority (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
+    priorities = {}
+    for plugin in response.plugins:
+        if plugin.namespace in ("sample-metadata", "copytags"):
+            priorities[plugin.namespace] = plugin.priority
+    assert priorities["sample-metadata"] == 5, f"Expected sample-metadata priority 5, got {priorities.get('sample-metadata')}"
+    assert priorities["copytags"] == 3, f"Expected copytags priority 3, got {priorities.get('copytags')}"
+    # <<<<< DISTINCT PRIORITIES ON TWO METADATA PLUGINS <<<<<
+
+    # >>>>> PRIORITY ON NON-METADATA PLUGIN >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_id)
+    )
+    assert not error, f"Failed to install sample-downloader (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "sample-downloader", UpdatePluginConfigRequest(priority=2)
+    )
+    assert not error, f"Failed to set sample-downloader priority (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="download")
+    )
+    assert not error, f"Failed to list download plugins (status {error.status}): {error.error}"
+    for plugin in response.plugins:
+        if plugin.namespace == "sample-downloader":
+            assert plugin.priority == 2, f"Expected sample-downloader priority 2, got {plugin.priority}"
+            break
+    else:
+        pytest.fail("sample-downloader not found in download plugin list")
+    # <<<<< PRIORITY ON NON-METADATA PLUGIN <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
 async def test_plugin_install_conflict(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test plugin install conflict detection and upgrade behavior.

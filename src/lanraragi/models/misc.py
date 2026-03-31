@@ -44,6 +44,7 @@ class GetAvailablePluginsResponsePlugin(BaseModel):
     type: Literal["login", "metadata", "script", "download", "all"] = Field(...)
     version: str = Field(...)
     hidden: bool = Field(False)
+    priority: int = Field(0)
     registry: str | None = Field(None)
 
 class GetAvailablePluginsResponse(LanraragiResponse):
@@ -136,6 +137,7 @@ class RefreshRegistryResponse(LanraragiResponse):
 
 class UpdatePluginConfigRequest(LanraragiRequest):
     hidden: bool | None = Field(None)
+    priority: int | None = Field(None)
 
 class InstallPluginRequest(LanraragiRequest):
     namespace: str = Field(...)
