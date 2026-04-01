@@ -7,6 +7,8 @@ import tempfile
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
+import playwright.async_api
+import playwright.async_api._generated
 import pytest
 import pytest_asyncio
 from lanraragi.clients.client import LRRClient
@@ -18,12 +20,16 @@ from lanraragi.models.misc import (
     UpdateRegistryRequest,
 )
 
-from aio_lanraragi_tests.common import DEFAULT_API_KEY
+from aio_lanraragi_tests.common import DEFAULT_API_KEY, DEFAULT_LRR_PASSWORD
 from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
 )
 from aio_lanraragi_tests.deployment.factory import generate_deployment
+from aio_lanraragi_tests.utils.playwright import (
+    assert_browser_responses_ok,
+    assert_console_logs_ok,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -322,6 +328,95 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     response, error = await lrr_client.misc_api.uninstall_plugin("sample-downloader")
     assert not error, f"Failed to uninstall plugin (status {error.status}): {error.error}"
     # <<<<< UNINSTALL PLUGIN <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test that uninstalling a plugin fully removes it and allows reinstallation.
+
+    1. Create registry and refresh index.
+    2. Install sample-metadata, verify managed provenance.
+    3. Uninstall, verify plugin absent from list.
+    4. Reinstall, verify managed provenance preserved.
+    """
+    environment.setup(with_api_key=True)
+
+    # >>>>> SETUP REGISTRY >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+    # <<<<< SETUP REGISTRY <<<<<
+
+    # >>>>> INSTALL >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-metadata", registry=reg_id)
+    )
+    assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
+    assert response.registry == reg_id, f"Expected provenance {reg_id}, got: {response.registry}"
+    # <<<<< INSTALL <<<<<
+
+    # >>>>> VERIFY INSTALLED >>>>>
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
+    for plugin in response.plugins:
+        if plugin.namespace == "sample-metadata":
+            assert plugin.registry == reg_id, f"Expected managed provenance {reg_id}, got: {plugin.registry}"
+            break
+    else:
+        pytest.fail("sample-metadata not found after install")
+    # <<<<< VERIFY INSTALLED <<<<<
+
+    # >>>>> UNINSTALL >>>>>
+    response, error = await lrr_client.misc_api.uninstall_plugin("sample-metadata")
+    assert not error, f"Failed to uninstall plugin (status {error.status}): {error.error}"
+    # <<<<< UNINSTALL <<<<<
+
+    # >>>>> VERIFY REMOVED >>>>>
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list plugins after uninstall (status {error.status}): {error.error}"
+    namespaces = {p.namespace for p in response.plugins}
+    assert "sample-metadata" not in namespaces, f"Plugin still in list after uninstall: {namespaces}"
+    # <<<<< VERIFY REMOVED <<<<<
+
+    # >>>>> REINSTALL >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-metadata", registry=reg_id)
+    )
+    assert not error, f"Failed to reinstall plugin (status {error.status}): {error.error}"
+    assert response.registry == reg_id, f"Expected provenance on reinstall {reg_id}, got: {response.registry}"
+    # <<<<< REINSTALL <<<<<
+
+    # >>>>> VERIFY REINSTALLED >>>>>
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list plugins after reinstall (status {error.status}): {error.error}"
+    for plugin in response.plugins:
+        if plugin.namespace == "sample-metadata":
+            assert plugin.registry == reg_id, f"Expected managed provenance {reg_id}, got: {plugin.registry}"
+            break
+    else:
+        pytest.fail("sample-metadata not found after reinstall")
+    # <<<<< VERIFY REINSTALLED <<<<<
 
     expect_no_error_logs(environment, LOGGER)
 
@@ -675,3 +770,149 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
 #     # <<<<< VERIFY AFTER RESTART <<<<<
 
 #     expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.dev("registry")
+async def test_plugin_uninstall_ui(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test plugin install, enable, uninstall, and reinstall through the UI.
+
+    1. Create registry, refresh index via API.
+    2. Navigate to plugin page, install sample-metadata from registry.
+    3. Move sample-metadata to enabled pool, save configuration.
+    4. Uninstall sample-metadata, verify absent from page and API.
+    5. Refresh registry, verify sample-metadata available for reinstall.
+    6. Reinstall, verify managed provenance.
+    """
+    environment.setup(with_api_key=True)
+
+    # >>>>> SETUP REGISTRY >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+    # <<<<< SETUP REGISTRY <<<<<
+
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await bc.new_page()
+
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            # >>>>> LOGIN >>>>>
+            await page.goto(f"{lrr_client.lrr_base_url}/config/plugins")
+            await page.wait_for_load_state("networkidle")
+
+            if "login" in page.url.lower():
+                await page.fill("#pw_field", DEFAULT_LRR_PASSWORD)
+                await page.click("input[type='submit'][value='Login']")
+                await page.wait_for_load_state("networkidle")
+            assert "plugins" in page.url, f"Expected plugins page, got: {page.url}"
+            responses.clear()
+            console_evts.clear()
+            # <<<<< LOGIN <<<<<
+
+            # >>>>> INSTALL >>>>>
+            await page.get_by_role("button", name="Refresh Index").click()
+            await page.wait_for_load_state("networkidle")
+
+            sample_metadata_row = page.locator(".registry-plugin-row").filter(
+                has=page.locator("h2", has_text="Sample Metadata")
+            )
+            await sample_metadata_row.locator("input[type='button']").click()
+            await page.wait_for_load_state("networkidle")
+            # <<<<< INSTALL <<<<<
+
+            # >>>>> VERIFY INSTALLED >>>>>
+            badge = page.locator(".plugin-card[data-namespace='sample-metadata'] .plugin-badge")
+            assert await badge.text_content() == "managed", f"Expected 'managed' badge after install, got: {await badge.text_content()}"
+            # <<<<< VERIFY INSTALLED <<<<<
+
+            # >>>>> ENABLE AND SAVE >>>>>
+            # native drag does not trigger SortableJS; move via DOM
+            moved = await page.evaluate("""() => {
+                const card = document.querySelector('.plugin-card[data-namespace="sample-metadata"]');
+                const enabledPool = document.getElementById('metadata-enabled');
+                if (!card || !enabledPool) return false;
+
+                const emptyMsg = enabledPool.querySelector('.pool-empty-msg');
+                if (emptyMsg) emptyMsg.remove();
+
+                enabledPool.appendChild(card);
+                if (typeof Plugins !== 'undefined' && Plugins.renumberEnabled) {
+                    Plugins.renumberEnabled();
+                }
+                return card.closest('#metadata-enabled') !== null;
+            }""")
+            assert moved, "Failed to move sample-metadata to enabled pool"
+
+            await page.get_by_role("button", name="Save Plugin Configuration").click()
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(2000)
+            # <<<<< ENABLE AND SAVE <<<<<
+
+            # >>>>> UNINSTALL >>>>>
+            await page.locator(".plugin-uninstall-btn[data-namespace='sample-metadata']").click()
+
+            # confirm uninstall dialog
+            await page.wait_for_selector(".swal2-confirm", state="visible")
+            await page.click(".swal2-confirm")
+            await page.wait_for_load_state("networkidle")
+            # <<<<< UNINSTALL <<<<<
+
+            # >>>>> VERIFY REMOVED >>>>>
+            card_count = await page.locator(".plugin-card[data-namespace='sample-metadata']").count()
+            assert card_count == 0, f"sample-metadata still in DOM after uninstall (count: {card_count})"
+
+            # verify via API
+            response, error = await lrr_client.misc_api.get_available_plugins(
+                GetAvailablePluginsRequest(type="metadata")
+            )
+            assert not error, f"Failed to list plugins after uninstall (status {error.status}): {error.error}"
+            namespaces = {p.namespace for p in response.plugins}
+            assert "sample-metadata" not in namespaces, f"Plugin still in API after uninstall: {namespaces}"
+            # <<<<< VERIFY REMOVED <<<<<
+
+            # >>>>> REFRESH AND VERIFY AVAILABLE >>>>>
+            await page.get_by_role("button", name="Refresh Index").click()
+            await page.wait_for_load_state("networkidle")
+
+            reinstall_row = page.locator(".registry-plugin-row").filter(
+                has=page.locator("h2", has_text="Sample Metadata")
+            )
+            await reinstall_row.wait_for(state="visible")
+            # <<<<< REFRESH AND VERIFY AVAILABLE <<<<<
+
+            # >>>>> REINSTALL >>>>>
+            await reinstall_row.locator("input[type='button']").click()
+            await page.wait_for_load_state("networkidle")
+
+            badge_after = page.locator(".plugin-card[data-namespace='sample-metadata'] .plugin-badge")
+            assert await badge_after.text_content() == "managed", f"Expected 'managed' after reinstall, got: {await badge_after.text_content()}"
+            # <<<<< REINSTALL <<<<<
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+
+    expect_no_error_logs(environment, LOGGER)
