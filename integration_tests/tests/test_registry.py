@@ -831,18 +831,25 @@ async def test_plugin_uninstall_ui(lrr_client: LRRClient, environment: AbstractL
             # <<<<< LOGIN <<<<<
 
             # >>>>> INSTALL >>>>>
-            await page.get_by_role("button", name="Refresh Index").click()
+            # Expand the Metadata Plugins collapsible (hidden by allcollapsible on load)
+            await page.locator(".collapsible-title", has_text="Metadata Plugins").click()
+            await page.wait_for_timeout(500)
+
+            await page.locator("#registry-refresh-btn").click()
             await page.wait_for_load_state("networkidle")
 
             sample_metadata_row = page.locator(".registry-plugin-row").filter(
                 has=page.locator("h2", has_text="Sample Metadata")
             )
-            await sample_metadata_row.locator("input[type='button']").click()
-            await page.wait_for_load_state("networkidle")
+            async with page.expect_response("**/api/plugins/install") as response_info:
+                await sample_metadata_row.locator("input[type='button']").click()
+            install_response = await response_info.value
+            assert install_response.ok, f"Install API failed: {install_response.status}"
             # <<<<< INSTALL <<<<<
 
             # >>>>> VERIFY INSTALLED >>>>>
             badge = page.locator(".plugin-card[data-namespace='sample-metadata'] .plugin-badge")
+            await page.wait_for_timeout(500)
             assert await badge.text_content() == "managed", f"Expected 'managed' badge after install, got: {await badge.text_content()}"
             # <<<<< VERIFY INSTALLED <<<<<
 
@@ -872,9 +879,12 @@ async def test_plugin_uninstall_ui(lrr_client: LRRClient, environment: AbstractL
             # >>>>> UNINSTALL >>>>>
             await page.locator(".plugin-uninstall-btn[data-namespace='sample-metadata']").click()
 
-            # confirm uninstall dialog
+            # confirm uninstall dialog; wait for DELETE response then page reload
             await page.wait_for_selector(".swal2-confirm", state="visible")
-            await page.click(".swal2-confirm")
+            async with page.expect_response("**/api/plugins/installed/**") as response_info:
+                await page.click(".swal2-confirm")
+            uninstall_response = await response_info.value
+            assert uninstall_response.ok, f"Uninstall API failed: {uninstall_response.status}"
             await page.wait_for_load_state("networkidle")
             # <<<<< UNINSTALL <<<<<
 
@@ -892,7 +902,11 @@ async def test_plugin_uninstall_ui(lrr_client: LRRClient, environment: AbstractL
             # <<<<< VERIFY REMOVED <<<<<
 
             # >>>>> REFRESH AND VERIFY AVAILABLE >>>>>
-            await page.get_by_role("button", name="Refresh Index").click()
+            # Re-expand collapsible (page reloaded after uninstall)
+            await page.locator(".collapsible-title", has_text="Metadata Plugins").click()
+            await page.wait_for_timeout(500)
+
+            await page.locator("#registry-refresh-btn").click()
             await page.wait_for_load_state("networkidle")
 
             reinstall_row = page.locator(".registry-plugin-row").filter(
@@ -902,10 +916,13 @@ async def test_plugin_uninstall_ui(lrr_client: LRRClient, environment: AbstractL
             # <<<<< REFRESH AND VERIFY AVAILABLE <<<<<
 
             # >>>>> REINSTALL >>>>>
-            await reinstall_row.locator("input[type='button']").click()
-            await page.wait_for_load_state("networkidle")
+            async with page.expect_response("**/api/plugins/install") as response_info:
+                await reinstall_row.locator("input[type='button']").click()
+            reinstall_response = await response_info.value
+            assert reinstall_response.ok, f"Reinstall API failed: {reinstall_response.status}"
 
             badge_after = page.locator(".plugin-card[data-namespace='sample-metadata'] .plugin-badge")
+            await page.wait_for_timeout(500)
             assert await badge_after.text_content() == "managed", f"Expected 'managed' after reinstall, got: {await badge_after.text_content()}"
             # <<<<< REINSTALL <<<<<
 
