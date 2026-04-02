@@ -933,3 +933,53 @@ async def test_plugin_uninstall_ui(lrr_client: LRRClient, environment: AbstractL
             await browser.close()
 
     expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+async def test_plugin_uninstall_not_listed(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test that uninstalled plugin is absent from plugin list across repeated cycles.
+
+    1. Create registry and refresh index.
+    2. Run 5 cycles of: install sample-login, uninstall, verify absent from GET /api/plugins/login.
+    """
+    environment.setup(with_api_key=True)
+
+    # >>>>> SETUP REGISTRY >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+    # <<<<< SETUP REGISTRY <<<<<
+
+    for i in range(5):
+        LOGGER.info(f"Cycle {i}: installing sample-login")
+        response, error = await lrr_client.misc_api.install_plugin(
+            InstallPluginRequest(namespace="sample-login", registry=reg_id)
+        )
+        assert not error, f"Cycle {i}: install failed (status {error.status}): {error.error}"
+
+        LOGGER.info(f"Cycle {i}: uninstalling sample-login")
+        response, error = await lrr_client.misc_api.uninstall_plugin("sample-login")
+        assert not error, f"Cycle {i}: uninstall failed (status {error.status}): {error.error}"
+
+        LOGGER.info(f"Cycle {i}: verifying absent from plugin list")
+        response, error = await lrr_client.misc_api.get_available_plugins(
+            GetAvailablePluginsRequest(type="login")
+        )
+        assert not error, f"Cycle {i}: list failed (status {error.status}): {error.error}"
+        namespaces = {p.namespace for p in response.plugins}
+        assert "sample-login" not in namespaces, f"Cycle {i}: sample-login still listed after uninstall: {namespaces}"
+
+    expect_no_error_logs(environment, LOGGER)
