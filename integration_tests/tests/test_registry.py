@@ -660,7 +660,7 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
         InstallPluginRequest(namespace="sample-metadata", registry=reg_id)
     )
     assert error is not None, "Expected error when installing plugin with existing sideloaded copy"
-    assert "no provenance" in error.error, f"Expected 'no provenance' in error, got: {error.error}"
+    assert "without provenance" in error.error, f"Expected 'without provenance' in error, got: {error.error}"
     # <<<<< INSTALL WITH CONFLICT (NO PROVENANCE) <<<<<
 
     # >>>>> INSTALL WITHOUT CONFLICT >>>>>
