@@ -305,6 +305,7 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
     1. Create a git registry and refresh.
     2. Update the URL, verify index_cleared is true.
     3. Update name only, verify index_cleared is false.
+    4. Switch type from git to local, verify stale git fields are absent.
     """
     environment.setup(with_api_key=True)
 
@@ -341,6 +342,19 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
     assert not error, f"Failed to update registry name (status {error.status}): {error.error}"
     assert response.index_cleared is False, "Name change should not clear index"
     # <<<<< UPDATE NAME ONLY <<<<<
+
+    # >>>>> TYPE SWITCH: GIT -> LOCAL >>>>>
+    response, error = await lrr_client.misc_api.update_registry(
+        reg_id, UpdateRegistryRequest(type="local", path="/tmp/plugins")
+    )
+    assert not error, f"Failed to switch type (status {error.status}): {error.error}"
+    assert response.index_cleared is True, "Type change should clear index"
+    assert response.registry.type == "local", "Type should be local"
+    assert response.registry.path == "/tmp/plugins", "Path should be set"
+    assert response.registry.url is None, "Stale git field 'url' should be absent"
+    assert response.registry.provider is None, "Stale git field 'provider' should be absent"
+    assert response.registry.ref is None, "Stale git field 'ref' should be absent"
+    # <<<<< TYPE SWITCH: GIT -> LOCAL <<<<<
 
     expect_no_error_logs(environment, LOGGER)
 
