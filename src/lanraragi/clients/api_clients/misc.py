@@ -301,6 +301,8 @@ class _MiscApiClient(_ApiClient):
         """
         url = self.api_context.build_url(f"/api/plugins/installed/{namespace}/config")
         body = {}
+        if request.enabled is not None:
+            body["enabled"] = request.enabled
         if request.hidden is not None:
             body["hidden"] = request.hidden
         if request.priority is not None:
