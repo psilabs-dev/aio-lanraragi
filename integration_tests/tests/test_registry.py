@@ -2,6 +2,7 @@
 Plugin registry integration tests.
 """
 
+import asyncio
 import logging
 import tempfile
 from collections.abc import AsyncGenerator, Generator
@@ -12,6 +13,7 @@ import playwright.async_api._generated
 import pytest
 import pytest_asyncio
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.archive import GetArchiveMetadataRequest
 from lanraragi.models.misc import (
     CreateRegistryRequest,
     GetAvailablePluginsRequest,
@@ -26,6 +28,7 @@ from aio_lanraragi_tests.deployment.base import (
     expect_no_error_logs,
 )
 from aio_lanraragi_tests.deployment.factory import generate_deployment
+from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
@@ -303,9 +306,11 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
     Test that updating source fields clears the cached index.
 
     1. Create a git registry and refresh.
-    2. Update the URL, verify index_cleared is true.
-    3. Update name only, verify index_cleared is false.
-    4. Switch type from git to local, verify stale git fields are absent.
+    2. Install a plugin from the registry.
+    3. Update the URL, verify index_cleared is true.
+    4. Verify installed plugin retains provenance despite index clear.
+    5. Update name only, verify index_cleared is false.
+    6. Switch type from git to local, verify stale git fields are absent.
     """
     environment.setup(with_api_key=True)
 
@@ -327,12 +332,31 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
     assert response.index is not None, "Expected index after refresh"
     # <<<<< CREATE AND REFRESH <<<<<
 
+    # >>>>> INSTALL PLUGIN BEFORE SOURCE CHANGE >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_id)
+    )
+    assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
+    assert response.registry == reg_id
+    # <<<<< INSTALL PLUGIN BEFORE SOURCE CHANGE <<<<<
+
     # >>>>> UPDATE URL (SOURCE CHANGE) >>>>>
     response, error = await lrr_client.misc_api.update_registry(
         reg_id, UpdateRegistryRequest(url="https://github.com/example/other-repo.git")
     )
     assert not error, f"Failed to update registry (status {error.status}): {error.error}"
     assert response.index_cleared is True, "URL change should clear index"
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="download")
+    )
+    assert not error, f"Failed to list plugins after source change (status {error.status}): {error.error}"
+    for plugin in response.plugins:
+        if plugin.namespace == "sample-downloader":
+            assert plugin.registry == reg_id, f"Expected provenance {reg_id} after source change, got: {plugin.registry}"
+            break
+    else:
+        pytest.fail("Installed plugin should survive registry source change")
     # <<<<< UPDATE URL (SOURCE CHANGE) <<<<<
 
     # >>>>> UPDATE NAME ONLY >>>>>
@@ -421,6 +445,7 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     4. Uninstall the plugin, verify absent.
     5. Uninstall again (no install path), expect error.
     6. Uninstall a namespace that was never installed, expect error.
+    7. Uninstall a built-in plugin, expect 403 error.
     """
     environment.setup(with_api_key=True)
 
@@ -482,6 +507,19 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     assert error is not None, "Expected error uninstalling never-installed plugin"
     # <<<<< UNINSTALL NEVER-INSTALLED <<<<<
 
+    # >>>>> UNINSTALL BUILT-IN BLOCKED >>>>>
+    response, error = await lrr_client.misc_api.uninstall_plugin("copytags")
+    assert error is not None, "Expected error uninstalling built-in plugin"
+    assert error.status == 403, f"Expected 403 for built-in uninstall, got {error.status}"
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
+    namespaces = {p.namespace for p in response.plugins}
+    assert "copytags" in namespaces, "Built-in plugin should still be listed after blocked uninstall"
+    # <<<<< UNINSTALL BUILT-IN BLOCKED <<<<<
+
     expect_no_error_logs(environment, LOGGER)
 
 
@@ -493,11 +531,13 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     Test uninstall/reinstall lifecycle and orphaned provenance.
 
     1. Create registry and refresh index.
-    2. Install sample-metadata, verify managed provenance.
+    2. Install title-suffix-1, verify managed provenance.
     3. Uninstall, verify plugin absent from list.
     4. Reinstall, verify managed provenance preserved.
-    5. Delete registry, verify plugin still listed with orphaned provenance.
-    6. Uninstall orphaned plugin, verify success.
+    5. Enable plugin, upload archive, verify title mutated.
+    6. Delete registry, verify plugin still listed with orphaned provenance.
+    7. Upload another archive, verify orphaned plugin still auto-executes.
+    8. Uninstall orphaned plugin, verify success.
     """
     environment.setup(with_api_key=True)
 
@@ -520,7 +560,7 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
 
     # >>>>> INSTALL >>>>>
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-metadata", registry=reg_id)
+        InstallPluginRequest(namespace="title-suffix-1", registry=reg_id)
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
     assert response.registry == reg_id, f"Expected provenance {reg_id}, got: {response.registry}"
@@ -532,15 +572,15 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     )
     assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
     for plugin in response.plugins:
-        if plugin.namespace == "sample-metadata":
+        if plugin.namespace == "title-suffix-1":
             assert plugin.registry == reg_id, f"Expected managed provenance {reg_id}, got: {plugin.registry}"
             break
     else:
-        pytest.fail("sample-metadata not found after install")
+        pytest.fail("title-suffix-1 not found after install")
     # <<<<< VERIFY INSTALLED <<<<<
 
     # >>>>> UNINSTALL >>>>>
-    response, error = await lrr_client.misc_api.uninstall_plugin("sample-metadata")
+    response, error = await lrr_client.misc_api.uninstall_plugin("title-suffix-1")
     assert not error, f"Failed to uninstall plugin (status {error.status}): {error.error}"
     # <<<<< UNINSTALL <<<<<
 
@@ -550,12 +590,12 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     )
     assert not error, f"Failed to list plugins after uninstall (status {error.status}): {error.error}"
     namespaces = {p.namespace for p in response.plugins}
-    assert "sample-metadata" not in namespaces, f"Plugin still in list after uninstall: {namespaces}"
+    assert "title-suffix-1" not in namespaces, f"Plugin still in list after uninstall: {namespaces}"
     # <<<<< VERIFY REMOVED <<<<<
 
     # >>>>> REINSTALL >>>>>
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-metadata", registry=reg_id)
+        InstallPluginRequest(namespace="title-suffix-1", registry=reg_id)
     )
     assert not error, f"Failed to reinstall plugin (status {error.status}): {error.error}"
     assert response.registry == reg_id, f"Expected provenance on reinstall {reg_id}, got: {response.registry}"
@@ -567,12 +607,32 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     )
     assert not error, f"Failed to list plugins after reinstall (status {error.status}): {error.error}"
     for plugin in response.plugins:
-        if plugin.namespace == "sample-metadata":
+        if plugin.namespace == "title-suffix-1":
             assert plugin.registry == reg_id, f"Expected managed provenance {reg_id}, got: {plugin.registry}"
             break
     else:
-        pytest.fail("sample-metadata not found after reinstall")
+        pytest.fail("title-suffix-1 not found after reinstall")
     # <<<<< VERIFY REINSTALLED <<<<<
+
+    # >>>>> ENABLE AND VERIFY EXECUTION >>>>>
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "title-suffix-1", UpdatePluginConfigRequest(enabled=True)
+    )
+    assert not error, f"Failed to enable plugin (status {error.status}): {error.error}"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_path = create_archive_file(Path(tmpdir), "test_reinstall_exec", num_pages=1)
+        response, error = await upload_archive(
+            lrr_client, archive_path, archive_path.name, asyncio.Semaphore(1),
+            title="base", tags="test:reinstall",
+        )
+    assert not error, f"Upload failed (status {error.status}): {error.error}"
+    arcid = response.arcid
+
+    response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+    assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
+    assert response.title == "base-1", f"Expected 'base-1' after enabled plugin execution, got: {response.title!r}"
+    # <<<<< ENABLE AND VERIFY EXECUTION <<<<<
 
     # >>>>> ORPHANED PROVENANCE >>>>>
     response, error = await lrr_client.misc_api.delete_registry(reg_id)
@@ -583,15 +643,30 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     )
     assert not error, f"Failed to list plugins after registry delete (status {error.status}): {error.error}"
     for plugin in response.plugins:
-        if plugin.namespace == "sample-metadata":
+        if plugin.namespace == "title-suffix-1":
             assert plugin.registry == reg_id, f"Expected orphaned provenance {reg_id}, got: {plugin.registry}"
             break
     else:
-        pytest.fail("sample-metadata should still be listed after registry delete")
+        pytest.fail("title-suffix-1 should still be listed after registry delete")
     # <<<<< ORPHANED PROVENANCE <<<<<
 
+    # >>>>> ORPHANED PLUGIN STILL EXECUTES >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_path = create_archive_file(Path(tmpdir), "test_orphan_exec", num_pages=1)
+        response, error = await upload_archive(
+            lrr_client, archive_path, archive_path.name, asyncio.Semaphore(1),
+            title="orphan", tags="test:orphan",
+        )
+    assert not error, f"Upload failed (status {error.status}): {error.error}"
+    arcid = response.arcid
+
+    response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+    assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
+    assert response.title == "orphan-1", f"Expected 'orphan-1' from orphaned plugin, got: {response.title!r}"
+    # <<<<< ORPHANED PLUGIN STILL EXECUTES <<<<<
+
     # >>>>> UNINSTALL ORPHANED >>>>>
-    response, error = await lrr_client.misc_api.uninstall_plugin("sample-metadata")
+    response, error = await lrr_client.misc_api.uninstall_plugin("title-suffix-1")
     assert not error, f"Failed to uninstall orphaned plugin (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.get_available_plugins(
@@ -599,7 +674,7 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     )
     assert not error, f"Failed to list plugins after orphaned uninstall (status {error.status}): {error.error}"
     namespaces = {p.namespace for p in response.plugins}
-    assert "sample-metadata" not in namespaces, f"Orphaned plugin still listed after uninstall: {namespaces}"
+    assert "title-suffix-1" not in namespaces, f"Orphaned plugin still listed after uninstall: {namespaces}"
     # <<<<< UNINSTALL ORPHANED <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -617,6 +692,7 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     3. Unhide the plugin, verify hidden field is false.
     4. Hide again, set priority, uninstall, reinstall.
     5. Verify hidden and priority survive uninstall/reinstall.
+    6. Hide a built-in plugin, verify hidden in plugin list, then unhide.
     """
     environment.setup(with_api_key=True)
 
@@ -704,6 +780,29 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     else:
         pytest.fail("sample-metadata not found after reinstall")
     # <<<<< CONFIG SURVIVES UNINSTALL/REINSTALL <<<<<
+
+    # >>>>> HIDE BUILT-IN PLUGIN >>>>>
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "copytags", UpdatePluginConfigRequest(hidden=True)
+    )
+    assert not error, f"Failed to hide built-in plugin (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
+    for plugin in response.plugins:
+        if plugin.namespace == "copytags":
+            assert plugin.hidden is True, f"Expected built-in hidden=True, got {plugin.hidden}"
+            break
+    else:
+        pytest.fail("Built-in plugin copytags not found in list after hide")
+
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "copytags", UpdatePluginConfigRequest(hidden=False)
+    )
+    assert not error, f"Failed to unhide built-in plugin (status {error.status}): {error.error}"
+    # <<<<< HIDE BUILT-IN PLUGIN <<<<<
 
     expect_no_error_logs(environment, LOGGER)
 
@@ -816,6 +915,122 @@ async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDe
     else:
         pytest.fail("sample-downloader not found in download plugin list")
     # <<<<< PRIORITY ON NON-METADATA PLUGIN <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+@pytest.mark.ratelimit
+async def test_plugin_priority_execution_order(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test that enabled metadata plugins execute in priority order on archive upload.
+
+    1. Create registry, refresh, install title-suffix-1, title-suffix-2, title-suffix-3.
+    2. Set priorities: suffix-2=1, suffix-1=2, suffix-3=3 (execution order: 2, 1, 3).
+    3. Enable all three via Redis.
+    4. Upload archive with title "test", verify final title is "test-2-1-3".
+    5. Change priorities: suffix-3=1, suffix-2=2, suffix-1=3 (execution order: 3, 2, 1).
+    6. Upload another archive, verify final title is "test-3-2-1".
+    """
+    environment.setup(with_api_key=True)
+
+    # >>>>> SETUP REGISTRY >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+    # <<<<< SETUP REGISTRY <<<<<
+
+    # >>>>> INSTALL ALL THREE >>>>>
+    for ns in ("title-suffix-1", "title-suffix-2", "title-suffix-3"):
+        response, error = await lrr_client.misc_api.install_plugin(
+            InstallPluginRequest(namespace=ns, registry=reg_id)
+        )
+        assert not error, f"Failed to install {ns} (status {error.status}): {error.error}"
+    # <<<<< INSTALL ALL THREE <<<<<
+
+    # >>>>> SET PRIORITIES: 2, 1, 3 >>>>>
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "title-suffix-2", UpdatePluginConfigRequest(priority=1)
+    )
+    assert not error, f"Failed to set suffix-2 priority (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "title-suffix-1", UpdatePluginConfigRequest(priority=2)
+    )
+    assert not error, f"Failed to set suffix-1 priority (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "title-suffix-3", UpdatePluginConfigRequest(priority=3)
+    )
+    assert not error, f"Failed to set suffix-3 priority (status {error.status}): {error.error}"
+    # <<<<< SET PRIORITIES <<<<<
+
+    # >>>>> ENABLE ALL THREE >>>>>
+    for ns in ("title-suffix-1", "title-suffix-2", "title-suffix-3"):
+        response, error = await lrr_client.misc_api.update_plugin_config(
+            ns, UpdatePluginConfigRequest(enabled=True)
+        )
+        assert not error, f"Failed to enable {ns} (status {error.status}): {error.error}"
+    # <<<<< ENABLE ALL THREE <<<<<
+
+    # >>>>> UPLOAD AND VERIFY ORDER 2-1-3 >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_path = create_archive_file(Path(tmpdir), "test_priority_order_1", num_pages=1)
+        response, error = await upload_archive(
+            lrr_client, archive_path, archive_path.name, asyncio.Semaphore(1),
+            title="test", tags="test:priority",
+        )
+    assert not error, f"Upload failed (status {error.status}): {error.error}"
+    arcid = response.arcid
+
+    response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+    assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
+    assert response.title == "test-2-1-3", f"Expected 'test-2-1-3', got: {response.title!r}"
+    # <<<<< UPLOAD AND VERIFY ORDER 2-1-3 <<<<<
+
+    # >>>>> CHANGE PRIORITIES: 3, 2, 1 >>>>>
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "title-suffix-3", UpdatePluginConfigRequest(priority=1)
+    )
+    assert not error, f"Failed to set suffix-3 priority (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "title-suffix-2", UpdatePluginConfigRequest(priority=2)
+    )
+    assert not error, f"Failed to set suffix-2 priority (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "title-suffix-1", UpdatePluginConfigRequest(priority=3)
+    )
+    assert not error, f"Failed to set suffix-1 priority (status {error.status}): {error.error}"
+    # <<<<< CHANGE PRIORITIES <<<<<
+
+    # >>>>> UPLOAD AND VERIFY ORDER 3-2-1 >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_path = create_archive_file(Path(tmpdir), "test_priority_order_2", num_pages=1)
+        response, error = await upload_archive(
+            lrr_client, archive_path, archive_path.name, asyncio.Semaphore(1),
+            title="test", tags="test:priority2",
+        )
+    assert not error, f"Upload failed (status {error.status}): {error.error}"
+    arcid = response.arcid
+
+    response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+    assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
+    assert response.title == "test-3-2-1", f"Expected 'test-3-2-1', got: {response.title!r}"
+    # <<<<< UPLOAD AND VERIFY ORDER 3-2-1 <<<<<
 
     expect_no_error_logs(environment, LOGGER)
 
