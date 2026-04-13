@@ -136,6 +136,7 @@ class RefreshRegistryResponse(LanraragiResponse):
     index: dict[str, Any] | None = Field(None)
 
 class UpdatePluginConfigRequest(LanraragiRequest):
+    enabled: bool | None = Field(None)
     hidden: bool | None = Field(None)
     priority: int | None = Field(None)
 
