@@ -8,6 +8,7 @@ import tempfile
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
+import aiohttp
 import playwright.async_api
 import playwright.async_api._generated
 import pytest
@@ -1497,3 +1498,111 @@ async def test_plugin_uninstall_not_listed(lrr_client: LRRClient, environment: A
         assert "sample-login" not in namespaces, f"Cycle {i}: sample-login still listed after uninstall: {namespaces}"
 
     expect_no_error_logs(environment, LOGGER)
+
+
+# # TODO: this needs improvement.
+# @pytest.mark.asyncio
+# @pytest.mark.dev("registry")
+# @pytest.mark.ratelimit
+# async def test_sideloaded_script_replaces_managed_duplicate_without_duplicate_api_entries(
+#     lrr_client: LRRClient,
+#     environment: AbstractLRRDeploymentContext,
+# ):
+#     """
+#     Test that replacing a managed script with a sideloaded duplicate does not duplicate script API entries.
+
+#     1. Create registry, refresh index, and install sample-script.
+#     2. Attempt to upload the sideloaded SampleScript.pm while managed copy exists, expect failure.
+#     3. Uninstall the managed sample-script.
+#     4. Upload the sideloaded SampleScript.pm, expect success.
+#     5. Verify GET /api/plugins/script returns one sample-script entry.
+#     """
+#     plugin_path = Path(__file__).parent / "resources" / "plugins" / "scripts" / "SampleScript.pm"
+#     assert plugin_path.exists(), f"Test plugin file not found: {plugin_path}"
+
+#     environment.setup(with_api_key=True)
+
+#     # >>>>> SETUP REGISTRY AND INSTALL MANAGED SCRIPT >>>>>
+#     response, error = await lrr_client.misc_api.create_registry(
+#         CreateRegistryRequest(
+#             name="demo",
+#             type="git",
+#             provider="github",
+#             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+#             ref="main",
+#         )
+#     )
+#     assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+#     reg_id = response.id
+
+#     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+#     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+
+#     response, error = await lrr_client.misc_api.install_plugin(
+#         InstallPluginRequest(namespace="sample-script", registry=reg_id)
+#     )
+#     assert not error, f"Failed to install sample-script (status {error.status}): {error.error}"
+#     # <<<<< SETUP REGISTRY AND INSTALL MANAGED SCRIPT <<<<<
+
+#     # >>>>> DUPLICATE SIDELOAD UPLOAD FAILS >>>>>
+#     login_url = lrr_client.misc_api.api_context.build_url("/login")
+#     upload_url = lrr_client.misc_api.api_context.build_url("/config/plugins/upload")
+#     async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as session:
+#         login_form = aiohttp.FormData(quote_fields=False)
+#         login_form.add_field("password", DEFAULT_LRR_PASSWORD)
+#         login_form.add_field("redirect", "index")
+#         async with session.post(login_url, data=login_form) as response:
+#             content = await response.text()
+#             assert response.status == 200, f"Expected login redirect target to resolve with 200, got {response.status}"
+#             assert "LANraragi" in content, f"Expected login flow to land on app page, got: {content}"
+
+#         with plugin_path.open("rb") as file_handle:
+#             form_data = aiohttp.FormData(quote_fields=False)
+#             form_data.add_field("file", file_handle, filename=plugin_path.name)
+#             async with session.post(upload_url, data=form_data) as response:
+#                 content = await response.text()
+#                 assert response.status == 200, f"Expected 200 upload status, got {response.status}: {content}"
+#                 assert '"success":0' in content, f"Expected failed duplicate upload, got: {content}"
+
+#     response, error = await lrr_client.misc_api.get_available_plugins(
+#         GetAvailablePluginsRequest(type="script")
+#     )
+#     assert not error, f"Failed to list scripts after duplicate upload (status {error.status}): {error.error}"
+#     sample_scripts = [plugin for plugin in response.plugins if plugin.namespace == "sample-script"]
+#     assert len(sample_scripts) == 1, f"Expected one sample-script before uninstall, got {len(sample_scripts)}"
+#     # <<<<< DUPLICATE SIDELOAD UPLOAD FAILS <<<<<
+
+#     # >>>>> UNINSTALL MANAGED SCRIPT >>>>>
+#     response, error = await lrr_client.misc_api.uninstall_plugin("sample-script")
+#     assert not error, f"Failed to uninstall sample-script (status {error.status}): {error.error}"
+#     # <<<<< UNINSTALL MANAGED SCRIPT <<<<<
+
+#     # >>>>> SIDELOAD UPLOAD SUCCEEDS >>>>>
+#     async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as session:
+#         login_form = aiohttp.FormData(quote_fields=False)
+#         login_form.add_field("password", DEFAULT_LRR_PASSWORD)
+#         login_form.add_field("redirect", "index")
+#         async with session.post(login_url, data=login_form) as response:
+#             content = await response.text()
+#             assert response.status == 200, f"Expected login redirect target to resolve with 200, got {response.status}"
+#             assert "LANraragi" in content, f"Expected login flow to land on app page, got: {content}"
+
+#         with plugin_path.open("rb") as file_handle:
+#             form_data = aiohttp.FormData(quote_fields=False)
+#             form_data.add_field("file", file_handle, filename=plugin_path.name)
+#             async with session.post(upload_url, data=form_data) as response:
+#                 content = await response.text()
+#                 assert response.status == 200, f"Expected 200 upload status, got {response.status}: {content}"
+#                 assert '"success":1' in content, f"Expected successful sideload upload, got: {content}"
+#     # <<<<< SIDELOAD UPLOAD SUCCEEDS <<<<<
+
+#     # >>>>> VERIFY SINGLE API ENTRY >>>>>
+#     response, error = await lrr_client.misc_api.get_available_plugins(
+#         GetAvailablePluginsRequest(type="script")
+#     )
+#     assert not error, f"Failed to list scripts after sideload upload (status {error.status}): {error.error}"
+#     sample_scripts = [plugin for plugin in response.plugins if plugin.namespace == "sample-script"]
+#     assert len(sample_scripts) == 1, f"Expected one sample-script after sideload replacement, got {len(sample_scripts)}"
+#     # <<<<< VERIFY SINGLE API ENTRY <<<<<
+
+#     expect_no_error_logs(environment, LOGGER)
