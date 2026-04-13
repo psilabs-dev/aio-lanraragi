@@ -172,6 +172,7 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
         CreateRegistryRequest(name="bad git", type="git")
     )
     assert error is not None, "Expected error for git registry without url"
+    assert error.status == 400, f"Expected 400 for git registry without url, got {error.status}"
     # <<<<< MISSING URL FOR GIT <<<<<
 
     # >>>>> MISSING PATH FOR LOCAL >>>>>
@@ -179,6 +180,7 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
         CreateRegistryRequest(name="bad local", type="local")
     )
     assert error is not None, "Expected error for local registry without path"
+    assert error.status == 400, f"Expected 400 for local registry without path, got {error.status}"
     # <<<<< MISSING PATH FOR LOCAL <<<<<
 
     # >>>>> NON-HTTPS URL >>>>>
@@ -186,6 +188,7 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
         CreateRegistryRequest(name="http git", type="git", provider="github", url="http://github.com/owner/repo.git")
     )
     assert error is not None, "Expected error for non-HTTPS git URL"
+    assert error.status == 400, f"Expected 400 for non-HTTPS git URL, got {error.status}"
     # <<<<< NON-HTTPS URL <<<<<
 
     # >>>>> MISSING NAME >>>>>
@@ -193,6 +196,7 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
         CreateRegistryRequest(name="", type="local", path="/tmp/plugins")
     )
     assert error is not None, "Expected error for missing registry name"
+    assert error.status == 400, f"Expected 400 for missing registry name, got {error.status}"
     # <<<<< MISSING NAME <<<<<
 
     # >>>>> SINGLE-REGISTRY LIMIT >>>>>
@@ -206,6 +210,7 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
         CreateRegistryRequest(name="second", type="local", path="/tmp/other")
     )
     assert error is not None, "Expected error for single-registry limit"
+    assert error.status == 400, f"Expected 400 for single-registry limit, got {error.status}"
 
     response, error = await lrr_client.misc_api.delete_registry(first_id)
     assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
@@ -242,11 +247,13 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
         fake_id, UpdateRegistryRequest(name="nope")
     )
     assert error is not None, "Expected error updating nonexistent registry"
+    assert error.status == 404, f"Expected 404 for update nonexistent, got {error.status}"
     # <<<<< UPDATE NONEXISTENT <<<<<
 
     # >>>>> DELETE NONEXISTENT >>>>>
     response, error = await lrr_client.misc_api.delete_registry(fake_id)
     assert error is not None, "Expected error deleting nonexistent registry"
+    assert error.status == 404, f"Expected 404 for delete nonexistent, got {error.status}"
     # <<<<< DELETE NONEXISTENT <<<<<
 
     # >>>>> EMPTY UPDATE >>>>>
@@ -260,6 +267,7 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
         reg_id, UpdateRegistryRequest()
     )
     assert error is not None, "Expected error for empty update body"
+    assert error.status == 400, f"Expected 400 for empty update body, got {error.status}"
     # <<<<< EMPTY UPDATE <<<<<
 
     # >>>>> NON-HTTPS URL ON UPDATE >>>>>
@@ -267,6 +275,7 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
         reg_id, UpdateRegistryRequest(type="git", url="http://example.com/repo.git")
     )
     assert error is not None, "Expected error for non-HTTPS URL on update"
+    assert error.status == 400, f"Expected 400 for non-HTTPS URL on update, got {error.status}"
     # <<<<< NON-HTTPS URL ON UPDATE <<<<<
 
     # >>>>> UPDATE REF CLEARS INDEX >>>>>
@@ -399,6 +408,7 @@ async def test_registry_refresh(lrr_client: LRRClient, environment: AbstractLRRD
     # >>>>> REFRESH NONEXISTENT >>>>>
     response, error = await lrr_client.misc_api.refresh_registry("REG_0000000000")
     assert error is not None, "Expected error when refreshing nonexistent registry"
+    assert error.status == 404, f"Expected 404 for refresh nonexistent, got {error.status}"
     # <<<<< REFRESH NONEXISTENT <<<<<
 
     # >>>>> CREATE AND REFRESH >>>>>
@@ -429,6 +439,7 @@ async def test_registry_refresh(lrr_client: LRRClient, environment: AbstractLRRD
 
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert error is not None, "Expected error refreshing after registry deleted"
+    assert error.status == 404, f"Expected 404 for refresh after delete, got {error.status}"
     # <<<<< DELETE CLEARS INDEX <<<<<
 
 
@@ -500,11 +511,13 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     # >>>>> UNINSTALL AGAIN (NO INSTALL PATH) >>>>>
     response, error = await lrr_client.misc_api.uninstall_plugin("sample-downloader")
     assert error is not None, "Expected error uninstalling plugin with no install path"
+    assert error.status == 404, f"Expected 404 for uninstall without install path, got {error.status}"
     # <<<<< UNINSTALL AGAIN (NO INSTALL PATH) <<<<<
 
     # >>>>> UNINSTALL NEVER-INSTALLED >>>>>
     response, error = await lrr_client.misc_api.uninstall_plugin("nonexistent-plugin-xyz")
     assert error is not None, "Expected error uninstalling never-installed plugin"
+    assert error.status == 404, f"Expected 404 for never-installed plugin, got {error.status}"
     # <<<<< UNINSTALL NEVER-INSTALLED <<<<<
 
     # >>>>> UNINSTALL BUILT-IN BLOCKED >>>>>
@@ -519,6 +532,64 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     namespaces = {p.namespace for p in response.plugins}
     assert "copytags" in namespaces, "Built-in plugin should still be listed after blocked uninstall"
     # <<<<< UNINSTALL BUILT-IN BLOCKED <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+@pytest.mark.ratelimit
+async def test_plugin_install_error_paths(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test install error responses for invalid registry, missing index, and unknown namespace.
+
+    1. Install from nonexistent registry, expect 404.
+    2. Create registry without refresh, install, expect 409.
+    3. Refresh, then install nonexistent namespace, expect 404.
+    """
+    environment.setup(with_api_key=True)
+
+    # >>>>> INSTALL FROM NONEXISTENT REGISTRY >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-downloader", registry="REG_0000000001")
+    )
+    assert error is not None, "Expected error for nonexistent registry"
+    assert error.status == 404, f"Expected 404 for nonexistent registry, got {error.status}"
+    # <<<<< INSTALL FROM NONEXISTENT REGISTRY <<<<<
+
+    # >>>>> INSTALL WITHOUT REFRESH >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_id)
+    )
+    assert error is not None, "Expected error when installing without refresh"
+    assert error.status == 409, f"Expected 409 for no cached index, got {error.status}"
+    # <<<<< INSTALL WITHOUT REFRESH <<<<<
+
+    # >>>>> INSTALL NONEXISTENT NAMESPACE >>>>>
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="does-not-exist-xyz", registry=reg_id)
+    )
+    assert error is not None, "Expected error for nonexistent namespace"
+    assert error.status == 404, f"Expected 404 for unknown namespace, got {error.status}"
+    # <<<<< INSTALL NONEXISTENT NAMESPACE <<<<<
+
+    response, error = await lrr_client.misc_api.delete_registry(reg_id)
+    assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
 
     expect_no_error_logs(environment, LOGGER)
 
@@ -1040,18 +1111,15 @@ async def test_plugin_priority_execution_order(lrr_client: LRRClient, environmen
 @pytest.mark.ratelimit
 async def test_plugin_install_conflict(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
-    Test plugin install conflict detection, force install, and install error paths.
+    Test plugin install conflict detection and force install.
 
     1. Write a .pm file declaring the same namespace as sample-metadata.
     2. Setup environment with the conflicting plugin.
     3. Create registry and refresh index.
-    4. Install sample-metadata, expect namespace conflict error.
-    5. Force install sample-metadata, expect namespace conflict (filesystem-level block).
+    4. Install sample-metadata, expect provenance conflict (400).
+    5. Force install sample-metadata, expect namespace conflict (422).
     6. Install sample-downloader (no conflict), expect success with provenance.
     7. Reinstall sample-downloader (same-registry upgrade), expect success.
-    8. Install nonexistent namespace, expect error.
-    9. Install from nonexistent registry, expect error.
-    10. Install before refresh (no cached index), expect error.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         conflict_path = Path(tmpdir) / "SampleMetadata.pm"
@@ -1087,6 +1155,7 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
         InstallPluginRequest(namespace="sample-metadata", registry=reg_id)
     )
     assert error is not None, "Expected error when installing plugin with existing sideloaded copy"
+    assert error.status == 400, f"Expected 400 for provenance conflict, got {error.status}"
     assert "without provenance" in error.error, f"Expected 'without provenance' in error, got: {error.error}"
     # <<<<< INSTALL WITH CONFLICT (NO PROVENANCE) <<<<<
 
@@ -1095,6 +1164,7 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
         InstallPluginRequest(namespace="sample-metadata", registry=reg_id, force=True)
     )
     assert error is not None, "Expected error: force bypasses provenance but not filesystem namespace conflict"
+    assert error.status == 422, f"Expected 422 for namespace conflict, got {error.status}"
     # <<<<< FORCE INSTALL STILL BLOCKED BY FILESYSTEM CONFLICT <<<<<
 
     # >>>>> INSTALL WITHOUT CONFLICT >>>>>
@@ -1112,42 +1182,6 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
     )
     assert not error, f"Failed to reinstall/upgrade plugin (status {error.status}): {error.error}"
     # <<<<< UPGRADE (REINSTALL) <<<<<
-
-    # >>>>> INSTALL NONEXISTENT NAMESPACE >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="does-not-exist", registry=reg_id)
-    )
-    assert error is not None, "Expected error installing nonexistent namespace"
-    # <<<<< INSTALL NONEXISTENT NAMESPACE <<<<<
-
-    # >>>>> INSTALL FROM NONEXISTENT REGISTRY >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-downloader", registry="REG_0000000001")
-    )
-    assert error is not None, "Expected error installing from nonexistent registry"
-    # <<<<< INSTALL FROM NONEXISTENT REGISTRY <<<<<
-
-    # >>>>> INSTALL BEFORE REFRESH (NO CACHED INDEX) >>>>>
-    response, error = await lrr_client.misc_api.delete_registry(reg_id)
-    assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
-
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(
-            name="unrefreshed",
-            type="git",
-            provider="github",
-            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
-            ref="main",
-        )
-    )
-    assert not error, f"Failed to create unrefreshed registry (status {error.status}): {error.error}"
-    unreffed_id = response.id
-
-    response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-downloader", registry=unreffed_id)
-    )
-    assert error is not None, "Expected error installing from registry without cached index"
-    # <<<<< INSTALL BEFORE REFRESH (NO CACHED INDEX) <<<<<
 
     expect_no_error_logs(environment, LOGGER)
 
