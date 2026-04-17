@@ -17,6 +17,7 @@ from lanraragi.models.misc import (
     GetAvailablePluginsRequest,
     InstallPluginRequest,
     UpdatePluginConfigRequest,
+    UpdateRegistryRequest,
 )
 
 from aio_lanraragi_tests.common import DEFAULT_LRR_PASSWORD
@@ -698,5 +699,96 @@ async def test_sideloaded_script_lifecycle(
     assert not environment.redis_client.hexists("LRR_PLUGIN_SAMPLE-SCRIPT", "installed_path"), \
         "Expected installed_path to be cleared after uninstall"
     # <<<<< UNINSTALL CLEARS PROVENANCE AND FILE <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+@pytest.mark.ratelimit
+async def test_managed_plugin_upgrade_reloads_class(
+    lrr_client: LRRClient,
+    environment: AbstractLRRDeploymentContext,
+):
+    """
+    Test that managed plugin upgrade reloads the class in the installing worker.
+
+    The uploading worker has the plugin's source file cached in %INC. Without an
+    explicit delete, require short-circuits and the new file contents are not
+    loaded into the worker interpreter until server restart.
+
+    1. Install sample-script from the main ref (version 1.0).
+    2. Verify plugin_info returns version "1.0".
+    3. Update the registry to the v1.1 ref (same namespace, version "1.1").
+    4. Refresh and force-install sample-script.
+    5. Verify plugin_info returns version "1.1" across multiple requests.
+    """
+    # Single worker deterministically routes the verification request to the
+    # same process that handled the install/upgrade, where %INC is populated.
+    environment.setup(with_api_key=True, environment={"MOJO_WORKERS": "1"})
+
+    # >>>>> INSTALL v1.0 FROM main >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    _, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+
+    _, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-script", registry=reg_id)
+    )
+    assert not error, f"Failed to install sample-script v1.0 (status {error.status}): {error.error}"
+    # <<<<< INSTALL v1.0 FROM main <<<<<
+
+    # >>>>> VERIFY v1.0 IN LOADED CLASS >>>>>
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="script")
+    )
+    assert not error, f"Failed to list scripts (status {error.status}): {error.error}"
+    sample = next((p for p in response.plugins if p.namespace == "sample-script"), None)
+    assert sample is not None, "sample-script not listed after install"
+    assert sample.version == "1.0", f"Expected v1.0 after initial install, got {sample.version!r}"
+    # <<<<< VERIFY v1.0 IN LOADED CLASS <<<<<
+
+    # >>>>> SWITCH REGISTRY TO v1.1 AND UPGRADE >>>>>
+    _, error = await lrr_client.misc_api.update_registry(
+        reg_id, UpdateRegistryRequest(ref="v1.1")
+    )
+    assert not error, f"Failed to update registry ref (status {error.status}): {error.error}"
+
+    _, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry after ref change (status {error.status}): {error.error}"
+
+    _, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-script", registry=reg_id, force=True)
+    )
+    assert not error, f"Failed to upgrade sample-script to v1.1 (status {error.status}): {error.error}"
+    # <<<<< SWITCH REGISTRY TO v1.1 AND UPGRADE <<<<<
+
+    # >>>>> VERIFY v1.1 IN LOADED CLASS >>>>>
+    # Fire several reads to cover any transient scheduling; every one must see v1.1
+    # because plugin_info() returns data from the in-memory class, which should have
+    # been re-required against the new file contents.
+    for attempt in range(5):
+        response, error = await lrr_client.misc_api.get_available_plugins(
+            GetAvailablePluginsRequest(type="script")
+        )
+        assert not error, f"Failed to list scripts (status {error.status}): {error.error}"
+        sample = next((p for p in response.plugins if p.namespace == "sample-script"), None)
+        assert sample is not None, f"sample-script not listed on attempt {attempt}"
+        assert sample.version == "1.1", (
+            f"Attempt {attempt}: loaded class still reports version {sample.version!r} "
+            f"after upgrade; %INC short-circuited require so the new file was not re-read"
+        )
+    # <<<<< VERIFY v1.1 IN LOADED CLASS <<<<<
 
     expect_no_error_logs(environment, LOGGER)
