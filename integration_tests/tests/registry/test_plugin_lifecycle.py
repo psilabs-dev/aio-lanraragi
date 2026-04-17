@@ -474,6 +474,86 @@ async def test_plugin_uninstall_not_listed(lrr_client: LRRClient, environment: A
 
     expect_no_error_logs(environment, LOGGER)
 
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+@pytest.mark.ratelimit
+async def test_sideload_after_managed_uninstall_no_duplicate_rows(
+    lrr_client: LRRClient,
+    environment: AbstractLRRDeploymentContext,
+):
+    """
+    Reproduce: install managed → uninstall → sideload → server renders 2 rows.
+
+    Single worker so all operations hit the same Perl process. No restart
+    between the cycle and the check — the bug is per-worker symbol table
+    state that a restart would clear.
+
+    1. Install managed sample-script from registry.
+    2. Uninstall the managed sample-script (file deleted, class stays in symbol table).
+    3. Sideload SampleScript.pm (new class loaded in same worker).
+    4. Fetch /config/plugins raw HTML and count sample-script rows.
+    """
+    plugin_path = Path(__file__).parent.parent / "resources" / "plugins" / "scripts" / "SampleScript.pm"
+    assert plugin_path.exists(), f"Test plugin file not found: {plugin_path}"
+
+    environment.setup(with_api_key=True)
+
+    # >>>>> INSTALL MANAGED >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo", type="git", provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git", ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    _, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+
+    _, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-script", registry=reg_id)
+    )
+    assert not error, f"Failed to install managed sample-script (status {error.status}): {error.error}"
+    # <<<<< INSTALL MANAGED <<<<<
+
+    # >>>>> UNINSTALL MANAGED >>>>>
+    _, error = await lrr_client.misc_api.uninstall_plugin("sample-script")
+    assert not error, f"Failed to uninstall managed sample-script (status {error.status}): {error.error}"
+    # <<<<< UNINSTALL MANAGED <<<<<
+
+    # >>>>> SIDELOAD >>>>>
+    status, content = await sideload_plugin(lrr_client, plugin_path, DEFAULT_LRR_PASSWORD)
+    assert status == 200, f"Expected 200 upload status, got {status}: {content}"
+    assert '"success":1' in content, f"Expected sideload to succeed, got: {content}"
+    # <<<<< SIDELOAD <<<<<
+
+    # >>>>> RAW HTML CHECK — NO RESTART, SAME WORKER >>>>>
+    import aiohttp
+    login_url = lrr_client.misc_api.api_context.build_url("/login")
+    plugins_url = lrr_client.misc_api.api_context.build_url("/config/plugins")
+
+    async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as session:
+        login_form = aiohttp.FormData(quote_fields=False)
+        login_form.add_field("password", DEFAULT_LRR_PASSWORD)
+        login_form.add_field("redirect", "index")
+        async with session.post(login_url, data=login_form) as resp:
+            assert resp.status == 200
+
+        # Fetch raw HTML 20 times across default workers (typically 4).
+        # The affected worker returns 2 rows; others return 1. With 4 workers
+        # and 20 fetches, P(never hitting the affected worker) < 0.3%.
+        for i in range(20):
+            async with session.get(plugins_url) as resp:
+                html = await resp.text()
+                matches = html.count('data-namespace="sample-script" data-source=')
+                LOGGER.info(f"Fetch {i}: {matches} sample-script row(s) in server HTML")
+                assert matches <= 1, \
+                    f"Fetch {i}: expected at most 1 sample-script row in server HTML, got {matches}"
+    # <<<<< RAW HTML CHECK <<<<<
+
+
 @pytest.mark.asyncio
 @pytest.mark.playwright
 @pytest.mark.dev("registry")
@@ -498,7 +578,9 @@ async def test_sideloaded_script_lifecycle(
     plugin_path = Path(__file__).parent.parent / "resources" / "plugins" / "scripts" / "SampleScript.pm"
     assert plugin_path.exists(), f"Test plugin file not found: {plugin_path}"
 
-    environment.setup(with_api_key=True)
+    # Single worker ensures all requests hit the same process, making per-worker
+    # state bugs (stale symbol table after managed install/uninstall) deterministic.
+    environment.setup(with_api_key=True, environment={"MOJO_WORKERS": "1"})
 
     # >>>>> INSTALL MANAGED SAMPLE-SCRIPT >>>>>
     response, error = await lrr_client.misc_api.create_registry(
@@ -549,20 +631,10 @@ async def test_sideloaded_script_lifecycle(
     assert recorded_path == sideloaded_script_path, \
         f"Expected installed_path={sideloaded_script_path!r} after upload, got {recorded_path!r}"
 
-    environment.restart()
-
-    environment.redis_client.select(2)
-    recorded_path = environment.redis_client.hget("LRR_PLUGIN_SAMPLE-SCRIPT", "installed_path")
-    assert recorded_path == sideloaded_script_path, \
-        f"Expected installed_path={sideloaded_script_path!r} after restart, got {recorded_path!r}"
-
-    response, error = await lrr_client.misc_api.get_available_plugins(GetAvailablePluginsRequest(type="script"))
-    assert not error, f"Failed to list scripts after restart (status {error.status}): {error.error}"
-    sample_scripts = [p for p in response.plugins if p.namespace == "sample-script"]
-    assert len(sample_scripts) == 1, f"Expected one sample-script after restart, got {len(sample_scripts)}"
-    # <<<<< SIDELOAD PROVENANCE IS PORTABLE AND PERSISTS ACROSS RESTART <<<<<
-
     # >>>>> MANAGE TAB RENDERS ONE SIDELOADED ROW >>>>>
+    # UI check runs BEFORE restart: the workers that handled install->uninstall->sideload
+    # still have the managed class in their symbol table. This catches per-worker state
+    # bugs (e.g. stale %INC entries causing the managed class to pass through get_plugins).
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
         bc = await browser.new_context()
@@ -583,17 +655,19 @@ async def test_sideloaded_script_lifecycle(
             responses.clear()
             console_evts.clear()
 
-            await page.goto(f"{lrr_client.lrr_base_url}/config/plugins#tab-manage")
-            await page.wait_for_load_state("networkidle")
+            # Fetch multiple times to exercise different Hypnotoad workers.
+            for i in range(3):
+                await page.goto(f"{lrr_client.lrr_base_url}/config/plugins#tab-manage")
+                await page.wait_for_load_state("networkidle")
 
-            sample_rows = page.locator(
-                '.manage-installed[data-type="script"] .manage-plugin-row[data-namespace="sample-script"]'
-            )
-            row_count = await sample_rows.count()
-            assert row_count == 1, f"Expected one sample-script row in Scripts section, got {row_count}"
+                sample_rows = page.locator(
+                    '.manage-installed[data-type="script"] .manage-plugin-row[data-namespace="sample-script"]'
+                )
+                row_count = await sample_rows.count()
+                assert row_count == 1, f"Fetch {i}: expected one sample-script row in Scripts section, got {row_count}"
 
-            badge_text = await sample_rows.locator(".plugin-badge").text_content()
-            assert badge_text == "sideloaded", f"Expected 'sideloaded' badge, got: {badge_text!r}"
+                badge_text = await sample_rows.locator(".plugin-badge").text_content()
+                assert badge_text == "sideloaded", f"Fetch {i}: expected 'sideloaded' badge, got: {badge_text!r}"
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
@@ -601,6 +675,20 @@ async def test_sideloaded_script_lifecycle(
             await bc.close()
             await browser.close()
     # <<<<< MANAGE TAB RENDERS ONE SIDELOADED ROW <<<<<
+
+    # >>>>> SIDELOAD PROVENANCE PERSISTS ACROSS RESTART >>>>>
+    environment.restart()
+
+    environment.redis_client.select(2)
+    recorded_path = environment.redis_client.hget("LRR_PLUGIN_SAMPLE-SCRIPT", "installed_path")
+    assert recorded_path == sideloaded_script_path, \
+        f"Expected installed_path={sideloaded_script_path!r} after restart, got {recorded_path!r}"
+
+    response, error = await lrr_client.misc_api.get_available_plugins(GetAvailablePluginsRequest(type="script"))
+    assert not error, f"Failed to list scripts after restart (status {error.status}): {error.error}"
+    sample_scripts = [p for p in response.plugins if p.namespace == "sample-script"]
+    assert len(sample_scripts) == 1, f"Expected one sample-script after restart, got {len(sample_scripts)}"
+    # <<<<< SIDELOAD PROVENANCE PERSISTS ACROSS RESTART <<<<<
 
     # >>>>> UNINSTALL CLEARS PROVENANCE AND FILE >>>>>
     _, error = await lrr_client.misc_api.uninstall_plugin("sample-script")
