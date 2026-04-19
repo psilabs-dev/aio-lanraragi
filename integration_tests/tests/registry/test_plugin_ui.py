@@ -32,14 +32,15 @@ LOGGER = logging.getLogger(__name__)
 @pytest.mark.ratelimit
 async def test_plugin_uninstall_ui(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
-    Test plugin install, enable, uninstall, and reinstall through the UI.
+    Test plugin install / uninstall / reinstall through the Manage tab batch UI.
 
     1. Create registry, refresh index via API.
-    2. Navigate to plugin page, install sample-metadata from registry.
-    3. Move sample-metadata to enabled pool, save configuration.
-    4. Uninstall sample-metadata, verify absent from page and API.
-    5. Refresh registry, verify sample-metadata available for reinstall.
-    6. Reinstall, verify managed provenance.
+    2. Manage tab: toggle sample-metadata checkbox, click Apply, verify install.
+    3. Managed badge renders in the Configure tab.
+    4. Manage tab: toggle checkbox off, click Apply, verify uninstall.
+    5. Card absent from Configure tab, namespace absent from API.
+    6. Refresh registry, verify sample-metadata available for reinstall.
+    7. Reinstall via Apply, verify managed provenance.
     """
     environment.setup(with_api_key=True)
 
@@ -73,7 +74,7 @@ async def test_plugin_uninstall_ui(lrr_client: LRRClient, environment: AbstractL
             page.on("console", lambda console: console_evts.append(console))
 
             # >>>>> LOGIN >>>>>
-            await page.goto(f"{lrr_client.lrr_base_url}/config/plugins")
+            await page.goto(f"{lrr_client.lrr_base_url}/config/plugins#tab-manage")
             await page.wait_for_load_state("networkidle")
 
             if "login" in page.url.lower():
@@ -85,69 +86,57 @@ async def test_plugin_uninstall_ui(lrr_client: LRRClient, environment: AbstractL
             console_evts.clear()
             # <<<<< LOGIN <<<<<
 
-            # >>>>> INSTALL >>>>>
-            # Expand the Metadata Plugins collapsible (hidden by allcollapsible on load)
-            await page.locator(".collapsible-title", has_text="Metadata Plugins").click()
-            await page.wait_for_timeout(500)
-
+            # >>>>> EXPAND MANAGE SECTION AND REFRESH AVAILABLE >>>>>
+            await page.locator("#manage-section-metadata .collapsible-title", has_text="Metadata Plugins").click()
             await page.locator("#registry-refresh-btn").click()
-            await page.wait_for_load_state("networkidle")
+            await page.locator(".manage-install-cb[data-namespace='sample-metadata']").wait_for(state="attached")
+            # <<<<< EXPAND MANAGE SECTION AND REFRESH AVAILABLE <<<<<
 
-            sample_metadata_row = page.locator(".registry-plugin-row").filter(
-                has=page.locator("h2", has_text="Sample Metadata")
-            )
+            # >>>>> INSTALL VIA BATCH APPLY >>>>>
+            # Check the install checkbox — this marks the plugin for install
+            # without firing the request. The batch fires on #manage-apply-btn,
+            # which first opens a SweetAlert confirm popup (plugins.js:165).
+            await page.locator(".manage-install-cb[data-namespace='sample-metadata']").check()
+            await page.locator("#manage-apply-btn").click()
+            await page.locator(".swal2-confirm").wait_for(state="visible")
             async with page.expect_response("**/api/plugins/install") as response_info:
-                await sample_metadata_row.locator("input[type='button']").click()
+                await page.locator(".swal2-confirm").click()
             install_response = await response_info.value
             assert install_response.ok, f"Install API failed: {install_response.status}"
-            # <<<<< INSTALL <<<<<
+
+            # Apply reloads the page (plugins.js:553-554); wait for it to settle.
+            await page.wait_for_load_state("networkidle")
+            # <<<<< INSTALL VIA BATCH APPLY <<<<<
 
             # >>>>> VERIFY INSTALLED >>>>>
             badge = page.locator(".plugin-card[data-namespace='sample-metadata'] .plugin-badge")
-            await page.wait_for_timeout(500)
-            assert await badge.text_content() == "managed", f"Expected 'managed' badge after install, got: {await badge.text_content()}"
+            await badge.wait_for(state="attached")
+            assert await badge.text_content() == "managed", \
+                f"Expected 'managed' badge after install, got: {await badge.text_content()}"
             # <<<<< VERIFY INSTALLED <<<<<
 
-            # >>>>> ENABLE AND SAVE >>>>>
-            # native drag does not trigger SortableJS; move via DOM
-            moved = await page.evaluate("""() => {
-                const card = document.querySelector('.plugin-card[data-namespace="sample-metadata"]');
-                const enabledPool = document.getElementById('metadata-enabled');
-                if (!card || !enabledPool) return false;
+            # >>>>> UNINSTALL VIA BATCH APPLY >>>>>
+            # Post-reload, the Manage tab reloads available plugins automatically
+            # (plugins.js:596-598 when #tab-manage hash is active on page load).
+            # Re-expand the section in case it collapsed, then toggle the cb off.
+            await page.locator("#manage-section-metadata .collapsible-title", has_text="Metadata Plugins").click()
+            await page.locator(".manage-install-cb[data-namespace='sample-metadata']").wait_for(state="attached")
+            await page.locator(".manage-install-cb[data-namespace='sample-metadata']").uncheck()
 
-                const emptyMsg = enabledPool.querySelector('.pool-empty-msg');
-                if (emptyMsg) emptyMsg.remove();
-
-                enabledPool.appendChild(card);
-                if (typeof Plugins !== 'undefined' && Plugins.renumberEnabled) {
-                    Plugins.renumberEnabled();
-                }
-                return card.closest('#metadata-enabled') !== null;
-            }""")
-            assert moved, "Failed to move sample-metadata to enabled pool"
-
-            await page.get_by_role("button", name="Save Plugin Configuration").click()
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(2000)
-            # <<<<< ENABLE AND SAVE <<<<<
-
-            # >>>>> UNINSTALL >>>>>
-            await page.locator(".plugin-uninstall-btn[data-namespace='sample-metadata']").click()
-
-            # confirm uninstall dialog; wait for DELETE response then page reload
-            await page.wait_for_selector(".swal2-confirm", state="visible")
-            async with page.expect_response("**/api/plugins/installed/**") as response_info:
-                await page.click(".swal2-confirm")
+            await page.locator("#manage-apply-btn").click()
+            await page.locator(".swal2-confirm").wait_for(state="visible")
+            async with page.expect_response("**/api/plugins/installed/sample-metadata") as response_info:
+                await page.locator(".swal2-confirm").click()
             uninstall_response = await response_info.value
             assert uninstall_response.ok, f"Uninstall API failed: {uninstall_response.status}"
+
             await page.wait_for_load_state("networkidle")
-            # <<<<< UNINSTALL <<<<<
+            # <<<<< UNINSTALL VIA BATCH APPLY <<<<<
 
             # >>>>> VERIFY REMOVED >>>>>
             card_count = await page.locator(".plugin-card[data-namespace='sample-metadata']").count()
             assert card_count == 0, f"sample-metadata still in DOM after uninstall (count: {card_count})"
 
-            # verify via API
             response, error = await lrr_client.misc_api.get_available_plugins(
                 GetAvailablePluginsRequest(type="metadata")
             )
@@ -156,29 +145,24 @@ async def test_plugin_uninstall_ui(lrr_client: LRRClient, environment: AbstractL
             assert "sample-metadata" not in namespaces, f"Plugin still in API after uninstall: {namespaces}"
             # <<<<< VERIFY REMOVED <<<<<
 
-            # >>>>> REFRESH AND VERIFY AVAILABLE >>>>>
-            # Re-expand collapsible (page reloaded after uninstall)
-            await page.locator(".collapsible-title", has_text="Metadata Plugins").click()
-            await page.wait_for_timeout(500)
-
-            await page.locator("#registry-refresh-btn").click()
-            await page.wait_for_load_state("networkidle")
-
-            reinstall_row = page.locator(".registry-plugin-row").filter(
-                has=page.locator("h2", has_text="Sample Metadata")
-            )
-            await reinstall_row.wait_for(state="visible")
-            # <<<<< REFRESH AND VERIFY AVAILABLE <<<<<
-
             # >>>>> REINSTALL >>>>>
+            await page.locator("#manage-section-metadata .collapsible-title", has_text="Metadata Plugins").click()
+            await page.locator(".manage-install-cb[data-namespace='sample-metadata']").wait_for(state="attached")
+            await page.locator(".manage-install-cb[data-namespace='sample-metadata']").check()
+
+            await page.locator("#manage-apply-btn").click()
+            await page.locator(".swal2-confirm").wait_for(state="visible")
             async with page.expect_response("**/api/plugins/install") as response_info:
-                await reinstall_row.locator("input[type='button']").click()
+                await page.locator(".swal2-confirm").click()
             reinstall_response = await response_info.value
             assert reinstall_response.ok, f"Reinstall API failed: {reinstall_response.status}"
 
+            await page.wait_for_load_state("networkidle")
+
             badge_after = page.locator(".plugin-card[data-namespace='sample-metadata'] .plugin-badge")
-            await page.wait_for_timeout(500)
-            assert await badge_after.text_content() == "managed", f"Expected 'managed' after reinstall, got: {await badge_after.text_content()}"
+            await badge_after.wait_for(state="attached")
+            assert await badge_after.text_content() == "managed", \
+                f"Expected 'managed' after reinstall, got: {await badge_after.text_content()}"
             # <<<<< REINSTALL <<<<<
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
