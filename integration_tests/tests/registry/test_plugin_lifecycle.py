@@ -18,6 +18,7 @@ from lanraragi.models.misc import (
     InstallPluginRequest,
     UpdatePluginConfigRequest,
     UpdateRegistryRequest,
+    UsePluginRequest,
 )
 
 from aio_lanraragi_tests.common import DEFAULT_LRR_PASSWORD
@@ -790,5 +791,102 @@ async def test_managed_plugin_upgrade_reloads_class(
             f"after upgrade; %INC short-circuited require so the new file was not re-read"
         )
     # <<<<< VERIFY v1.1 IN LOADED CLASS <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+@pytest.mark.ratelimit
+async def test_managed_plugin_upgrade_reloads_across_workers(
+    lrr_client: LRRClient,
+    environment: AbstractLRRDeploymentContext,
+):
+    """
+    Test that managed plugin upgrade reloads the class in every prefork worker.
+
+    Each worker forks from master with the plugin's source file cached in %INC.
+    Without cross-worker coherence, only the installing worker sees the new file
+    after upgrade; other workers keep running the old symbols until restart.
+    Round-robin routing exposes the inconsistency.
+
+    1. Install sample-script v1.0 under default multi-worker prefork.
+    2. Upgrade to v1.1 — run_script changes to prefix its result with "v1.1:".
+    3. Fire use_plugin_sync across workers; assert every response reflects v1.1.
+    """
+    environment.setup(with_api_key=True)
+
+    # >>>>> INSTALL v1.0 FROM main >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    _, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+
+    _, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-script", registry=reg_id)
+    )
+    assert not error, f"Failed to install sample-script v1.0 (status {error.status}): {error.error}"
+
+    # Prime every prefork worker concurrently so each loads v1.0 into its own
+    # %INC + symbol table. Concurrent requests force the client to open multiple
+    # connections, spreading across workers. A serial keep-alive loop would pin
+    # to a single worker and not reproduce the bug.
+    prime_results = await asyncio.gather(*[
+        lrr_client.misc_api.use_plugin(
+            UsePluginRequest(plugin="sample-script", arg=f"prime-{i}")
+        )
+        for i in range(40)
+    ])
+    for i, (_, error) in enumerate(prime_results):
+        assert not error, f"Prime attempt {i} failed (status {error.status}): {error.error}"
+    # <<<<< INSTALL v1.0 FROM main <<<<<
+
+    # >>>>> UPGRADE TO v1.1 >>>>>
+    _, error = await lrr_client.misc_api.update_registry(
+        reg_id, UpdateRegistryRequest(ref="v1.1")
+    )
+    assert not error, f"Failed to update registry ref (status {error.status}): {error.error}"
+
+    _, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry after ref change (status {error.status}): {error.error}"
+
+    _, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-script", registry=reg_id, force=True)
+    )
+    assert not error, f"Failed to upgrade sample-script to v1.1 (status {error.status}): {error.error}"
+    # <<<<< UPGRADE TO v1.1 <<<<<
+
+    # >>>>> VERIFY v1.1 ACROSS WORKERS >>>>>
+    # v1.1 run_script prefixes its result with "v1.1:". v1.0 returns the raw arg.
+    # Concurrent requests spread across workers via the connection pool.
+    verify_results = await asyncio.gather(*[
+        lrr_client.misc_api.use_plugin(
+            UsePluginRequest(plugin="sample-script", arg=f"ping-{i}")
+        )
+        for i in range(40)
+    ])
+    v10_responses = []
+    for i, (response, error) in enumerate(verify_results):
+        assert not error, f"Attempt {i}: use_plugin failed (status {error.status}): {error.error}"
+        result = response.data.get("result") if response.data else None
+        assert result is not None, f"Attempt {i}: use_plugin returned no result"
+        if not result.startswith("v1.1:"):
+            v10_responses.append((i, result))
+
+    assert not v10_responses, (
+        f"{len(v10_responses)} of 40 responses from stale workers still running v1.0 symbols: "
+        f"{v10_responses[:5]}. Cross-worker coherence not converging after upgrade."
+    )
+    # <<<<< VERIFY v1.1 ACROSS WORKERS <<<<<
 
     expect_no_error_logs(environment, LOGGER)
