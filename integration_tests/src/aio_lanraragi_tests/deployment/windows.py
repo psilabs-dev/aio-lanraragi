@@ -168,6 +168,23 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
     def lrr_plugin_dir(self) -> Path:
         return self.windist_dir / "lib" / "LANraragi" / "Plugin"
 
+    @property
+    def plugin_managed_dir(self) -> Path:
+        return self.lrr_plugin_dir / "Managed"
+
+    @property
+    def plugin_sideloaded_dir(self) -> Path:
+        return self.lrr_plugin_dir / "Sideloaded"
+
+    @property
+    def local_registry_dir(self) -> Path:
+        dirname = self.resource_prefix + "local_registry"
+        return self.staging_dir / dirname
+
+    @property
+    def local_registry_path(self) -> str:
+        return str(self.local_registry_dir)
+
     def __init__(
         self, windist_path: str, staging_directory: str, resource_prefix: str, port_offset: int,
         logger: logging.Logger | None=None
@@ -244,6 +261,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         log_dir = self.logs_dir
         pid_dir = self.pid_dir
         redis_dir = self.redis_dir
+        local_registry_dir = self.local_registry_dir
         if contents_dir.exists():
             self.logger.debug(f"Contents directory exists: {contents_dir}")
         else:
@@ -274,6 +292,11 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         else:
             self.logger.debug(f"Creating Redis directory: {redis_dir}")
             redis_dir.mkdir(parents=True, exist_ok=False)
+        if local_registry_dir.exists():
+            self.logger.debug(f"Local registry directory exists: {local_registry_dir}")
+        else:
+            self.logger.debug(f"Creating local registry directory: {local_registry_dir}")
+            local_registry_dir.mkdir(parents=True, exist_ok=False)
 
         # we need to handle cases where existing services are running.
         # Unlike docker, we have no idea whether we can skip recreation of
@@ -365,6 +388,19 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger.debug("Stopped LRR.")
         self.stop_redis()
         self.logger.debug("Stopped Redis.")
+        # Clear managed and sideloaded plugins between tests, matching the
+        # docker context. plugin_managed_dir/plugin_sideloaded_dir live inside
+        # the Windows lib tree, so files installed by one test would otherwise
+        # persist into the next.
+        for plugin_dir in (self.plugin_managed_dir, self.plugin_sideloaded_dir):
+            if not plugin_dir.exists():
+                continue
+            for entry in plugin_dir.iterdir():
+                if entry.is_dir():
+                    self._remove_ro(entry)
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink()
 
     @override
     def restart(self):
@@ -391,6 +427,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         windist_dir = self.windist_dir
         redis_dir = self.redis_dir
         temp_dir = self.temp_dir
+        local_registry_dir = self.local_registry_dir
         self.stop()
         if hasattr(self, "_redis_client") and self._redis_client is not None:
             self._redis_client.close()
@@ -419,6 +456,10 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self._remove_ro(temp_dir)
                 shutil.rmtree(temp_dir)
                 self.logger.debug(f"Removed temp directory: {temp_dir}")
+            if local_registry_dir.exists():
+                self._remove_ro(local_registry_dir)
+                shutil.rmtree(local_registry_dir)
+                self.logger.debug(f"Removed local registry directory: {local_registry_dir}")
 
     @override
     def start_lrr(self):
