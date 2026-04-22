@@ -7,6 +7,7 @@ import logging
 import tempfile
 from pathlib import Path
 
+import aiohttp
 import playwright.async_api
 import playwright.async_api._generated
 import pytest
@@ -88,7 +89,9 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     )
     assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
     namespaces = {p.namespace for p in response.plugins}
-    assert "sample-downloader" in namespaces, f"Installed plugin not found in list: {namespaces}"
+    # LRR ships no built-in download plugins on dev-registry-backend, so the
+    # only download plugin present after install is the one we just installed.
+    assert namespaces == {"sample-downloader"}, f"Expected only sample-downloader in download list, got: {namespaces}"
     # <<<<< VERIFY INSTALLED <<<<<
 
     # >>>>> UNINSTALL PLUGIN >>>>>
@@ -116,6 +119,13 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     # <<<<< UNINSTALL NEVER-INSTALLED <<<<<
 
     # >>>>> UNINSTALL BUILT-IN BLOCKED >>>>>
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
+    metadata_before = {p.namespace for p in response.plugins}
+    assert "copytags" in metadata_before, f"copytags missing from metadata plugin list before uninstall attempt: {metadata_before}"
+
     response, error = await lrr_client.misc_api.uninstall_plugin("copytags")
     assert error is not None, "Expected error uninstalling built-in plugin"
     assert error.status == 403, f"Expected 403 for built-in uninstall, got {error.status}"
@@ -124,8 +134,11 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
         GetAvailablePluginsRequest(type="metadata")
     )
     assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
-    namespaces = {p.namespace for p in response.plugins}
-    assert "copytags" in namespaces, "Built-in plugin should still be listed after blocked uninstall"
+    metadata_after = {p.namespace for p in response.plugins}
+    assert metadata_after == metadata_before, (
+        f"Metadata plugin list changed after blocked uninstall. "
+        f"Removed: {metadata_before - metadata_after}, added: {metadata_after - metadata_before}"
+    )
     # <<<<< UNINSTALL BUILT-IN BLOCKED <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -480,12 +493,120 @@ async def test_plugin_uninstall_not_listed(lrr_client: LRRClient, environment: A
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
 @pytest.mark.ratelimit
+async def test_plugin_cross_provenance_force(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test cross-provenance force install flow: orphan upgrade attempt, mismatch error, and forced re-attribution.
+
+    1. Create reg A, refresh, install sample-downloader -> 200.
+    2. Delete reg A -> plugin becomes orphan (registry field still points to A_id).
+    3. Install from A_id -> 404 (registry not found).
+    4. Create reg B (same URL/ref), different timestamp id.
+    5. Install from B without force -> provenance mismatch error.
+    6. Install from B with force=True -> 200, provenance updated to B_id.
+    7. GET download plugins -> sample-downloader present with registry == B_id.
+    """
+    environment.setup(with_api_key=True)
+
+    # >>>>> SETUP REG A >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo-A",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create reg A (status {error.status}): {error.error}"
+    reg_a_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_a_id)
+    assert not error, f"Failed to refresh reg A (status {error.status}): {error.error}"
+    # <<<<< SETUP REG A <<<<<
+
+    # >>>>> INSTALL FROM REG A >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_a_id)
+    )
+    assert not error, f"Failed to install sample-downloader from reg A (status {error.status}): {error.error}"
+    assert response.registry == reg_a_id, f"Expected provenance {reg_a_id}, got: {response.registry}"
+    # <<<<< INSTALL FROM REG A <<<<<
+
+    # >>>>> DELETE REG A -> ORPHAN >>>>>
+    response, error = await lrr_client.misc_api.delete_registry(reg_a_id)
+    assert not error, f"Failed to delete reg A (status {error.status}): {error.error}"
+    # Registry IDs are REG_{unix_timestamp}. Guarantee reg B gets a distinct
+    # timestamp so the provenance mismatch scenario below is actually reached.
+    await asyncio.sleep(1.0)
+    # <<<<< DELETE REG A -> ORPHAN <<<<<
+
+    # >>>>> UPGRADE WITH ORPHAN REGISTRY -> 404 >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_a_id)
+    )
+    assert error is not None, "Expected error when installing from deleted registry"
+    assert error.status == 404, f"Expected 404 for deleted registry, got {error.status}"
+    # <<<<< UPGRADE WITH ORPHAN REGISTRY -> 404 <<<<<
+
+    # >>>>> CREATE REG B (SAME SOURCE) >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo-B",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create reg B (status {error.status}): {error.error}"
+    reg_b_id = response.id
+    assert reg_b_id != reg_a_id, "Expected reg B to have a different id than reg A"
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_b_id)
+    assert not error, f"Failed to refresh reg B (status {error.status}): {error.error}"
+    # <<<<< CREATE REG B (SAME SOURCE) <<<<<
+
+    # >>>>> INSTALL FROM REG B WITHOUT FORCE -> PROVENANCE MISMATCH >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_b_id)
+    )
+    assert error is not None, "Expected provenance mismatch error when installing from different registry without force"
+    assert error.status == 400, f"Expected 400 for cross-registry provenance mismatch, got {error.status}"
+    # <<<<< INSTALL FROM REG B WITHOUT FORCE -> PROVENANCE MISMATCH <<<<<
+
+    # >>>>> INSTALL FROM REG B WITH FORCE -> 200 >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_b_id, force=True)
+    )
+    assert not error, f"Expected force install to succeed (status {error.status}): {error.error}"
+    assert response.registry == reg_b_id, f"Expected provenance {reg_b_id} after force install, got: {response.registry}"
+    # <<<<< INSTALL FROM REG B WITH FORCE -> 200 <<<<<
+
+    # >>>>> VERIFY PROVENANCE UPDATED >>>>>
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="download")
+    )
+    assert not error, f"Failed to list download plugins (status {error.status}): {error.error}"
+    for plugin in response.plugins:
+        if plugin.namespace == "sample-downloader":
+            assert plugin.registry == reg_b_id, f"Expected provenance {reg_b_id}, got: {plugin.registry}"
+            break
+    else:
+        pytest.fail("sample-downloader not found in download plugin list after force install")
+    # <<<<< VERIFY PROVENANCE UPDATED <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+@pytest.mark.ratelimit
 async def test_sideload_after_managed_uninstall_no_duplicate_rows(
     lrr_client: LRRClient,
     environment: AbstractLRRDeploymentContext,
 ):
     """
-    Reproduce: install managed → uninstall → sideload → server renders 2 rows.
+    Reproduce: install managed -> uninstall -> sideload -> server renders 2 rows.
 
     Single worker so all operations hit the same Perl process. No restart
     between the cycle and the check — the bug is per-worker symbol table
@@ -532,7 +653,6 @@ async def test_sideload_after_managed_uninstall_no_duplicate_rows(
     # <<<<< SIDELOAD <<<<<
 
     # >>>>> RAW HTML CHECK — NO RESTART, SAME WORKER >>>>>
-    import aiohttp
     login_url = lrr_client.misc_api.api_context.build_url("/login")
     plugins_url = lrr_client.misc_api.api_context.build_url("/config/plugins")
 
@@ -888,5 +1008,131 @@ async def test_managed_plugin_upgrade_reloads_across_workers(
         f"{v10_responses[:5]}. Cross-worker coherence not converging after upgrade."
     )
     # <<<<< VERIFY v1.1 ACROSS WORKERS <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+@pytest.mark.ratelimit
+async def test_managed_plugin_survives_restart(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test that a managed plugin file persists across LRR restart and scan_plugins does not orphan it.
+
+    1. Create registry, refresh, install sample-downloader -> 200.
+    2. Capture installed_version and expected host path under plugin_managed_dir.
+    3. Assert host path exists before restart.
+    4. Restart LRR.
+    5. Assert host path still exists after restart.
+    6. GET download plugins -> sample-downloader present, registry provenance unchanged.
+    """
+    environment.setup(with_api_key=True)
+
+    # >>>>> SETUP AND INSTALL >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_id)
+    )
+    assert not error, f"Failed to install sample-downloader (status {error.status}): {error.error}"
+    installed_version = response.version
+    # <<<<< SETUP AND INSTALL <<<<<
+
+    # >>>>> RESTART >>>>>
+    environment.restart()
+    # <<<<< RESTART <<<<<
+
+    # >>>>> ASSERT FILE AND PROVENANCE SURVIVE RESTART >>>>>
+    plugin_file = environment.plugin_managed_dir / "Download" / "SampleDownload.pm"
+    assert plugin_file.exists(), f"Expected plugin file at {plugin_file} after restart"
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="download")
+    )
+    assert not error, f"Failed to list download plugins after restart (status {error.status}): {error.error}"
+    for plugin in response.plugins:
+        if plugin.namespace == "sample-downloader":
+            assert plugin.registry == reg_id, f"Expected provenance {reg_id} after restart, got: {plugin.registry}"
+            assert plugin.version == installed_version, (
+                f"Expected version {installed_version!r} after restart, got: {plugin.version!r}"
+            )
+            break
+    else:
+        pytest.fail("sample-downloader not found in download plugin list after restart")
+    # <<<<< ASSERT FILE AND PROVENANCE SURVIVE RESTART <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+@pytest.mark.ratelimit
+async def test_plugin_file_deleted_under_lrr(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test that a managed plugin deleted from the filesystem is orphan-cleaned by scan_plugins at restart.
+
+    1. Install sample-downloader from registry -> 200.
+    2. Delete the plugin file directly from the host (plugin_managed_dir / "Download" / "SampleDownload.pm").
+    3. Restart LRR (triggers scan_plugins).
+    4. GET download plugins -> sample-downloader absent (orphan-clean removed provenance).
+    """
+    environment.setup(with_api_key=True)
+
+    # >>>>> SETUP AND INSTALL >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_id)
+    )
+    assert not error, f"Failed to install sample-downloader (status {error.status}): {error.error}"
+    # <<<<< SETUP AND INSTALL <<<<<
+
+    # >>>>> DELETE PLUGIN FILE HOST-SIDE >>>>>
+    plugin_file = environment.plugin_managed_dir / "Download" / "SampleDownload.pm"
+    assert plugin_file.exists(), f"Expected plugin file at {plugin_file} before deletion"
+    plugin_file.unlink()
+    assert not plugin_file.exists(), "Plugin file should be gone after unlink"
+    # <<<<< DELETE PLUGIN FILE HOST-SIDE <<<<<
+
+    # >>>>> RESTART TRIGGERS ORPHAN CLEANUP >>>>>
+    environment.restart()
+    # <<<<< RESTART TRIGGERS ORPHAN CLEANUP <<<<<
+
+    # >>>>> VERIFY PLUGIN ABSENT AFTER SCAN >>>>>
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="download")
+    )
+    assert not error, f"Failed to list download plugins after restart (status {error.status}): {error.error}"
+    namespaces = {p.namespace for p in response.plugins}
+    assert "sample-downloader" not in namespaces, (
+        f"sample-downloader should be orphan-cleaned after file deletion and restart, got: {namespaces}"
+    )
+    # <<<<< VERIFY PLUGIN ABSENT AFTER SCAN <<<<<
 
     expect_no_error_logs(environment, LOGGER)

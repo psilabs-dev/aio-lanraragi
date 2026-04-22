@@ -155,6 +155,19 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
+async def test_plugin_config_nonexistent_namespace(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """Updating config for a never-installed namespace returns 404."""
+    environment.setup(with_api_key=True)
+
+    response, error = await lrr_client.misc_api.update_plugin_config(
+        "definitely-not-real", UpdatePluginConfigRequest(hidden=True)
+    )
+    assert error is not None, "Expected 404 error for nonexistent namespace"
+    assert error.status == 404, f"Expected 404 for nonexistent namespace, got {error.status}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
 @pytest.mark.ratelimit
 async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """

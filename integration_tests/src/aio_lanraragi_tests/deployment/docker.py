@@ -32,6 +32,7 @@ from aio_lanraragi_tests.deployment.base import (
 from aio_lanraragi_tests.exceptions import DeploymentException
 
 DEFAULT_LANRARAGI_DOCKER_TAG = "difegue/lanraragi"
+LOCAL_REGISTRY_CONTAINER_PATH = "/srv/test-registry"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -186,6 +187,37 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def plugins_root_dir(self) -> Path:
         dirname = self.resource_prefix + "plugins"
         return self.staging_dir / dirname
+
+    @property
+    def plugin_managed_dir(self) -> Path:
+        """
+        Bind mount for LRR container:/home/koyomi/lanraragi/lib/LANraragi/Plugin/Managed.
+        """
+        dirname = self.resource_prefix + "plugin_managed"
+        return self.staging_dir / dirname
+
+    @property
+    def plugin_sideloaded_dir(self) -> Path:
+        """
+        Bind mount for LRR container:/home/koyomi/lanraragi/lib/LANraragi/Plugin/Sideloaded.
+        """
+        dirname = self.resource_prefix + "plugin_sideloaded"
+        return self.staging_dir / dirname
+
+    @property
+    def local_registry_dir(self) -> Path:
+        """
+        Host path bind-mounted at ``local_registry_path`` for local-registry tests.
+        """
+        dirname = self.resource_prefix + "local_registry"
+        return self.staging_dir / dirname
+
+    @property
+    def local_registry_path(self) -> str:
+        """
+        Path at which LRR reads the local registry. Pass this to ``CreateRegistryRequest(path=...)``.
+        """
+        return LOCAL_REGISTRY_CONTAINER_PATH
 
     @property
     def docker_client(self) -> docker.DockerClient:
@@ -473,6 +505,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         thumb_dir = self.thumb_dir
         logs_dir = self.logs_dir
         redis_dir = self.redis_dir
+        plugin_managed_dir = self.plugin_managed_dir
+        plugin_sideloaded_dir = self.plugin_sideloaded_dir
+        local_registry_dir = self.local_registry_dir
         if contents_dir.exists():
             self.logger.debug(f"Contents directory exists: {contents_dir}")
         else:
@@ -496,6 +531,27 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
             # Brief delay for VirtioFS to propagate the
             # newly created directory before it is used as a bind mount source.
+            if sys.platform == "darwin":
+                time.sleep(1)
+        if plugin_managed_dir.exists():
+            self.logger.debug(f"Plugin managed directory exists: {plugin_managed_dir}")
+        else:
+            self.logger.debug(f"Creating plugin managed dir: {plugin_managed_dir}")
+            plugin_managed_dir.mkdir(parents=True, exist_ok=False)
+            if sys.platform == "darwin":
+                time.sleep(1)
+        if plugin_sideloaded_dir.exists():
+            self.logger.debug(f"Plugin sideloaded directory exists: {plugin_sideloaded_dir}")
+        else:
+            self.logger.debug(f"Creating plugin sideloaded dir: {plugin_sideloaded_dir}")
+            plugin_sideloaded_dir.mkdir(parents=True, exist_ok=False)
+            if sys.platform == "darwin":
+                time.sleep(1)
+        if local_registry_dir.exists():
+            self.logger.debug(f"Local registry directory exists: {local_registry_dir}")
+        else:
+            self.logger.debug(f"Creating local registry dir: {local_registry_dir}")
+            local_registry_dir.mkdir(parents=True, exist_ok=False)
             if sys.platform == "darwin":
                 time.sleep(1)
 
@@ -662,6 +718,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 str(contents_dir): {"bind": "/home/koyomi/lanraragi/content", "mode": "rw"},
                 str(thumb_dir): {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"},
                 str(logs_dir): {"bind": "/home/koyomi/lanraragi/log", "mode": "rw"},
+                str(plugin_managed_dir): {"bind": "/home/koyomi/lanraragi/lib/LANraragi/Plugin/Managed", "mode": "rw"},
+                str(plugin_sideloaded_dir): {"bind": "/home/koyomi/lanraragi/lib/LANraragi/Plugin/Sideloaded", "mode": "rw"},
+                str(local_registry_dir): {"bind": LOCAL_REGISTRY_CONTAINER_PATH, "mode": "ro"},
             }
             lrr_volumes.update(plugin_volumes)
             self.lrr_container = self.docker_client.containers.create(
@@ -856,6 +915,8 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/content/*'], user='root')
                 self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/thumb/*'], user='root')
                 self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/log/*'], user='root')
+                self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/lib/LANraragi/Plugin/Managed/*'], user='root')
+                self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/lib/LANraragi/Plugin/Sideloaded/*'], user='root')
             else:
                 self.logger.info(f"Container not running with status {status} (no teardown commands run): {self.lrr_container_name}")
         if self.lrr_container:
@@ -890,6 +951,15 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if self.plugins_root_dir.exists():
                 shutil.rmtree(self.plugins_root_dir)
                 self.logger.debug(f"Removed plugins directory: {self.plugins_root_dir}")
+            if self.plugin_managed_dir.exists():
+                shutil.rmtree(self.plugin_managed_dir)
+                self.logger.debug(f"Removed plugin managed directory: {self.plugin_managed_dir}")
+            if self.plugin_sideloaded_dir.exists():
+                shutil.rmtree(self.plugin_sideloaded_dir)
+                self.logger.debug(f"Removed plugin sideloaded directory: {self.plugin_sideloaded_dir}")
+            if self.local_registry_dir.exists():
+                shutil.rmtree(self.local_registry_dir)
+                self.logger.debug(f"Removed local registry directory: {self.local_registry_dir}")
             redis_conf_staging = self.staging_dir / (self.resource_prefix + "redis.conf")
             if redis_conf_staging.exists():
                 redis_conf_staging.unlink()
