@@ -292,17 +292,18 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
     assert not error, f"Failed to create registry (status {error.status}): {error.error}"
     reg_id = response.id
 
-    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
-    assert response.index is not None, "Expected index after refresh"
+    assert refresh_response.index is not None, "Expected index after refresh"
+    sample_downloader_version = refresh_response.index["plugins"]["sample-downloader"]["channels"]["latest"]
     # <<<<< CREATE AND REFRESH <<<<<
 
     # >>>>> INSTALL PLUGIN BEFORE SOURCE CHANGE >>>>>
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-downloader", registry=reg_id)
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
-    assert response.registry == reg_id
+    assert response.installed_registry == reg_id
     # <<<<< INSTALL PLUGIN BEFORE SOURCE CHANGE <<<<<
 
     # >>>>> UPDATE URL (SOURCE CHANGE) >>>>>
@@ -318,7 +319,7 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
     assert not error, f"Failed to list plugins after source change (status {error.status}): {error.error}"
     for plugin in response.plugins:
         if plugin.namespace == "sample-downloader":
-            assert plugin.registry == reg_id, f"Expected provenance {reg_id} after source change, got: {plugin.registry}"
+            assert plugin.installed_registry == reg_id, f"Expected provenance {reg_id} after source change, got: {plugin.installed_registry}"
             break
     else:
         pytest.fail("Installed plugin should survive registry source change")
