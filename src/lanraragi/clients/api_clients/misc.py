@@ -266,7 +266,7 @@ class _MiscApiClient(_ApiClient):
         POST /api/plugins/install
         """
         url = self.api_context.build_url("/api/plugins/install")
-        body: dict[str, Any] = {"namespace": request.namespace, "registry": request.registry}
+        body: dict[str, Any] = {"namespace": request.namespace, "registry": request.registry, "version": request.version}
         if request.force is not None:
             body["force"] = request.force
         status, content = await self.api_context.handle_request(
@@ -278,7 +278,7 @@ class _MiscApiClient(_ApiClient):
                 name=response_j["name"],
                 namespace=response_j["namespace"],
                 version=response_j["version"],
-                registry=response_j["registry"],
+                installed_registry=response_j["installed_registry"],
             ), None)
         return (None, _build_err_response(content, status))
 

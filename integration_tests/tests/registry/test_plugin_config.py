@@ -55,11 +55,12 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     assert not error, f"Failed to create registry (status {error.status}): {error.error}"
     reg_id = response.id
 
-    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+    sample_metadata_version = refresh_response.index["plugins"]["sample-metadata"]["channels"]["latest"]
 
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-metadata", registry=reg_id)
+        InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version)
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
     # <<<<< SETUP AND INSTALL <<<<<
@@ -110,7 +111,7 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     assert not error, f"Failed to uninstall plugin (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-metadata", registry=reg_id)
+        InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version)
     )
     assert not error, f"Failed to reinstall plugin (status {error.status}): {error.error}"
 
@@ -194,11 +195,13 @@ async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDe
     assert not error, f"Failed to create registry (status {error.status}): {error.error}"
     reg_id = response.id
 
-    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+    sample_metadata_version = refresh_response.index["plugins"]["sample-metadata"]["channels"]["latest"]
+    sample_downloader_version = refresh_response.index["plugins"]["sample-downloader"]["channels"]["latest"]
 
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-metadata", registry=reg_id)
+        InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version)
     )
     assert not error, f"Failed to install sample-metadata (status {error.status}): {error.error}"
     # <<<<< SETUP AND INSTALL <<<<<
@@ -254,7 +257,7 @@ async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDe
 
     # >>>>> PRIORITY ON NON-METADATA PLUGIN >>>>>
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-downloader", registry=reg_id)
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
     )
     assert not error, f"Failed to install sample-downloader (status {error.status}): {error.error}"
 
@@ -307,14 +310,15 @@ async def test_plugin_priority_execution_order(lrr_client: LRRClient, environmen
     assert not error, f"Failed to create registry (status {error.status}): {error.error}"
     reg_id = response.id
 
-    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     # <<<<< SETUP REGISTRY <<<<<
 
     # >>>>> INSTALL ALL THREE >>>>>
     for ns in ("title-suffix-1", "title-suffix-2", "title-suffix-3"):
+        version_key = refresh_response.index["plugins"][ns]["channels"]["latest"]
         response, error = await lrr_client.misc_api.install_plugin(
-            InstallPluginRequest(namespace=ns, registry=reg_id)
+            InstallPluginRequest(namespace=ns, registry=reg_id, version=version_key)
         )
         assert not error, f"Failed to install {ns} (status {error.status}): {error.error}"
     # <<<<< INSTALL ALL THREE <<<<<
