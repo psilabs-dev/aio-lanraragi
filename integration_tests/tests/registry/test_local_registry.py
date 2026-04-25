@@ -71,8 +71,20 @@ async def test_local_registry_install_errors(
         "generated_at": generated_at,
         "plugins": {
             "traversal-plugin": {
-                "name": "traversal", "type": "download", "author": "test", "version": "1.0",
-                "path": "../../etc/passwd", "sha256": dummy_sha,
+                "namespace": "traversal-plugin",
+                "type": "download",
+                "channels": {"latest": "1.0"},
+                "versions": {
+                    "1.0": {
+                        "version": "1.0",
+                        "name": "traversal",
+                        "author": "test",
+                        "description": "traversal test plugin",
+                        "artifact": "../../etc/passwd",
+                        "sha256": dummy_sha,
+                        "published_at": generated_at,
+                    },
+                },
             },
         },
     }))
@@ -81,7 +93,7 @@ async def test_local_registry_install_errors(
     assert not error, f"Expected refresh to succeed with traversal path entry (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="traversal-plugin", registry=reg_id)
+        InstallPluginRequest(namespace="traversal-plugin", registry=reg_id, version="1.0")
     )
     assert error is not None, "Expected install to fail for traversal path"
     assert error.status == 400, f"Expected 400 for traversal path install, got {error.status}"
@@ -94,8 +106,20 @@ async def test_local_registry_install_errors(
         "generated_at": generated_at,
         "plugins": {
             "absolute-plugin": {
-                "name": "absolute", "type": "download", "author": "test", "version": "1.0",
-                "path": "/etc/passwd", "sha256": dummy_sha,
+                "namespace": "absolute-plugin",
+                "type": "download",
+                "channels": {"latest": "1.0"},
+                "versions": {
+                    "1.0": {
+                        "version": "1.0",
+                        "name": "absolute",
+                        "author": "test",
+                        "description": "absolute path test plugin",
+                        "artifact": "/etc/passwd",
+                        "sha256": dummy_sha,
+                        "published_at": generated_at,
+                    },
+                },
             },
         },
     }))
@@ -104,14 +128,14 @@ async def test_local_registry_install_errors(
     assert not error, f"Expected refresh to succeed with absolute path entry (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="absolute-plugin", registry=reg_id)
+        InstallPluginRequest(namespace="absolute-plugin", registry=reg_id, version="1.0")
     )
     assert error is not None, "Expected install to fail for absolute path"
     assert error.status == 400, f"Expected 400 for absolute path install, got {error.status}"
     assert not list(environment.plugin_managed_dir.rglob("*.pm")), "No .pm files should be written for absolute path"
     # <<<<< ABSOLUTE PATH REJECTED <<<<<
 
-    plugin_rel_path = "Plugin/Managed/Download/LocalSample.pm"
+    plugin_rel_path = "artifacts/local-sample-downloader/1.0/LocalSample.pm"
     plugin_file = environment.local_registry_dir / plugin_rel_path
     plugin_file.parent.mkdir(parents=True, exist_ok=True)
     plugin_file.write_text("""\
@@ -141,8 +165,20 @@ sub plugin_info {
         "generated_at": generated_at,
         "plugins": {
             "local-sample-downloader": {
-                "name": "Local Sample", "type": "download", "author": "test", "version": "1.0",
-                "path": plugin_rel_path, "sha256": dummy_sha,
+                "namespace": "local-sample-downloader",
+                "type": "download",
+                "channels": {"latest": "1.0"},
+                "versions": {
+                    "1.0": {
+                        "version": "1.0",
+                        "name": "Local Sample",
+                        "author": "test",
+                        "description": "local sample downloader",
+                        "artifact": plugin_rel_path,
+                        "sha256": dummy_sha,
+                        "published_at": generated_at,
+                    },
+                },
             },
         },
     }))
@@ -151,7 +187,7 @@ sub plugin_info {
     assert not error, f"Expected refresh to succeed with wrong sha entry (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="local-sample-downloader", registry=reg_id)
+        InstallPluginRequest(namespace="local-sample-downloader", registry=reg_id, version="1.0")
     )
     assert error is not None, "Expected install to fail for wrong sha256"
     assert error.status == 422, f"Expected 422 for wrong sha256 install, got {error.status}"
@@ -175,8 +211,20 @@ sub plugin_info {
         "generated_at": generated_at,
         "plugins": {
             "local-sample-downloader": {
-                "name": "Local Sample", "type": "download", "author": "test", "version": "1.0",
-                "path": plugin_rel_path, "sha256": real_sha,
+                "namespace": "local-sample-downloader",
+                "type": "download",
+                "channels": {"latest": "1.0"},
+                "versions": {
+                    "1.0": {
+                        "version": "1.0",
+                        "name": "Local Sample",
+                        "author": "test",
+                        "description": "local sample downloader",
+                        "artifact": plugin_rel_path,
+                        "sha256": real_sha,
+                        "published_at": generated_at,
+                    },
+                },
             },
         },
     }))
@@ -185,7 +233,7 @@ sub plugin_info {
     assert not error, f"Expected refresh to succeed (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="local-sample-downloader", registry=reg_id)
+        InstallPluginRequest(namespace="local-sample-downloader", registry=reg_id, version="1.0")
     )
     assert not error, f"Expected install to succeed (status {error.status}): {error.error}"
     assert response.namespace == "local-sample-downloader"
