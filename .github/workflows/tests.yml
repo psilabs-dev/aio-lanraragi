@@ -102,7 +102,8 @@ jobs:
             --server-logs "$GITHUB_WORKSPACE/server-logs" \
             --playwright \
             --no-rate-limit \
-            --npseed 42
+            --npseed 42 \
+            --dev registry
         env:
           DOCKER_HOST: unix:///var/run/docker.sock
 
@@ -262,7 +263,8 @@ jobs:
           --server-logs "$env:GITHUB_WORKSPACE\server-logs" `
           --playwright `
           --no-rate-limit `
-          --npseed 42
+          --npseed 42 `
+          --dev registry
 
       - name: Upload server logs
         if: failure()

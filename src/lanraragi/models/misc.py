@@ -45,7 +45,7 @@ class GetAvailablePluginsResponsePlugin(BaseModel):
     version: str = Field(...)
     hidden: bool = Field(False)
     priority: int = Field(0)
-    registry: str | None = Field(None)
+    installed_registry: str | None = Field(None)
 
 class GetAvailablePluginsResponse(LanraragiResponse):
     plugins: list[GetAvailablePluginsResponsePlugin] = Field(...)
@@ -143,13 +143,14 @@ class UpdatePluginConfigRequest(LanraragiRequest):
 class InstallPluginRequest(LanraragiRequest):
     namespace: str = Field(...)
     registry: str = Field(...)
+    version: str = Field(...)
     force: bool | None = Field(None)
 
 class InstallPluginResponse(LanraragiResponse):
     name: str = Field(...)
     namespace: str = Field(...)
     version: str = Field(...)
-    registry: str = Field(...)
+    installed_registry: str = Field(...)
 
 __all__ = [
     "GetServerInfoResponse",
