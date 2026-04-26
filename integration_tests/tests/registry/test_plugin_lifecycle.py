@@ -90,10 +90,11 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
         GetAvailablePluginsRequest(type="download")
     )
     assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
-    namespaces = {p.namespace for p in response.plugins}
-    # LRR ships no built-in download plugins on dev-registry-backend, so the
-    # only download plugin present after install is the one we just installed.
-    assert namespaces == {"sample-downloader"}, f"Expected only sample-downloader in download list, got: {namespaces}"
+    sample = next((p for p in response.plugins if p.namespace == "sample-downloader"), None)
+    assert sample is not None, "sample-downloader missing from download plugin list after install"
+    assert sample.installed_registry == reg_id, (
+        f"Expected managed provenance {reg_id}, got: {sample.installed_registry}"
+    )
     # <<<<< VERIFY INSTALLED <<<<<
 
     # >>>>> UNINSTALL PLUGIN >>>>>
@@ -143,6 +144,113 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     )
     # <<<<< UNINSTALL BUILT-IN BLOCKED <<<<<
 
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+@pytest.mark.ratelimit
+async def test_plugin_install_provenance_fields(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test provenance fields for channel-tracked and explicit-version installs.
+
+    1. Install sample-downloader with installed_channel="latest".
+    2. Assert install response and plugin list include required sha256/channel provenance.
+    3. Reinstall explicitly after uninstalling.
+    4. Assert installed_channel is cleared while sha256 remains.
+    """
+    environment.setup(with_api_key=True)
+
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+
+    version_key = refresh_response.index["plugins"]["sample-downloader"]["channels"]["latest"]
+    version_record = refresh_response.index["plugins"]["sample-downloader"]["versions"][version_key]
+    expected_sha = version_record["sha256"]
+
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(
+            namespace="sample-downloader",
+            registry=reg_id,
+            version=version_key,
+            installed_channel="latest",
+        )
+    )
+    assert not error, f"Failed to install channel-tracked plugin (status {error.status}): {error.error}"
+    assert response.installed_registry == reg_id, f"Expected provenance {reg_id}, got: {response.installed_registry}"
+    assert response.installed_sha256 == expected_sha, (
+        f"Expected install sha256 {expected_sha}, got {response.installed_sha256}"
+    )
+    assert response.installed_channel == "latest", (
+        f"Expected install channel 'latest', got {response.installed_channel!r}"
+    )
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="download")
+    )
+    assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
+    plugin = next((p for p in response.plugins if p.namespace == "sample-downloader"), None)
+    assert plugin is not None, "sample-downloader missing from plugin list after install"
+    assert plugin.installed_registry == reg_id, f"Expected managed provenance {reg_id}, got: {plugin.installed_registry}"
+    assert plugin.installed_version == version_key, (
+        f"Expected installed_version {version_key!r}, got {plugin.installed_version!r}"
+    )
+    assert plugin.installed_sha256 == expected_sha, (
+        f"Expected installed_sha256 {expected_sha}, got {plugin.installed_sha256!r}"
+    )
+    assert plugin.installed_channel == "latest", (
+        f"Expected installed_channel 'latest', got {plugin.installed_channel!r}"
+    )
+    environment.restart()
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="download")
+    )
+    assert not error, f"Failed to list plugins after restart (status {error.status}): {error.error}"
+    plugin = next((p for p in response.plugins if p.namespace == "sample-downloader"), None)
+    assert plugin is not None, "sample-downloader missing from plugin list after restart"
+    assert plugin.installed_channel == "latest", (
+        f"Expected installed_channel 'latest' after restart, got {plugin.installed_channel!r}"
+    )
+    assert plugin.installed_sha256 == expected_sha, (
+        f"Expected installed_sha256 {expected_sha} after restart, got {plugin.installed_sha256!r}"
+    )
+    response, error = await lrr_client.misc_api.uninstall_plugin("sample-downloader")
+    assert not error, f"Failed to uninstall plugin (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=version_key)
+    )
+    assert not error, f"Failed to install explicit-version plugin (status {error.status}): {error.error}"
+    assert response.installed_channel is None, (
+        f"Expected no installed_channel for explicit install, got {response.installed_channel!r}"
+    )
+    assert response.installed_sha256 == expected_sha, (
+        f"Expected install sha256 {expected_sha}, got {response.installed_sha256}"
+    )
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="download")
+    )
+    assert not error, f"Failed to list plugins after explicit install (status {error.status}): {error.error}"
+    plugin = next((p for p in response.plugins if p.namespace == "sample-downloader"), None)
+    assert plugin is not None, "sample-downloader missing after explicit reinstall"
+    assert plugin.installed_channel is None, (
+        f"Expected installed_channel to clear after explicit install, got {plugin.installed_channel!r}"
+    )
+    assert plugin.installed_sha256 == expected_sha, (
+        f"Expected installed_sha256 {expected_sha}, got {plugin.installed_sha256!r}"
+    )
     expect_no_error_logs(environment, LOGGER)
 
 
@@ -372,8 +480,8 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
     1. Write a .pm file declaring the same namespace as sample-metadata.
     2. Setup environment with the conflicting plugin.
     3. Create registry and refresh index.
-    4. Install sample-metadata, expect provenance conflict (400).
-    5. Force install sample-metadata, expect namespace conflict (422).
+    4. Install sample-metadata, expect non-managed conflict (400) -- user must remove first.
+    5. Force install sample-metadata, expect same non-managed conflict (400) -- force does not bypass.
     6. Install sample-downloader (no conflict), expect success with provenance.
     7. Reinstall sample-downloader (same-registry upgrade), expect success.
     """
@@ -389,59 +497,60 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
             plugin_paths={"Metadata": [str(conflict_path)]},
         )
 
-    # >>>>> SETUP REGISTRY >>>>>
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(
-            name="demo",
-            type="git",
-            provider="github",
-            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
-            ref="main",
+        # >>>>> SETUP REGISTRY >>>>>
+        response, error = await lrr_client.misc_api.create_registry(
+            CreateRegistryRequest(
+                name="demo",
+                type="git",
+                provider="github",
+                url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+                ref="main",
+            )
         )
-    )
-    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
-    reg_id = response.id
+        assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+        reg_id = response.id
 
-    refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
-    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
-    sample_metadata_version = refresh_response.index["plugins"]["sample-metadata"]["channels"]["latest"]
-    sample_downloader_version = refresh_response.index["plugins"]["sample-downloader"]["channels"]["latest"]
-    # <<<<< SETUP REGISTRY <<<<<
+        refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+        assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+        sample_metadata_version = refresh_response.index["plugins"]["sample-metadata"]["channels"]["latest"]
+        sample_downloader_version = refresh_response.index["plugins"]["sample-downloader"]["channels"]["latest"]
+        # <<<<< SETUP REGISTRY <<<<<
 
-    # >>>>> INSTALL WITH CONFLICT (NO PROVENANCE) >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version)
-    )
-    assert error is not None, "Expected error when installing plugin with existing sideloaded copy"
-    assert error.status == 400, f"Expected 400 for provenance conflict, got {error.status}"
-    assert "without provenance" in error.error, f"Expected 'without provenance' in error, got: {error.error}"
-    # <<<<< INSTALL WITH CONFLICT (NO PROVENANCE) <<<<<
+        # >>>>> INSTALL WITH NON-MANAGED CONFLICT >>>>>
+        response, error = await lrr_client.misc_api.install_plugin(
+            InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version)
+        )
+        assert error is not None, "Expected error when installing plugin with existing non-managed copy"
+        assert error.status == 400, f"Expected 400 for non-managed conflict, got {error.status}"
+        assert "Remove it first" in error.error, f"Expected 'Remove it first' in error, got: {error.error}"
+        # <<<<< INSTALL WITH NON-MANAGED CONFLICT <<<<<
 
-    # >>>>> FORCE INSTALL STILL BLOCKED BY FILESYSTEM CONFLICT >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version, force=True)
-    )
-    assert error is not None, "Expected error: force bypasses provenance but not filesystem namespace conflict"
-    assert error.status == 422, f"Expected 422 for namespace conflict, got {error.status}"
-    # <<<<< FORCE INSTALL STILL BLOCKED BY FILESYSTEM CONFLICT <<<<<
+        # >>>>> FORCE INSTALL STILL BLOCKED OVER NON-MANAGED >>>>>
+        response, error = await lrr_client.misc_api.install_plugin(
+            InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version, force=True)
+        )
+        assert error is not None, "Expected error: force must not bypass non-managed conflict"
+        assert error.status == 400, f"Expected 400 for non-managed conflict (force), got {error.status}"
+        assert "Remove it first" in error.error, f"Expected 'Remove it first' in error, got: {error.error}"
+        # <<<<< FORCE INSTALL STILL BLOCKED OVER NON-MANAGED <<<<<
 
-    # >>>>> INSTALL WITHOUT CONFLICT >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
-    )
-    assert not error, f"Failed to install non-conflicting plugin (status {error.status}): {error.error}"
-    assert response.namespace == "sample-downloader"
-    assert response.installed_registry == reg_id, f"Expected provenance {reg_id}, got: {response.installed_registry}"
-    # <<<<< INSTALL WITHOUT CONFLICT <<<<<
+        # >>>>> INSTALL WITHOUT CONFLICT >>>>>
+        response, error = await lrr_client.misc_api.install_plugin(
+            InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
+        )
+        assert not error, f"Failed to install non-conflicting plugin (status {error.status}): {error.error}"
+        assert response.namespace == "sample-downloader"
+        assert response.installed_registry == reg_id, f"Expected provenance {reg_id}, got: {response.installed_registry}"
+        # <<<<< INSTALL WITHOUT CONFLICT <<<<<
 
-    # >>>>> UPGRADE (REINSTALL) >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
-    )
-    assert not error, f"Failed to reinstall/upgrade plugin (status {error.status}): {error.error}"
-    # <<<<< UPGRADE (REINSTALL) <<<<<
+        # >>>>> UPGRADE (REINSTALL) >>>>>
+        response, error = await lrr_client.misc_api.install_plugin(
+            InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
+        )
+        assert not error, f"Failed to reinstall/upgrade plugin (status {error.status}): {error.error}"
+        # <<<<< UPGRADE (REINSTALL) <<<<<
 
-    expect_no_error_logs(environment, LOGGER)
+        expect_no_error_logs(environment, LOGGER)
 
 
 @pytest.mark.asyncio
@@ -450,6 +559,11 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
 async def test_plugin_uninstall_not_listed(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test that uninstalled plugin is absent from plugin list across repeated cycles.
+
+    Worker-lottery regression check: under prefork, each request may land on a
+    different worker, so a single uninstall->list cycle does not exercise every
+    worker's module/cache state. 5 cycles raise the probability that every
+    worker observes both the install and the post-uninstall state.
 
     1. Create registry and refresh index.
     2. Run 5 cycles of: install sample-login, uninstall, verify absent from GET /api/plugins/login.
@@ -475,17 +589,17 @@ async def test_plugin_uninstall_not_listed(lrr_client: LRRClient, environment: A
     # <<<<< SETUP REGISTRY <<<<<
 
     for i in range(5):
-        LOGGER.info(f"Cycle {i}: installing sample-login")
+        LOGGER.debug(f"Cycle {i}: installing sample-login")
         response, error = await lrr_client.misc_api.install_plugin(
             InstallPluginRequest(namespace="sample-login", registry=reg_id, version=sample_login_version)
         )
         assert not error, f"Cycle {i}: install failed (status {error.status}): {error.error}"
 
-        LOGGER.info(f"Cycle {i}: uninstalling sample-login")
+        LOGGER.debug(f"Cycle {i}: uninstalling sample-login")
         response, error = await lrr_client.misc_api.uninstall_plugin("sample-login")
         assert not error, f"Cycle {i}: uninstall failed (status {error.status}): {error.error}"
 
-        LOGGER.info(f"Cycle {i}: verifying absent from plugin list")
+        LOGGER.debug(f"Cycle {i}: verifying absent from plugin list")
         response, error = await lrr_client.misc_api.get_available_plugins(
             GetAvailablePluginsRequest(type="login")
         )
@@ -679,10 +793,12 @@ async def test_sideload_after_managed_uninstall_no_duplicate_rows(
             async with session.get(plugins_url) as resp:
                 html = await resp.text()
                 matches = html.count('data-namespace="sample-script" data-source=')
-                LOGGER.info(f"Fetch {i}: {matches} sample-script row(s) in server HTML")
+                LOGGER.debug(f"Fetch {i}: {matches} sample-script row(s) in server HTML")
                 assert matches <= 1, \
                     f"Fetch {i}: expected at most 1 sample-script row in server HTML, got {matches}"
     # <<<<< RAW HTML CHECK <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
 
 
 @pytest.mark.asyncio
@@ -1064,6 +1180,7 @@ async def test_managed_plugin_survives_restart(lrr_client: LRRClient, environmen
     )
     assert not error, f"Failed to install sample-downloader (status {error.status}): {error.error}"
     installed_version = response.version
+    installed_sha256 = response.installed_sha256
     # <<<<< SETUP AND INSTALL <<<<<
 
     # >>>>> RESTART >>>>>
@@ -1083,6 +1200,15 @@ async def test_managed_plugin_survives_restart(lrr_client: LRRClient, environmen
             assert plugin.installed_registry == reg_id, f"Expected provenance {reg_id} after restart, got: {plugin.installed_registry}"
             assert plugin.version == installed_version, (
                 f"Expected version {installed_version!r} after restart, got: {plugin.version!r}"
+            )
+            assert plugin.installed_version == installed_version, (
+                f"Expected installed_version {installed_version!r} after restart, got: {plugin.installed_version!r}"
+            )
+            assert plugin.installed_sha256 == installed_sha256, (
+                f"Expected installed_sha256 {installed_sha256!r} after restart, got: {plugin.installed_sha256!r}"
+            )
+            assert plugin.installed_channel is None, (
+                f"Expected no installed_channel after explicit install, got: {plugin.installed_channel!r}"
             )
             break
     else:

@@ -267,6 +267,8 @@ class _MiscApiClient(_ApiClient):
         """
         url = self.api_context.build_url("/api/plugins/install")
         body: dict[str, Any] = {"namespace": request.namespace, "registry": request.registry, "version": request.version}
+        if request.installed_channel is not None:
+            body["installed_channel"] = request.installed_channel
         if request.force is not None:
             body["force"] = request.force
         status, content = await self.api_context.handle_request(
@@ -279,6 +281,8 @@ class _MiscApiClient(_ApiClient):
                 namespace=response_j["namespace"],
                 version=response_j["version"],
                 installed_registry=response_j["installed_registry"],
+                installed_sha256=response_j["installed_sha256"],
+                installed_channel=response_j.get("installed_channel"),
             ), None)
         return (None, _build_err_response(content, status))
 
@@ -289,9 +293,6 @@ class _MiscApiClient(_ApiClient):
         url = self.api_context.build_url(f"/api/plugins/installed/{namespace}")
         status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
         if status == 200:
-            response_j = json.loads(content)
-            if response_j.get("success") == 0:
-                return (None, LanraragiErrorResponse(error=response_j.get("error", ""), status=status))
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))
 
