@@ -52,6 +52,9 @@ class GetAvailablePluginsResponsePlugin(BaseModel):
     hidden: bool = Field(False)
     priority: int = Field(0)
     installed_registry: str | None = Field(None)
+    installed_version: str | None = Field(None)
+    installed_sha256: str | None = Field(None)
+    installed_channel: str | None = Field(None)
 
 class GetAvailablePluginsResponse(LanraragiResponse):
     plugins: list[GetAvailablePluginsResponsePlugin] = Field(...)
@@ -150,6 +153,7 @@ class InstallPluginRequest(LanraragiRequest):
     namespace: str = Field(...)
     registry: str = Field(...)
     version: str = Field(...)
+    installed_channel: str | None = Field(None)
     force: bool | None = Field(None)
 
 class InstallPluginResponse(LanraragiResponse):
@@ -157,6 +161,8 @@ class InstallPluginResponse(LanraragiResponse):
     namespace: str = Field(...)
     version: str = Field(...)
     installed_registry: str = Field(...)
+    installed_sha256: str = Field(...)
+    installed_channel: str | None = Field(None)
 
 __all__ = [
     "GetServerInfoResponse",
