@@ -65,6 +65,29 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
     # <<<<< SETUP AND INSTALL <<<<<
 
+    # >>>>> DEFAULT FIELD VALUES >>>>>
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
+    found_managed = False
+    found_default = False
+    for plugin in response.plugins:
+        if plugin.namespace == "sample-metadata":
+            found_managed = True
+            assert plugin.hidden is False, f"Fresh install expected hidden=False, got {plugin.hidden}"
+            assert plugin.installed_registry == reg_id, (
+                f"Managed plugin expected installed_registry={reg_id}, got {plugin.installed_registry}"
+            )
+        if plugin.namespace == "copytags":
+            found_default = True
+            assert plugin.installed_registry is None, (
+                f"Default plugin expected installed_registry=None, got {plugin.installed_registry}"
+            )
+    assert found_managed, "sample-metadata not found in plugin list after install"
+    assert found_default, "default plugin copytags not found in plugin list"
+    # <<<<< DEFAULT FIELD VALUES <<<<<
+
     # >>>>> HIDE PLUGIN >>>>>
     response, error = await lrr_client.misc_api.update_plugin_config(
         "sample-metadata", UpdatePluginConfigRequest(hidden=True)
@@ -165,6 +188,8 @@ async def test_plugin_config_nonexistent_namespace(lrr_client: LRRClient, enviro
     )
     assert error is not None, "Expected 404 error for nonexistent namespace"
     assert error.status == 404, f"Expected 404 for nonexistent namespace, got {error.status}"
+
+    expect_no_error_logs(environment, LOGGER)
 
 
 @pytest.mark.asyncio
