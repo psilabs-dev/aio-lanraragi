@@ -1,5 +1,6 @@
 import http
 import json
+from typing import Any
 
 import aiohttp
 
@@ -9,19 +10,30 @@ from lanraragi.clients.res_processors.misc import (
     _process_get_server_info_response,
 )
 from lanraragi.clients.utils import _build_err_response
-from lanraragi.models.base import LanraragiErrorResponse
+from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
 from lanraragi.models.generics import _LRRClientResponse
 from lanraragi.models.misc import (
     CleanTempFolderResponse,
+    CreateRegistryRequest,
+    CreateRegistryResponse,
     GetAvailablePluginsRequest,
     GetAvailablePluginsResponse,
     GetOpdsCatalogRequest,
     GetOpdsCatalogResponse,
+    GetRegistryResponse,
     GetServerInfoResponse,
+    InstallPluginRequest,
+    InstallPluginResponse,
+    ListRegistriesResponse,
     QueueUrlDownloadRequest,
     QueueUrlDownloadResponse,
+    RefreshRegistryResponse,
     RegenerateThumbnailRequest,
     RegenerateThumbnailResponse,
+    RegistryConfig,
+    UpdatePluginConfigRequest,
+    UpdateRegistryRequest,
+    UpdateRegistryResponse,
     UsePluginAsyncRequest,
     UsePluginAsyncResponse,
     UsePluginRawResponse,
@@ -149,7 +161,157 @@ class _MiscApiClient(_ApiClient):
             job = response_j.get("job")
             return (RegenerateThumbnailResponse(job=job), None)
         return (None, _build_err_response(content, status))
-    pass
+
+    async def list_registries(self) -> _LRRClientResponse[ListRegistriesResponse]:
+        """
+        GET /api/registries
+        """
+        url = self.api_context.build_url("/api/registries")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
+        if status == 200:
+            response_j = json.loads(content)
+            registries = [RegistryConfig.model_validate(r) for r in response_j.get("registries", [])]
+            return (ListRegistriesResponse(registries=registries), None)
+        return (None, _build_err_response(content, status))
+
+    async def create_registry(self, request: CreateRegistryRequest) -> _LRRClientResponse[CreateRegistryResponse]:
+        """
+        POST /api/registries
+        """
+        url = self.api_context.build_url("/api/registries")
+        body: dict[str, str] = {"name": request.name, "type": request.type}
+        if request.provider:
+            body["provider"] = request.provider
+        if request.url:
+            body["url"] = request.url
+        if request.ref:
+            body["ref"] = request.ref
+        if request.path:
+            body["path"] = request.path
+        status, content = await self.api_context.handle_request(
+            http.HTTPMethod.POST, url, self.headers, json_data=body
+        )
+        if status == 200:
+            response_j = json.loads(content)
+            registry = RegistryConfig.model_validate(response_j.get("registry"))
+            return (CreateRegistryResponse(id=response_j["id"], registry=registry), None)
+        return (None, _build_err_response(content, status))
+
+    async def get_registry(self, registry_id: str) -> _LRRClientResponse[GetRegistryResponse]:
+        """
+        GET /api/registries/{id}
+        """
+        url = self.api_context.build_url(f"/api/registries/{registry_id}")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
+        if status == 200:
+            response_j = json.loads(content)
+            registry = RegistryConfig.model_validate(response_j.get("registry"))
+            return (GetRegistryResponse(id=response_j["id"], registry=registry), None)
+        return (None, _build_err_response(content, status))
+
+    async def update_registry(self, registry_id: str, request: UpdateRegistryRequest) -> _LRRClientResponse[UpdateRegistryResponse]:
+        """
+        PUT /api/registries/{id}
+        """
+        url = self.api_context.build_url(f"/api/registries/{registry_id}")
+        body: dict[str, str] = {}
+        if request.name is not None:
+            body["name"] = request.name
+        if request.type is not None:
+            body["type"] = request.type
+        if request.provider is not None:
+            body["provider"] = request.provider
+        if request.url is not None:
+            body["url"] = request.url
+        if request.ref is not None:
+            body["ref"] = request.ref
+        if request.path is not None:
+            body["path"] = request.path
+        status, content = await self.api_context.handle_request(
+            http.HTTPMethod.PUT, url, self.headers, json_data=body
+        )
+        if status == 200:
+            response_j = json.loads(content)
+            registry = RegistryConfig.model_validate(response_j.get("registry"))
+            return (UpdateRegistryResponse(
+                id=response_j["id"],
+                registry=registry,
+                index_cleared=response_j.get("index_cleared", False),
+            ), None)
+        return (None, _build_err_response(content, status))
+
+    async def delete_registry(self, registry_id: str) -> _LRRClientResponse[LanraragiResponse]:
+        """
+        DELETE /api/registries/{id}
+        """
+        url = self.api_context.build_url(f"/api/registries/{registry_id}")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
+        if status == 200:
+            return (LanraragiResponse(), None)
+        return (None, _build_err_response(content, status))
+
+    async def refresh_registry(self, registry_id: str) -> _LRRClientResponse[RefreshRegistryResponse]:
+        """
+        POST /api/registries/{id}/refresh
+        """
+        url = self.api_context.build_url(f"/api/registries/{registry_id}/refresh")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers)
+        if status == 200:
+            response_j = json.loads(content)
+            return (RefreshRegistryResponse(index=response_j.get("index")), None)
+        return (None, _build_err_response(content, status))
+
+    async def install_plugin(self, request: InstallPluginRequest) -> _LRRClientResponse[InstallPluginResponse]:
+        """
+        POST /api/plugins/install
+        """
+        url = self.api_context.build_url("/api/plugins/install")
+        body: dict[str, Any] = {"namespace": request.namespace, "registry": request.registry, "version": request.version}
+        if request.installed_channel is not None:
+            body["installed_channel"] = request.installed_channel
+        if request.force is not None:
+            body["force"] = request.force
+        status, content = await self.api_context.handle_request(
+            http.HTTPMethod.POST, url, self.headers, json_data=body
+        )
+        if status == 200:
+            response_j = json.loads(content)
+            return (InstallPluginResponse(
+                name=response_j["name"],
+                namespace=response_j["namespace"],
+                version=response_j["version"],
+                installed_registry=response_j["installed_registry"],
+                installed_sha256=response_j["installed_sha256"],
+                installed_channel=response_j.get("installed_channel"),
+            ), None)
+        return (None, _build_err_response(content, status))
+
+    async def uninstall_plugin(self, namespace: str) -> _LRRClientResponse[LanraragiResponse]:
+        """
+        DELETE /api/plugins/{namespace}
+        """
+        url = self.api_context.build_url(f"/api/plugins/installed/{namespace}")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
+        if status == 200:
+            return (LanraragiResponse(), None)
+        return (None, _build_err_response(content, status))
+
+    async def update_plugin_config(self, namespace: str, request: UpdatePluginConfigRequest) -> _LRRClientResponse[LanraragiResponse]:
+        """
+        PUT /api/plugins/installed/{namespace}/config
+        """
+        url = self.api_context.build_url(f"/api/plugins/installed/{namespace}/config")
+        body = {}
+        if request.enabled is not None:
+            body["enabled"] = request.enabled
+        if request.hidden is not None:
+            body["hidden"] = request.hidden
+        if request.priority is not None:
+            body["priority"] = request.priority
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers, json_data=body)
+        if status == 200:
+            return (LanraragiResponse(), None)
+        return (None, _build_err_response(content, status))
 
 __all__ = [
     "_MiscApiClient"
