@@ -388,19 +388,6 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.logger.debug("Stopped LRR.")
         self.stop_redis()
         self.logger.debug("Stopped Redis.")
-        # Clear managed and sideloaded plugins between tests, matching the
-        # docker context. plugin_managed_dir/plugin_sideloaded_dir live inside
-        # the Windows lib tree, so files installed by one test would otherwise
-        # persist into the next.
-        for plugin_dir in (self.plugin_managed_dir, self.plugin_sideloaded_dir):
-            if not plugin_dir.exists():
-                continue
-            for entry in plugin_dir.iterdir():
-                if entry.is_dir():
-                    self._remove_ro(entry)
-                    shutil.rmtree(entry)
-                else:
-                    entry.unlink()
 
     @override
     def restart(self):
