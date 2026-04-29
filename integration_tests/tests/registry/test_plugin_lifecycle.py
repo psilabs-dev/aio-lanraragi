@@ -3,8 +3,11 @@ Plugin install/uninstall lifecycle integration tests.
 """
 
 import asyncio
+import hashlib
+import json
 import logging
 import tempfile
+import time
 from pathlib import Path
 
 import aiohttp
@@ -251,6 +254,62 @@ async def test_plugin_install_provenance_fields(lrr_client: LRRClient, environme
     assert plugin.installed_sha256 == expected_sha, (
         f"Expected installed_sha256 {expected_sha}, got {plugin.installed_sha256!r}"
     )
+
+    # >>>>> SIDELOAD COUNTERPART PROVENANCE >>>>>
+    # Sideload a download plugin under a sister namespace and assert that only
+    # installed_path is written to Redis; the four managed provenance fields
+    # (installed_registry/version/sha256/channel) must be absent from the hash.
+    # The assertion reads Redis directly because a freshly sideloaded plugin
+    # may not appear in get_available_plugins until plugin discovery refreshes,
+    # and the parity claim is about Redis state, not list visibility.
+    sideload_ns = "test-sideload-provenance-1"
+    sideload_pm_name = "TestSideloadProvenance1.pm"
+    sideload_pm_body = (
+        "package LANraragi::Plugin::Download::TestSideloadProvenance1;\n"
+        "use strict;\n"
+        "use warnings;\n"
+        "no warnings 'uninitialized';\n"
+        "sub plugin_info {\n"
+        "    return (\n"
+        "        name      => 'Test Sideload Provenance 1',\n"
+        "        type      => 'download',\n"
+        f"        namespace => '{sideload_ns}',\n"
+        "        author    => 'test',\n"
+        "        version   => '1.0',\n"
+        "    );\n"
+        "}\n"
+        "sub provide_url { return; }\n"
+        "1;\n"
+    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pm_path = Path(tmpdir) / sideload_pm_name
+        pm_path.write_text(sideload_pm_body, encoding="utf-8")
+        status, content = await sideload_plugin(lrr_client, pm_path, DEFAULT_LRR_PASSWORD)
+    assert status == 200, f"Expected 200 for sideload, got {status}: {content}"
+    assert '"success":1' in content, f"Expected sideload to succeed, got: {content}"
+
+    environment.redis_client.select(2)
+    sideload_redis_key = f"LRR_PLUGIN_{sideload_ns.upper()}"
+    sideload_hash = environment.redis_client.hgetall(sideload_redis_key)
+    assert sideload_hash.get("installed_path") == f"LANraragi/Plugin/Sideloaded/{sideload_pm_name}", (
+        f"Expected installed_path LANraragi/Plugin/Sideloaded/{sideload_pm_name!r} in Redis, "
+        f"got hash: {sideload_hash}"
+    )
+    for provenance_field in ("installed_registry", "installed_version", "installed_sha256", "installed_channel"):
+        assert provenance_field not in sideload_hash, (
+            f"Expected {provenance_field} absent from sideload Redis hash, got: {sideload_hash}"
+        )
+
+    _, error = await lrr_client.misc_api.uninstall_plugin(sideload_ns)
+    assert not error, f"Failed to uninstall sideloaded plugin (status {error.status}): {error.error}"
+    # <<<<< SIDELOAD COUNTERPART PROVENANCE <<<<<
+
+    _, error = await lrr_client.misc_api.uninstall_plugin("sample-downloader")
+    assert not error, f"Failed to uninstall sample-downloader (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.delete_registry(reg_id)
+    assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
+
     expect_no_error_logs(environment, LOGGER)
 
 
@@ -310,6 +369,334 @@ async def test_plugin_install_error_paths(lrr_client: LRRClient, environment: Ab
     assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
 
     expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry-tx") # transactional (tx)
+async def test_plugin_install_failed_require_rolls_back(
+    lrr_client: LRRClient,
+    environment: AbstractLRRDeploymentContext,
+):
+    """
+    Test that a managed install rolls back when the plugin file fails to require.
+
+    1. Create local registry with one broken plugin (valid Perl, BEGIN { die }).
+    2. Refresh registry.
+    3. Install the broken plugin; expect a non-2xx error response.
+    4. Assert plugin file is absent on the host.
+    5. Assert Redis hash for the namespace is empty.
+    6. Assert namespace is absent from GET /api/plugins/metadata.
+    """
+    environment.setup(with_api_key=True)
+
+    broken_ns = "sample-broken-tx-1"
+    broken_pm_name = "SampleBrokenTx1.pm"
+    broken_pm_body = (
+        "package LANraragi::Plugin::Managed::Metadata::SampleBrokenTx1;\n"
+        "use strict;\n"
+        "use warnings;\n"
+        "no warnings 'uninitialized';\n"
+        "BEGIN { die 'boom' }\n"
+        "sub plugin_info {\n"
+        "    return (\n"
+        "        name      => 'sample-broken-tx-1',\n"
+        "        type      => 'metadata',\n"
+        f"        namespace => '{broken_ns}',\n"
+        "        author    => 'test',\n"
+        "        version   => '1.0',\n"
+        "    );\n"
+        "}\n"
+        "sub get_tags { return (); }\n"
+        "1;\n"
+    )
+    broken_pm_bytes = broken_pm_body.encode("utf-8")
+    broken_sha = hashlib.sha256(broken_pm_bytes).hexdigest()
+    generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    plugin_rel_path = f"artifacts/{broken_ns}/1.0/{broken_pm_name}"
+
+    registry_data = {
+        "version": 1,
+        "generated_at": generated_at,
+        "plugins": {
+            broken_ns: {
+                "namespace": broken_ns,
+                "type": "metadata",
+                "channels": {"latest": "1.0"},
+                "versions": {
+                    "1.0": {
+                        "version": "1.0",
+                        "name": "sample-broken-tx-1",
+                        "author": "test",
+                        "description": "broken require test plugin",
+                        "artifact": plugin_rel_path,
+                        "sha256": broken_sha,
+                        "published_at": generated_at,
+                    },
+                },
+            },
+        },
+    }
+
+    plugin_file = environment.local_registry_dir / plugin_rel_path
+    plugin_file.parent.mkdir(parents=True, exist_ok=True)
+    plugin_file.write_bytes(broken_pm_bytes)
+
+    registry_json = environment.local_registry_dir / "registry.json"
+    registry_json.write_text(json.dumps(registry_data), encoding="utf-8")
+
+    # >>>>> SETUP REGISTRY >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="local-broken",
+            type="local",
+            path=environment.local_registry_path,
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+    # <<<<< SETUP REGISTRY <<<<<
+
+    # >>>>> INSTALL BROKEN PLUGIN >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace=broken_ns, registry=reg_id, version="1.0")
+    )
+    assert error is not None, "Expected error for broken plugin install"
+    assert error.status >= 400, f"Expected non-2xx status for broken plugin install, got {error.status}"
+    LOGGER.debug(f"Install broken plugin: status={error.status}, error={error.error!r}")
+    # <<<<< INSTALL BROKEN PLUGIN <<<<<
+
+    # >>>>> ROLLBACK ASSERTIONS >>>>>
+    target_pm = environment.plugin_managed_dir / "Metadata" / broken_pm_name
+    assert not target_pm.exists(), f"Plugin file should be absent after failed install: {target_pm}"
+
+    environment.redis_client.select(2)
+    redis_key = f"LRR_PLUGIN_{broken_ns.upper()}"
+    redis_hash = environment.redis_client.hgetall(redis_key)
+    assert not redis_hash, f"Expected empty Redis hash for {broken_ns} after failed install, got: {redis_hash}"
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list metadata plugins (status {error.status}): {error.error}"
+    namespaces = {p.namespace for p in response.plugins}
+    assert broken_ns not in namespaces, f"{broken_ns} must be absent after failed install, got: {namespaces}"
+    # <<<<< ROLLBACK ASSERTIONS <<<<<
+
+    response, error = await lrr_client.misc_api.delete_registry(reg_id)
+    assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
+
+    # expect_no_error_logs is intentionally omitted: the install attempt against
+    # a deliberately broken plugin causes LRR to log a server-side error
+    # describing the failed require/rollback. That log is expected, not a defect.
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry-tx") # transactional (tx)
+async def test_install_failure_preserves_other_plugins(
+    lrr_client: LRRClient,
+    environment: AbstractLRRDeploymentContext,
+):
+    """
+    Test that a failed managed install does not disturb a previously installed plugin.
+
+    1. Create local registry with two plugins: sample-good (loadable metadata) and sample-broken (BEGIN die).
+    2. Install sample-good; assert success and capture full state.
+    3. Install sample-broken; expect a non-2xx error response.
+    4. Assert rollback for sample-broken (file absent, Redis empty, not in plugin list).
+    5. Re-fetch sample-good state; assert it matches the captured snapshot byte-for-byte.
+    """
+    environment.setup(with_api_key=True)
+
+    good_ns = "sample-good-tx-1"
+    good_pm_name = "SampleGoodTx1.pm"
+    good_pm_body = (
+        "package LANraragi::Plugin::Managed::Metadata::SampleGoodTx1;\n"
+        "use strict;\n"
+        "use warnings;\n"
+        "no warnings 'uninitialized';\n"
+        "sub plugin_info {\n"
+        "    return (\n"
+        "        name      => 'sample-good-tx-1',\n"
+        "        type      => 'metadata',\n"
+        f"        namespace => '{good_ns}',\n"
+        "        author    => 'test',\n"
+        "        version   => '1.0',\n"
+        "    );\n"
+        "}\n"
+        "sub get_tags { return (); }\n"
+        "1;\n"
+    )
+
+    broken_ns = "sample-broken-tx-2"
+    broken_pm_name = "SampleBrokenTx2.pm"
+    broken_pm_body = (
+        "package LANraragi::Plugin::Managed::Metadata::SampleBrokenTx2;\n"
+        "use strict;\n"
+        "use warnings;\n"
+        "no warnings 'uninitialized';\n"
+        "BEGIN { die 'boom' }\n"
+        "sub plugin_info {\n"
+        "    return (\n"
+        "        name      => 'sample-broken-tx-2',\n"
+        "        type      => 'metadata',\n"
+        f"        namespace => '{broken_ns}',\n"
+        "        author    => 'test',\n"
+        "        version   => '1.0',\n"
+        "    );\n"
+        "}\n"
+        "sub get_tags { return (); }\n"
+        "1;\n"
+    )
+
+    good_pm_bytes = good_pm_body.encode("utf-8")
+    broken_pm_bytes = broken_pm_body.encode("utf-8")
+    good_sha = hashlib.sha256(good_pm_bytes).hexdigest()
+    broken_sha = hashlib.sha256(broken_pm_bytes).hexdigest()
+    generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    good_rel_path = f"artifacts/{good_ns}/1.0/{good_pm_name}"
+    broken_rel_path = f"artifacts/{broken_ns}/1.0/{broken_pm_name}"
+
+    good_file = environment.local_registry_dir / good_rel_path
+    good_file.parent.mkdir(parents=True, exist_ok=True)
+    good_file.write_bytes(good_pm_bytes)
+
+    broken_file = environment.local_registry_dir / broken_rel_path
+    broken_file.parent.mkdir(parents=True, exist_ok=True)
+    broken_file.write_bytes(broken_pm_bytes)
+
+    registry_data = {
+        "version": 1,
+        "generated_at": generated_at,
+        "plugins": {
+            good_ns: {
+                "namespace": good_ns,
+                "type": "metadata",
+                "channels": {"latest": "1.0"},
+                "versions": {
+                    "1.0": {
+                        "version": "1.0",
+                        "name": "sample-good-tx-1",
+                        "author": "test",
+                        "description": "good metadata test plugin",
+                        "artifact": good_rel_path,
+                        "sha256": good_sha,
+                        "published_at": generated_at,
+                    },
+                },
+            },
+            broken_ns: {
+                "namespace": broken_ns,
+                "type": "metadata",
+                "channels": {"latest": "1.0"},
+                "versions": {
+                    "1.0": {
+                        "version": "1.0",
+                        "name": "sample-broken-tx-2",
+                        "author": "test",
+                        "description": "broken metadata test plugin",
+                        "artifact": broken_rel_path,
+                        "sha256": broken_sha,
+                        "published_at": generated_at,
+                    },
+                },
+            },
+        },
+    }
+    registry_json = environment.local_registry_dir / "registry.json"
+    registry_json.write_text(json.dumps(registry_data), encoding="utf-8")
+
+    # >>>>> SETUP REGISTRY >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="local-two-plugins",
+            type="local",
+            path=environment.local_registry_path,
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+    # <<<<< SETUP REGISTRY <<<<<
+
+    # >>>>> INSTALL GOOD PLUGIN AND CAPTURE STATE >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace=good_ns, registry=reg_id, version="1.0")
+    )
+    assert not error, f"Failed to install good plugin (status {error.status}): {error.error}"
+    assert response.namespace == good_ns
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list metadata plugins (status {error.status}): {error.error}"
+    good_plugin_before = next((p for p in response.plugins if p.namespace == good_ns), None)
+    assert good_plugin_before is not None, f"{good_ns} missing from plugin list after install"
+
+    environment.redis_client.select(2)
+    good_redis_key = f"LRR_PLUGIN_{good_ns.upper()}"
+    good_redis_before = environment.redis_client.hgetall(good_redis_key)
+    assert good_redis_before, f"Expected non-empty Redis hash for {good_ns} after install"
+    LOGGER.debug(f"Captured good plugin Redis state: {good_redis_before}")
+    # <<<<< INSTALL GOOD PLUGIN AND CAPTURE STATE <<<<<
+
+    # >>>>> INSTALL BROKEN PLUGIN >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace=broken_ns, registry=reg_id, version="1.0")
+    )
+    assert error is not None, "Expected error for broken plugin install"
+    assert error.status >= 400, f"Expected non-2xx status for broken plugin install, got {error.status}"
+    LOGGER.debug(f"Install broken plugin: status={error.status}, error={error.error!r}")
+    # <<<<< INSTALL BROKEN PLUGIN <<<<<
+
+    # >>>>> ROLLBACK ASSERTIONS FOR BROKEN >>>>>
+    broken_target = environment.plugin_managed_dir / "Metadata" / broken_pm_name
+    assert not broken_target.exists(), f"Broken plugin file should be absent after failed install: {broken_target}"
+
+    environment.redis_client.select(2)
+    broken_redis_key = f"LRR_PLUGIN_{broken_ns.upper()}"
+    broken_redis_hash = environment.redis_client.hgetall(broken_redis_key)
+    assert not broken_redis_hash, (
+        f"Expected empty Redis hash for {broken_ns} after failed install, got: {broken_redis_hash}"
+    )
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list metadata plugins (status {error.status}): {error.error}"
+    namespaces = {p.namespace for p in response.plugins}
+    assert broken_ns not in namespaces, f"{broken_ns} must be absent after failed install, got: {namespaces}"
+    # <<<<< ROLLBACK ASSERTIONS FOR BROKEN <<<<<
+
+    # >>>>> GOOD PLUGIN STATE UNCHANGED >>>>>
+    good_plugin_after = next((p for p in response.plugins if p.namespace == good_ns), None)
+    assert good_plugin_after is not None, f"{good_ns} must still be listed after broken install attempt"
+    assert good_plugin_after == good_plugin_before, (
+        f"Good plugin API state changed after broken install attempt.\n"
+        f"Before: {good_plugin_before}\nAfter: {good_plugin_after}"
+    )
+
+    environment.redis_client.select(2)
+    good_redis_after = environment.redis_client.hgetall(good_redis_key)
+    assert good_redis_after == good_redis_before, (
+        f"Good plugin Redis hash changed after broken install attempt.\n"
+        f"Before: {good_redis_before}\nAfter: {good_redis_after}"
+    )
+    # <<<<< GOOD PLUGIN STATE UNCHANGED <<<<<
+
+    response, error = await lrr_client.misc_api.uninstall_plugin(good_ns)
+    assert not error, f"Failed to uninstall good plugin (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.delete_registry(reg_id)
+    assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
+
+    # expect_no_error_logs is intentionally omitted: the broken-plugin install
+    # attempt causes LRR to log a server-side error describing the failed
+    # require/rollback. That log is expected, not a defect.
 
 
 @pytest.mark.asyncio
@@ -799,6 +1186,119 @@ async def test_sideload_after_managed_uninstall_no_duplicate_rows(
     # <<<<< RAW HTML CHECK <<<<<
 
     expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+async def test_sideload_failure_rolls_back(
+    lrr_client: LRRClient,
+    environment: AbstractLRRDeploymentContext,
+):
+    """
+    Test that sideload rolls back on require failure and namespace mismatch.
+
+    1. Sideload a plugin whose body has BEGIN { die }; expect success=0.
+       Assert file absent on container, Redis hash empty, namespace absent from plugin list.
+    2. Sideload a plugin where file text declares namespace A but plugin_info returns B.
+       Assert same rollback shape as subsection 1.
+    """
+    environment.setup(with_api_key=True)
+
+    # >>>>> BROKEN REQUIRE >>>>>
+    broken_ns = "test-sideload-broken-1"
+    broken_pm_name = "TestSideloadBroken1.pm"
+    broken_pm_body = (
+        "package LANraragi::Plugin::Metadata::TestSideloadBroken1;\n"
+        "use strict;\n"
+        "use warnings;\n"
+        "no warnings 'uninitialized';\n"
+        "BEGIN { die 'boom' }\n"
+        # namespace must be present for the pre-lock regex to extract it
+        f"sub plugin_info {{ return ( name => 'test-broken', type => 'metadata', namespace => '{broken_ns}', version => '1.0' ); }}\n"
+        "1;\n"
+    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pm_path = Path(tmpdir) / broken_pm_name
+        pm_path.write_text(broken_pm_body, encoding="utf-8")
+        status, content = await sideload_plugin(lrr_client, pm_path, DEFAULT_LRR_PASSWORD)
+    assert status == 200, f"Expected HTTP 200 for failed sideload, got {status}"
+    assert '"success":0' in content, f"Expected success=0 for broken sideload, got: {content}"
+
+    broken_sideload_file = environment.plugin_sideloaded_dir / broken_pm_name
+    assert not broken_sideload_file.exists(), (
+        f"File should be absent after failed sideload: {broken_sideload_file}"
+    )
+    environment.redis_client.select(2)
+    broken_redis_key = f"LRR_PLUGIN_{broken_ns.upper()}"
+    broken_redis_hash = environment.redis_client.hgetall(broken_redis_key)
+    assert not broken_redis_hash, (
+        f"Expected empty Redis hash for {broken_ns} after failed sideload, got: {broken_redis_hash}"
+    )
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list metadata plugins (status {error.status}): {error.error}"
+    namespaces = {p.namespace for p in response.plugins}
+    assert broken_ns not in namespaces, f"{broken_ns} must be absent after failed sideload, got: {namespaces}"
+    # <<<<< BROKEN REQUIRE <<<<<
+
+    # >>>>> NAMESPACE MISMATCH >>>>>
+    # file text declares mismatch-decl-ns but plugin_info returns the actual value below
+    declared_ns = "test-sideload-mismatch-decl-1"
+    actual_ns = "test-sideload-mismatch-actual-1"
+    mismatch_pm_name = "TestSideloadMismatch1.pm"
+    mismatch_pm_body = (
+        "package LANraragi::Plugin::Metadata::TestSideloadMismatch1;\n"
+        "use strict;\n"
+        "use warnings;\n"
+        "no warnings 'uninitialized';\n"
+        # The pre-lock regex (Controller/Plugins.pm) is unanchored and matches
+        # the first 'namespace => "..."' literal in the file text. This comment
+        # makes the regex extract declared_ns; plugin_info() then returns
+        # actual_ns, triggering the post-load coherence check.
+        f"# namespace => '{declared_ns}'\n"
+        "sub plugin_info {\n"
+        "    return (\n"
+        "        name      => 'test-mismatch',\n"
+        "        type      => 'metadata',\n"
+        f"        namespace => '{actual_ns}',\n"
+        "        version   => '1.0',\n"
+        "    );\n"
+        "}\n"
+        "sub get_tags { return (); }\n"
+        "1;\n"
+    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pm_path = Path(tmpdir) / mismatch_pm_name
+        pm_path.write_text(mismatch_pm_body, encoding="utf-8")
+        status, content = await sideload_plugin(lrr_client, pm_path, DEFAULT_LRR_PASSWORD)
+    assert status == 200, f"Expected HTTP 200 for failed sideload, got {status}"
+    assert '"success":0' in content, f"Expected success=0 for mismatch sideload, got: {content}"
+
+    mismatch_sideload_file = environment.plugin_sideloaded_dir / mismatch_pm_name
+    assert not mismatch_sideload_file.exists(), (
+        f"File should be absent after namespace-mismatch sideload: {mismatch_sideload_file}"
+    )
+    environment.redis_client.select(2)
+    for ns_check in (declared_ns, actual_ns):
+        ns_hash = environment.redis_client.hgetall(f"LRR_PLUGIN_{ns_check.upper()}")
+        assert not ns_hash, (
+            f"Expected empty Redis hash for {ns_check} after mismatch sideload, got: {ns_hash}"
+        )
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list metadata plugins (status {error.status}): {error.error}"
+    namespaces = {p.namespace for p in response.plugins}
+    for ns_check in (declared_ns, actual_ns):
+        assert ns_check not in namespaces, (
+            f"{ns_check} must be absent after namespace-mismatch sideload, got: {namespaces}"
+        )
+    # <<<<< NAMESPACE MISMATCH <<<<<
+
+    # expect_no_error_logs is intentionally omitted: the sideload failure paths
+    # emit LRR-side error logs by design (broken require, namespace mismatch).
+    # Those logs are the expected diagnostic output, not a defect to flag.
 
 
 @pytest.mark.asyncio
