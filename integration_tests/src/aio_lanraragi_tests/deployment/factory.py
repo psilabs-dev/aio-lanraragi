@@ -9,6 +9,9 @@ from aio_lanraragi_tests.deployment.docker import (
     DockerLRRCacheBackend,
     DockerLRRDeploymentContext,
 )
+from aio_lanraragi_tests.deployment.docker_postgres import (
+    DockerPostgresLRRDeploymentContext,
+)
 from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
 
@@ -53,12 +56,28 @@ def generate_deployment(
                 raise DeploymentException("--dockerfile cannot be combined with --image.")
             docker_client = docker.from_env()
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
-            environment = DockerLRRDeploymentContext(
-                build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
-                build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
-                global_run_id=global_run_id, is_allow_uploads=True,
-                logger=logger,
-                cache_backend=DockerLRRCacheBackend(cache_backend),
-            )
+            use_postgres: bool = request.config.getoption("--postgres")
+            if use_postgres:
+                postgres_jit: bool = request.config.getoption("postgres_jit")
+                postgres_shared_buffers_mb: int = request.config.getoption("--postgres-shared-buffers")
+                postgres_work_mem_mb: int = request.config.getoption("--postgres-work-mem")
+                environment = DockerPostgresLRRDeploymentContext(
+                    build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
+                    build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
+                    global_run_id=global_run_id, is_allow_uploads=True,
+                    logger=logger,
+                    cache_backend=DockerLRRCacheBackend(cache_backend),
+                    postgres_jit=postgres_jit,
+                    postgres_shared_buffers_mb=postgres_shared_buffers_mb,
+                    postgres_work_mem_mb=postgres_work_mem_mb,
+                )
+            else:
+                environment = DockerLRRDeploymentContext(
+                    build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
+                    build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
+                    global_run_id=global_run_id, is_allow_uploads=True,
+                    logger=logger,
+                    cache_backend=DockerLRRCacheBackend(cache_backend),
+                )
 
     return environment
