@@ -104,6 +104,7 @@ jobs:
             --server-logs "$GITHUB_WORKSPACE/server-logs" \
             --playwright \
             --no-rate-limit \
+            --dev stamps \
             --npseed 42
         env:
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -264,6 +265,7 @@ jobs:
           --server-logs "$env:GITHUB_WORKSPACE\server-logs" `
           --playwright `
           --no-rate-limit `
+          --dev stamps `
           --npseed 42
 
       - name: Upload server logs

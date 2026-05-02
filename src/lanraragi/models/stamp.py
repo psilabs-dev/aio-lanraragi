@@ -9,7 +9,6 @@ class StampRecord(BaseModel):
     content: str = Field(...)
 
 class GetStampRequest(LanraragiRequest):
-    arcid: str = Field(..., min_length=40, max_length=40)
     stamp_id: str = Field(...)
 
 class GetStampResponse(LanraragiResponse):
@@ -38,7 +37,6 @@ class AddStampResponse(LanraragiResponse):
     stamp_id: str = Field(...)
 
 class UpdateStampRequest(LanraragiRequest):
-    arcid: str = Field(..., min_length=40, max_length=40)
     stamp_id: str = Field(...)
     content: str | None = Field(None)
     position: str | None = Field(None)
@@ -47,7 +45,6 @@ class UpdateStampResponse(LanraragiResponse):
     success_message: str | None = Field(None)
 
 class DeleteStampRequest(LanraragiRequest):
-    arcid: str = Field(..., min_length=40, max_length=40)
     stamp_id: str = Field(...)
 
 class DeleteStampResponse(LanraragiResponse):
