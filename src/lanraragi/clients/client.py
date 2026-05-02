@@ -8,6 +8,7 @@ from lanraragi.clients.api_clients.minion import _MinionApiClient
 from lanraragi.clients.api_clients.misc import _MiscApiClient
 from lanraragi.clients.api_clients.search import _SearchApiClient
 from lanraragi.clients.api_clients.shinobu import _ShinobuApiClient
+from lanraragi.clients.api_clients.stamp import _StampApiClient
 from lanraragi.clients.api_clients.tankoubon import _TankoubonApiClient
 from lanraragi.clients.api_context import ApiContextManager
 
@@ -39,6 +40,7 @@ class LRRClient(ApiContextManager):
     - misc_api
     - shinobu_api
     - search_api
+    - stamp_api
     - tankoubon_api
     """
 
@@ -122,6 +124,15 @@ class LRRClient(ApiContextManager):
         self._search_api = value
 
     @property
+    def stamp_api(self) -> _StampApiClient:
+        # PR: https://github.com/Difegue/LANraragi/pull/1493
+        return self._stamp_api
+    @stamp_api.setter
+    def stamp_api(self, value: _StampApiClient):
+        # PR: https://github.com/Difegue/LANraragi/pull/1493
+        self._stamp_api = value
+
+    @property
     def tankoubon_api(self) -> _TankoubonApiClient:
         """
         https://sugoi.gitbook.io/lanraragi/api-documentation/tankoubon-api
@@ -141,6 +152,7 @@ class LRRClient(ApiContextManager):
         self._misc_api = _MiscApiClient(self)
         self._shinobu_api = _ShinobuApiClient(self)
         self._search_api = _SearchApiClient(self)
+        self._stamp_api = _StampApiClient(self)
         self._tankoubon_api = _TankoubonApiClient(self)
 
 __all__ = [
