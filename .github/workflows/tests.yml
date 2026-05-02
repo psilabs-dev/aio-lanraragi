@@ -23,11 +23,11 @@ on:
       lrr_ref:
         description: 'LANraragi ref (branch, tag, or commit SHA)'
         required: true
-        default: 'dev'
+        default: 'refs/pull/1493/head'
 
 env:
   LRR_REPOSITORY: ${{ github.event.inputs.lrr_repository || 'difegue/LANraragi' }}
-  LRR_REF: ${{ github.event.inputs.lrr_ref || 'dev' }}
+  LRR_REF: ${{ github.event.inputs.lrr_ref || 'refs/pull/1493/head' }}
 
 jobs:
 
