@@ -413,23 +413,3 @@ async def trigger_stat_rebuild(lrr_client: LRRClient, timeout_seconds: int = 60)
         elif state == "failed":
             raise AssertionError("build_stat_hashes job failed")
         await asyncio.sleep(0.5)
-
-async def sideload_plugin(client: LRRClient, plugin_path: Path, password: str) -> tuple[int, str]:
-    """Upload a plugin file via the browser-style login + multipart upload flow."""
-    login_url = client.misc_api.api_context.build_url("/login")
-    upload_url = client.misc_api.api_context.build_url("/config/plugins/upload")
-    async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as session:
-        login_form = aiohttp.FormData(quote_fields=False)
-        login_form.add_field("password", password)
-        login_form.add_field("redirect", "index")
-        async with session.post(login_url, data=login_form) as response:
-            content = await response.text()
-            assert response.status == 200, f"Expected login redirect target to resolve with 200, got {response.status}"
-            assert "LANraragi" in content, f"Expected login flow to land on app page, got: {content}"
-
-        with plugin_path.open("rb") as file_handle:
-            form_data = aiohttp.FormData(quote_fields=False)
-            form_data.add_field("file", file_handle, filename=plugin_path.name)
-            async with session.post(upload_url, data=form_data) as response:
-                content = await response.text()
-                return response.status, content
