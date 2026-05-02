@@ -4,11 +4,13 @@ on:
   pull_request:
     branches: 
       - main
+      - dev
       - 'dev-**/main'    # Run tests on main dev branches
       - 'devt-**/main'   # Run tests on main test branches
   push:
     branches: 
       - main
+      - dev
   schedule:
     - cron: '0 0 * * 4' # Run tests on main branch every Thursday at 00:00
   workflow_call:
