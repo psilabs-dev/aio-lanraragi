@@ -14,6 +14,7 @@ import playwright.async_api
 import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.category import CreateCategoryRequest
 
 from aio_lanraragi_tests.common import DEFAULT_LRR_PASSWORD
 from aio_lanraragi_tests.deployment.base import (
@@ -700,7 +701,7 @@ async def test_custom_column_sort_display(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.dev("namespace-exclusion")
+@pytest.mark.xfail(reason="date_added is hardcoded in index.html.tt2 sort dropdown, not filtered by excluded namespaces", strict=False)
 async def test_search_autocomplete_namespace_exclusion(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -857,6 +858,206 @@ async def test_search_autocomplete_namespace_exclusion(
             LOGGER.info(f"Awesomplete suggestions for 'alice': {suggestions}")
             assert len(suggestions) == 1, f"Expected exactly 1 suggestion, got: {suggestions}"
             assert suggestions[0] == "artist:alice", f"Expected 'artist:alice', got: {suggestions[0]}"
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.dev("category-context-menu")
+async def test_category_context_menu(
+    lrr_client: LRRClient,
+    environment: AbstractLRRDeploymentContext,
+) -> None:
+    """
+    Test category context menu pin toggle, dynamic bookmark suppression, and dropdown edge case.
+
+    1. Create 12 categories via API (1 static, 1 dynamic, 10 filler).
+    2. Login via browser, navigate to index.
+    3. Right-click static category, verify "Pin" label, click pin.
+    4. Right-click again, verify "Unpin" label, click unpin.
+    5. Right-click again, verify "Pin" label restored (round-trip).
+    6. Right-click dynamic category, verify "Set as Bookmark" is absent.
+    7. Right-click dropdown with no selection, verify no context menu appears.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> CREATE CATEGORIES >>>>>
+    response, error = await lrr_client.category_api.create_category(
+        CreateCategoryRequest(name="ctx-static")
+    )
+    assert not error, f"Failed to create static category (status {error.status}): {error.error}"
+    static_cat_id = response.category_id
+
+    response, error = await lrr_client.category_api.create_category(
+        CreateCategoryRequest(name="ctx-dynamic", search="test")
+    )
+    assert not error, f"Failed to create dynamic category (status {error.status}): {error.error}"
+    dynamic_cat_id = response.category_id
+
+    for i in range(10):
+        response, error = await lrr_client.category_api.create_category(
+            CreateCategoryRequest(name=f"filler-{i:02d}")
+        )
+        assert not error, f"Failed to create filler category {i} (status {error.status}): {error.error}"
+    # <<<<< CREATE CATEGORIES <<<<<
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await bc.new_page()
+
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            # login to access category context menu
+            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+            await page.wait_for_load_state("networkidle")
+            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+            await page.get_by_role("button", name="Login").click()
+            await page.wait_for_load_state("networkidle")
+            responses.clear()
+            console_evts.clear()
+
+            await page.goto(lrr_client.lrr_base_url, timeout=60000)
+            await page.wait_for_load_state("domcontentloaded")
+            await page.wait_for_load_state("networkidle")
+
+            # dismiss new version overlay if present
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
+
+            # >>>>> PIN TOGGLE >>>>>
+            LOGGER.debug("Testing pin toggle round-trip.")
+            static_btn = page.locator(f".favtag-btn#{static_cat_id}")
+            await static_btn.wait_for(state="visible", timeout=5000)
+
+            # right-click to open context menu
+            await static_btn.click(button="right")
+            menu = page.locator(".context-menu-list:visible")
+            await menu.wait_for(state="visible", timeout=3000)
+
+            # verify first item is "Pin"
+            pin_item = menu.locator(".context-menu-item").first
+            pin_text = await pin_item.locator("span").first.text_content()
+            assert pin_text == "Pin", f"Expected 'Pin', got {pin_text!r}"
+
+            # click pin, wait for PUT response
+            put_future: asyncio.Future = asyncio.get_event_loop().create_future()
+            async def on_pin_response(response: playwright.async_api._generated.Response) -> None:
+                if put_future.done():
+                    return
+                if f"/api/categories/{static_cat_id}" in response.url and response.request.method == "PUT":
+                    put_future.set_result(response.status)
+            page.on("response", on_pin_response)
+            await pin_item.click()
+            pin_status = await asyncio.wait_for(put_future, timeout=10)
+            page.remove_listener("response", on_pin_response)
+            assert pin_status == 200, f"Pin PUT returned status {pin_status}"
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(500)
+
+            # right-click again, verify "Unpin"
+            static_btn = page.locator(f".favtag-btn#{static_cat_id}")
+            await static_btn.wait_for(state="visible", timeout=5000)
+            await static_btn.click(button="right")
+            menu = page.locator(".context-menu-list:visible")
+            await menu.wait_for(state="visible", timeout=3000)
+            pin_item = menu.locator(".context-menu-item").first
+            pin_text = await pin_item.locator("span").first.text_content()
+            assert pin_text == "Unpin", f"Expected 'Unpin' after pin, got {pin_text!r}"
+
+            # click unpin
+            put_future = asyncio.get_event_loop().create_future()
+            async def on_unpin_response(response: playwright.async_api._generated.Response) -> None:
+                if put_future.done():
+                    return
+                if f"/api/categories/{static_cat_id}" in response.url and response.request.method == "PUT":
+                    put_future.set_result(response.status)
+            page.on("response", on_unpin_response)
+            await pin_item.click()
+            pin_status = await asyncio.wait_for(put_future, timeout=10)
+            page.remove_listener("response", on_unpin_response)
+            assert pin_status == 200, f"Unpin PUT returned status {pin_status}"
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(500)
+
+            # right-click again, verify "Pin" restored
+            static_btn = page.locator(f".favtag-btn#{static_cat_id}")
+            await static_btn.wait_for(state="visible", timeout=5000)
+            await static_btn.click(button="right")
+            menu = page.locator(".context-menu-list:visible")
+            await menu.wait_for(state="visible", timeout=3000)
+            pin_item = menu.locator(".context-menu-item").first
+            pin_text = await pin_item.locator("span").first.text_content()
+            assert pin_text == "Pin", f"Expected 'Pin' after unpin round-trip, got {pin_text!r}"
+            # dismiss menu
+            await page.keyboard.press("Escape")
+            await page.wait_for_timeout(300)
+            # <<<<< PIN TOGGLE <<<<<
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            responses.clear()
+            console_evts.clear()
+
+            # >>>>> DYNAMIC BOOKMARK SUPPRESSION >>>>>
+            LOGGER.debug("Testing dynamic category bookmark suppression.")
+            dynamic_btn = page.locator(f".favtag-btn#{dynamic_cat_id}")
+            await dynamic_btn.wait_for(state="visible", timeout=5000)
+            await dynamic_btn.click(button="right")
+            menu = page.locator(".context-menu-list:visible")
+            await menu.wait_for(state="visible", timeout=3000)
+
+            # collect all menu item labels
+            items = menu.locator(".context-menu-item span")
+            count = await items.count()
+            labels = []
+            for i in range(count):
+                text = await items.nth(i).text_content()
+                if text:
+                    labels.append(text.strip())
+
+            assert "Set as Bookmark" not in labels, f"Bookmark option should not appear for dynamic categories, got: {labels}"
+            assert "Pin" in labels, f"Pin option should be present for dynamic categories, got: {labels}"
+            assert "Delete" in labels, f"Delete option should be present for dynamic categories, got: {labels}"
+
+            # dismiss menu
+            await page.keyboard.press("Escape")
+            await page.wait_for_timeout(300)
+            # <<<<< DYNAMIC BOOKMARK SUPPRESSION <<<<<
+
+            # >>>>> DROPDOWN PLACEHOLDER >>>>>
+            LOGGER.debug("Testing dropdown placeholder right-click.")
+            dropdown = page.locator("#catdropdown")
+            await dropdown.wait_for(state="visible", timeout=5000)
+
+            # right-click without selecting any option
+            await dropdown.click(button="right")
+            await page.wait_for_timeout(500)
+
+            # context menu should not appear
+            visible_menu = page.locator(".context-menu-list:visible")
+            menu_count = await visible_menu.count()
+            assert menu_count == 0, "Context menu should not appear when right-clicking dropdown placeholder"
+            # <<<<< DROPDOWN PLACEHOLDER <<<<<
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)

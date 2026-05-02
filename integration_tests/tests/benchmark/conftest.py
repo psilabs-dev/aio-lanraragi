@@ -26,18 +26,18 @@ def benchmark_collector(request: pytest.FixtureRequest) -> Generator[BenchmarkCo
         collector.write(Path(output_path))
 
 @pytest.fixture
-def resource_prefix() -> Generator[str, None, None]:
+def resource_prefix(request: pytest.FixtureRequest) -> Generator[str, None, None]:
     """
     Reserved resource prefix for pytest benchmarking.
     """
-    yield "bench_"
+    yield request.config.getoption("--resource-prefix") + "bench_"
 
 @pytest.fixture
-def port_offset() -> Generator[int, None, None]:
+def port_offset(request: pytest.FixtureRequest) -> Generator[int, None, None]:
     """
     Reserved port offset for pytest benchmarking.
     """
-    yield 20
+    yield request.config.getoption("--port-offset") + 20
 
 @pytest.fixture
 def environment(request: pytest.FixtureRequest, port_offset: int, resource_prefix: str):

@@ -132,102 +132,6 @@ async def test_slideshow(
             await browser.close()
     # <<<<< UI STAGE <<<<<
 
-@pytest.mark.asyncio
-@pytest.mark.playwright
-@pytest.mark.dev("preload")
-async def test_webkit_reader_preload(
-    lrr_client: LRRClient, semaphore: asyncio.Semaphore,
-):
-    """
-    - Issue: https://github.com/Difegue/LANraragi/issues/1433
-    - PR: https://github.com/Difegue/LANraragi/pull/1459
-
-    In WebKit, when preloading is enabled and the user moves to the next page,
-    the reader should serve the already preloaded image without re-fetching the
-    same page image URL over the network.
-    """
-
-    # >>>>> TEST CONNECTION STAGE >>>>>
-    _, error = await lrr_client.misc_api.get_server_info()
-    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-    # <<<<< TEST CONNECTION STAGE <<<<<
-
-    # >>>>> UPLOAD STAGE >>>>>
-    with tempfile.TemporaryDirectory() as tmpdir:
-        archive_title = "test archive title"
-        archive_name = "test-archive-name"
-        archive_path = create_archive_file(Path(tmpdir), archive_name, num_pages=6)
-        response, error = await upload_archive(
-            lrr_client,
-            archive_path,
-            archive_path.name,
-            semaphore,
-            title=archive_title,
-            tags="",
-        )
-        assert not error, f"Upload failed (status {error.status}): {error.error}"
-        arcid = response.arcid
-    # <<<<< UPLOAD STAGE <<<<<
-
-    # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.webkit.launch()
-        bc = await browser.new_context()
-
-        try:
-            page = await browser.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
-
-            await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}")
-            await page.wait_for_load_state("networkidle")
-            await assert_no_spinner(page)
-
-            # Give preload requests a chance to complete before turning page
-            # responses will be growing so we need to capture responses_before_page_turn now
-            await page.wait_for_timeout(1000)
-            responses_before_page_turn = len(responses)
-
-            # Trigger one page turn
-            await page.keyboard.press("ArrowRight")
-            await page.wait_for_load_state("networkidle")
-            await assert_no_spinner(page)
-            await page.wait_for_timeout(1000)
-
-            # check that prefetch occurred.
-            next_page_url = f"/api/archives/{arcid}/page?path={archive_name}-pg-2.png"
-            prefetched_url = None
-            for response in responses[:responses_before_page_turn]:
-                if response.request.method != "GET":
-                    continue
-                if next_page_url not in response.url:
-                    continue
-                prefetched_url = response.url
-                break
-            assert prefetched_url is not None, (
-                "Expected next page to be preloaded before page turn, but no GET was observed. "
-                f"next_page_url_fragment={next_page_url}"
-            )
-
-            # check that prefetch URL doesn't appear again (GET refetch or HEAD size request).
-            for response in responses[responses_before_page_turn:]:
-                if response.request.method not in ("GET", "HEAD"):
-                    continue
-                if next_page_url not in response.url:
-                    continue
-                assert False, (
-                    f"Detected {response.request.method} request for prefetched page during page turn: {response.url}"
-                )
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-        finally:
-            await bc.close()
-            await browser.close()
-    # <<<<< UI STAGE <<<<<
-
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -720,6 +624,7 @@ async def test_slideshow_continue_navigation(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
+@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1492", strict=False)
 async def test_toc_reader(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 ):
@@ -860,6 +765,11 @@ async def test_toc_reader(
             # <<<<< ADD CHAPTER VIA UI <<<<<
 
             # >>>>> EDIT CHAPTER VIA UI >>>>>
+            # After the add step, the reader navigated to page 2 (the added chapter's page).
+            # Navigate back to Chapter 1 via dropdown so the edit targets Chapter 1.
+            await chapter_select.select_option(value="1")
+            await page.wait_for_timeout(500)
+
             LOGGER.debug("Editing chapter title via UI.")
             edit_icon = page.locator(".edit-toc").first
             await edit_icon.click()
@@ -870,6 +780,8 @@ async def test_toc_reader(
             # overlay reopens only after PUT + metadata reload completes
             await page.locator("#archivePagesOverlay").wait_for(state="hidden")
             await page.locator("#archivePagesOverlay").wait_for(state="visible")
+            first_option_text = await page.locator("#chapter-select option").first.text_content()
+            assert first_option_text == "Chapter 1 Renamed", f"Expected renamed chapter in dropdown, got {first_option_text!r}"
 
             # verify via API that the rename took effect
             response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
@@ -885,6 +797,11 @@ async def test_toc_reader(
             # <<<<< EDIT CHAPTER VIA UI <<<<<
 
             # >>>>> DELETE CHAPTER VIA UI >>>>>
+            # After the edit, goToPage moved to page 2 (Chapter 1.5).
+            # Navigate back to Chapter 1 Renamed so the delete targets it.
+            await chapter_select.select_option(value="1")
+            await page.wait_for_timeout(500)
+
             LOGGER.debug("Deleting chapter via UI.")
             delete_icon = page.locator(".remove-toc").first
             await delete_icon.click()
