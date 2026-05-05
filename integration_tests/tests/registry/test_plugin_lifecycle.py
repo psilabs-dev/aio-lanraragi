@@ -69,7 +69,7 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
 
     # >>>>> INSTALL PLUGIN >>>>>
     refresh_response = response
-    version_key = refresh_response.index["plugins"]["sample-downloader"]["channels"]["latest"]
+    version_key = max(refresh_response.index["plugins"]["sample-downloader"]["versions"].keys())
     response, error = await lrr_client.misc_api.install_plugin(
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=version_key)
     )
@@ -144,14 +144,14 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
 @pytest.mark.ratelimit
-async def test_plugin_install_provenance_fields(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+async def test_plugin_install_provenance_roundtrip(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
-    Test provenance fields for channel-tracked and explicit-version installs.
+    Test that installed_registry, installed_version, and installed_sha256 survive restart and explicit reinstall.
 
-    1. Install sample-downloader with installed_channel="latest".
-    2. Assert install response and plugin list include required sha256/channel provenance.
-    3. Reinstall explicitly after uninstalling.
-    4. Assert installed_channel is cleared while sha256 remains.
+    1. Install sample-downloader, capture provenance from install response.
+    2. Verify provenance fields in plugin list.
+    3. Restart LRR, verify provenance fields survive.
+    4. Uninstall and reinstall explicitly, verify provenance fields are preserved.
     """
     environment.setup(with_api_key=True)
 
@@ -170,26 +170,19 @@ async def test_plugin_install_provenance_fields(lrr_client: LRRClient, environme
     refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
 
-    version_key = refresh_response.index["plugins"]["sample-downloader"]["channels"]["latest"]
+    version_key = max(refresh_response.index["plugins"]["sample-downloader"]["versions"].keys())
     version_record = refresh_response.index["plugins"]["sample-downloader"]["versions"][version_key]
     expected_sha = version_record["sha256"]
 
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(
-            namespace="sample-downloader",
-            registry=reg_id,
-            version=version_key,
-            installed_channel="latest",
-        )
+        InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=version_key)
     )
-    assert not error, f"Failed to install channel-tracked plugin (status {error.status}): {error.error}"
+    assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
     assert response.installed_registry == reg_id, f"Expected provenance {reg_id}, got: {response.installed_registry}"
     assert response.installed_sha256 == expected_sha, (
         f"Expected install sha256 {expected_sha}, got {response.installed_sha256}"
     )
-    assert response.installed_channel == "latest", (
-        f"Expected install channel 'latest', got {response.installed_channel!r}"
-    )
+
     response, error = await lrr_client.misc_api.get_available_plugins(
         GetAvailablePluginsRequest(type="download")
     )
@@ -203,9 +196,7 @@ async def test_plugin_install_provenance_fields(lrr_client: LRRClient, environme
     assert plugin.installed_sha256 == expected_sha, (
         f"Expected installed_sha256 {expected_sha}, got {plugin.installed_sha256!r}"
     )
-    assert plugin.installed_channel == "latest", (
-        f"Expected installed_channel 'latest', got {plugin.installed_channel!r}"
-    )
+
     environment.restart()
 
     response, error = await lrr_client.misc_api.get_available_plugins(
@@ -214,36 +205,31 @@ async def test_plugin_install_provenance_fields(lrr_client: LRRClient, environme
     assert not error, f"Failed to list plugins after restart (status {error.status}): {error.error}"
     plugin = next((p for p in response.plugins if p.namespace == "sample-downloader"), None)
     assert plugin is not None, "sample-downloader missing from plugin list after restart"
-    assert plugin.installed_channel == "latest", (
-        f"Expected installed_channel 'latest' after restart, got {plugin.installed_channel!r}"
+    assert plugin.installed_registry == reg_id, (
+        f"Expected provenance {reg_id} after restart, got {plugin.installed_registry!r}"
+    )
+    assert plugin.installed_version == version_key, (
+        f"Expected installed_version {version_key!r} after restart, got {plugin.installed_version!r}"
     )
     assert plugin.installed_sha256 == expected_sha, (
         f"Expected installed_sha256 {expected_sha} after restart, got {plugin.installed_sha256!r}"
     )
+
     response, error = await lrr_client.misc_api.uninstall_plugin("sample-downloader")
     assert not error, f"Failed to uninstall plugin (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.install_plugin(
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=version_key)
     )
-    assert not error, f"Failed to install explicit-version plugin (status {error.status}): {error.error}"
-    assert response.installed_channel is None, (
-        f"Expected no installed_channel for explicit install, got {response.installed_channel!r}"
+    assert not error, f"Failed to reinstall plugin (status {error.status}): {error.error}"
+    assert response.installed_registry == reg_id, (
+        f"Expected provenance {reg_id} after reinstall, got {response.installed_registry!r}"
     )
     assert response.installed_sha256 == expected_sha, (
-        f"Expected install sha256 {expected_sha}, got {response.installed_sha256}"
+        f"Expected installed_sha256 {expected_sha} after reinstall, got {response.installed_sha256}"
     )
-    response, error = await lrr_client.misc_api.get_available_plugins(
-        GetAvailablePluginsRequest(type="download")
-    )
-    assert not error, f"Failed to list plugins after explicit install (status {error.status}): {error.error}"
-    plugin = next((p for p in response.plugins if p.namespace == "sample-downloader"), None)
-    assert plugin is not None, "sample-downloader missing after explicit reinstall"
-    assert plugin.installed_channel is None, (
-        f"Expected installed_channel to clear after explicit install, got {plugin.installed_channel!r}"
-    )
-    assert plugin.installed_sha256 == expected_sha, (
-        f"Expected installed_sha256 {expected_sha}, got {plugin.installed_sha256!r}"
+    assert response.version == version_key, (
+        f"Expected version {version_key!r} after reinstall, got {response.version!r}"
     )
 
     response, error = await lrr_client.misc_api.delete_registry(reg_id)
@@ -351,7 +337,7 @@ async def test_plugin_install_failed_require_rolls_back(
     broken_pm_bytes = broken_pm_body.encode("utf-8")
     broken_sha = hashlib.sha256(broken_pm_bytes).hexdigest()
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    plugin_rel_path = f"artifacts/{broken_ns}/1.0/{broken_pm_name}"
+    plugin_rel_path = f"artifacts/{broken_ns}/1.0.0/{broken_pm_name}"
 
     registry_data = {
         "version": 1,
@@ -360,10 +346,9 @@ async def test_plugin_install_failed_require_rolls_back(
             broken_ns: {
                 "namespace": broken_ns,
                 "type": "metadata",
-                "channels": {"latest": "1.0"},
                 "versions": {
-                    "1.0": {
-                        "version": "1.0",
+                    "1.0.0": {
+                        "version": "1.0.0",
                         "name": "sample-broken-tx-1",
                         "author": "test",
                         "description": "broken require test plugin",
@@ -400,7 +385,7 @@ async def test_plugin_install_failed_require_rolls_back(
 
     # >>>>> INSTALL BROKEN PLUGIN >>>>>
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace=broken_ns, registry=reg_id, version="1.0")
+        InstallPluginRequest(namespace=broken_ns, registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected error for broken plugin install"
     assert error.status >= 400, f"Expected non-2xx status for broken plugin install, got {error.status}"
@@ -495,8 +480,8 @@ async def test_install_failure_preserves_other_plugins(
     good_sha = hashlib.sha256(good_pm_bytes).hexdigest()
     broken_sha = hashlib.sha256(broken_pm_bytes).hexdigest()
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    good_rel_path = f"artifacts/{good_ns}/1.0/{good_pm_name}"
-    broken_rel_path = f"artifacts/{broken_ns}/1.0/{broken_pm_name}"
+    good_rel_path = f"artifacts/{good_ns}/1.0.0/{good_pm_name}"
+    broken_rel_path = f"artifacts/{broken_ns}/1.0.0/{broken_pm_name}"
 
     good_file = environment.local_registry_dir / good_rel_path
     good_file.parent.mkdir(parents=True, exist_ok=True)
@@ -513,10 +498,9 @@ async def test_install_failure_preserves_other_plugins(
             good_ns: {
                 "namespace": good_ns,
                 "type": "metadata",
-                "channels": {"latest": "1.0"},
                 "versions": {
-                    "1.0": {
-                        "version": "1.0",
+                    "1.0.0": {
+                        "version": "1.0.0",
                         "name": "sample-good-tx-1",
                         "author": "test",
                         "description": "good metadata test plugin",
@@ -529,10 +513,9 @@ async def test_install_failure_preserves_other_plugins(
             broken_ns: {
                 "namespace": broken_ns,
                 "type": "metadata",
-                "channels": {"latest": "1.0"},
                 "versions": {
-                    "1.0": {
-                        "version": "1.0",
+                    "1.0.0": {
+                        "version": "1.0.0",
                         "name": "sample-broken-tx-2",
                         "author": "test",
                         "description": "broken metadata test plugin",
@@ -564,7 +547,7 @@ async def test_install_failure_preserves_other_plugins(
 
     # >>>>> INSTALL GOOD PLUGIN AND CAPTURE STATE >>>>>
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace=good_ns, registry=reg_id, version="1.0")
+        InstallPluginRequest(namespace=good_ns, registry=reg_id, version="1.0.0")
     )
     assert not error, f"Failed to install good plugin (status {error.status}): {error.error}"
     assert response.namespace == good_ns
@@ -585,7 +568,7 @@ async def test_install_failure_preserves_other_plugins(
 
     # >>>>> INSTALL BROKEN PLUGIN >>>>>
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace=broken_ns, registry=reg_id, version="1.0")
+        InstallPluginRequest(namespace=broken_ns, registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected error for broken plugin install"
     assert error.status >= 400, f"Expected non-2xx status for broken plugin install, got {error.status}"
@@ -671,7 +654,7 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
 
     refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
-    title_suffix_1_version = refresh_response.index["plugins"]["title-suffix-1"]["channels"]["latest"]
+    title_suffix_1_version = max(refresh_response.index["plugins"]["title-suffix-1"]["versions"].keys())
     # <<<<< SETUP REGISTRY <<<<<
 
     # >>>>> INSTALL >>>>>
@@ -838,8 +821,8 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
 
         refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
         assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
-        sample_metadata_version = refresh_response.index["plugins"]["sample-metadata"]["channels"]["latest"]
-        sample_downloader_version = refresh_response.index["plugins"]["sample-downloader"]["channels"]["latest"]
+        sample_metadata_version = max(refresh_response.index["plugins"]["sample-metadata"]["versions"].keys())
+        sample_downloader_version = max(refresh_response.index["plugins"]["sample-downloader"]["versions"].keys())
         # <<<<< SETUP REGISTRY <<<<<
 
         # >>>>> INSTALL WITH NON-MANAGED CONFLICT >>>>>
@@ -911,7 +894,7 @@ async def test_plugin_uninstall_not_listed(lrr_client: LRRClient, environment: A
 
     refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
-    sample_login_version = refresh_response.index["plugins"]["sample-login"]["channels"]["latest"]
+    sample_login_version = max(refresh_response.index["plugins"]["sample-login"]["versions"].keys())
     # <<<<< SETUP REGISTRY <<<<<
 
     for i in range(5):
@@ -968,7 +951,7 @@ async def test_plugin_cross_provenance_force(lrr_client: LRRClient, environment:
 
     refresh_a_response, error = await lrr_client.misc_api.refresh_registry(reg_a_id)
     assert not error, f"Failed to refresh reg A (status {error.status}): {error.error}"
-    sample_downloader_version = refresh_a_response.index["plugins"]["sample-downloader"]["channels"]["latest"]
+    sample_downloader_version = max(refresh_a_response.index["plugins"]["sample-downloader"]["versions"].keys())
     # <<<<< SETUP REG A <<<<<
 
     # >>>>> INSTALL FROM REG A >>>>>
@@ -1011,7 +994,7 @@ async def test_plugin_cross_provenance_force(lrr_client: LRRClient, environment:
 
     refresh_b_response, error = await lrr_client.misc_api.refresh_registry(reg_b_id)
     assert not error, f"Failed to refresh reg B (status {error.status}): {error.error}"
-    sample_downloader_version_b = refresh_b_response.index["plugins"]["sample-downloader"]["channels"]["latest"]
+    sample_downloader_version_b = max(refresh_b_response.index["plugins"]["sample-downloader"]["versions"].keys())
     # <<<<< CREATE REG B (SAME SOURCE) <<<<<
 
     # >>>>> INSTALL FROM REG B WITHOUT FORCE -> PROVENANCE MISMATCH >>>>>
@@ -1085,7 +1068,7 @@ async def test_managed_plugin_upgrade_reloads_class(
 
     main_refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
-    main_version = main_refresh_response.index["plugins"]["sample-script"]["channels"]["latest"]
+    main_version = max(main_refresh_response.index["plugins"]["sample-script"]["versions"].keys())
 
     _, error = await lrr_client.misc_api.install_plugin(
         InstallPluginRequest(namespace="sample-script", registry=reg_id, version=main_version)
@@ -1111,7 +1094,7 @@ async def test_managed_plugin_upgrade_reloads_class(
 
     v11_refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry after ref change (status {error.status}): {error.error}"
-    v11_version = v11_refresh_response.index["plugins"]["sample-script"]["channels"]["latest"]
+    v11_version = max(v11_refresh_response.index["plugins"]["sample-script"]["versions"].keys())
 
     _, error = await lrr_client.misc_api.install_plugin(
         InstallPluginRequest(namespace="sample-script", registry=reg_id, version=v11_version, force=True)
@@ -1175,7 +1158,7 @@ async def test_managed_plugin_upgrade_reloads_across_workers(
 
     main_refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
-    main_version = main_refresh_response.index["plugins"]["sample-script"]["channels"]["latest"]
+    main_version = max(main_refresh_response.index["plugins"]["sample-script"]["versions"].keys())
 
     _, error = await lrr_client.misc_api.install_plugin(
         InstallPluginRequest(namespace="sample-script", registry=reg_id, version=main_version)
@@ -1204,7 +1187,7 @@ async def test_managed_plugin_upgrade_reloads_across_workers(
 
     v11_refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry after ref change (status {error.status}): {error.error}"
-    v11_version = v11_refresh_response.index["plugins"]["sample-script"]["channels"]["latest"]
+    v11_version = max(v11_refresh_response.index["plugins"]["sample-script"]["versions"].keys())
 
     _, error = await lrr_client.misc_api.install_plugin(
         InstallPluginRequest(namespace="sample-script", registry=reg_id, version=v11_version, force=True)
@@ -1269,7 +1252,7 @@ async def test_managed_plugin_survives_restart(lrr_client: LRRClient, environmen
 
     refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
-    sample_downloader_version = refresh_response.index["plugins"]["sample-downloader"]["channels"]["latest"]
+    sample_downloader_version = max(refresh_response.index["plugins"]["sample-downloader"]["versions"].keys())
 
     response, error = await lrr_client.misc_api.install_plugin(
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
@@ -1302,9 +1285,6 @@ async def test_managed_plugin_survives_restart(lrr_client: LRRClient, environmen
             )
             assert plugin.installed_sha256 == installed_sha256, (
                 f"Expected installed_sha256 {installed_sha256!r} after restart, got: {plugin.installed_sha256!r}"
-            )
-            assert plugin.installed_channel is None, (
-                f"Expected no installed_channel after explicit install, got: {plugin.installed_channel!r}"
             )
             break
     else:
@@ -1343,7 +1323,7 @@ async def test_plugin_file_deleted_under_lrr(lrr_client: LRRClient, environment:
 
     refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
-    sample_downloader_version = refresh_response.index["plugins"]["sample-downloader"]["channels"]["latest"]
+    sample_downloader_version = max(refresh_response.index["plugins"]["sample-downloader"]["versions"].keys())
 
     response, error = await lrr_client.misc_api.install_plugin(
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)

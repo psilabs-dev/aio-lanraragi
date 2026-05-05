@@ -57,7 +57,7 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
 
     refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
-    sample_metadata_version = refresh_response.index["plugins"]["sample-metadata"]["channels"]["latest"]
+    sample_metadata_version = max(refresh_response.index["plugins"]["sample-metadata"]["versions"].keys())
 
     response, error = await lrr_client.misc_api.install_plugin(
         InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version)
@@ -222,8 +222,8 @@ async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDe
 
     refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
-    sample_metadata_version = refresh_response.index["plugins"]["sample-metadata"]["channels"]["latest"]
-    sample_downloader_version = refresh_response.index["plugins"]["sample-downloader"]["channels"]["latest"]
+    sample_metadata_version = max(refresh_response.index["plugins"]["sample-metadata"]["versions"].keys())
+    sample_downloader_version = max(refresh_response.index["plugins"]["sample-downloader"]["versions"].keys())
 
     response, error = await lrr_client.misc_api.install_plugin(
         InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version)
@@ -341,7 +341,7 @@ async def test_plugin_priority_execution_order(lrr_client: LRRClient, environmen
 
     # >>>>> INSTALL ALL THREE >>>>>
     for ns in ("title-suffix-1", "title-suffix-2", "title-suffix-3"):
-        version_key = refresh_response.index["plugins"][ns]["channels"]["latest"]
+        version_key = max(refresh_response.index["plugins"][ns]["versions"].keys())
         response, error = await lrr_client.misc_api.install_plugin(
             InstallPluginRequest(namespace=ns, registry=reg_id, version=version_key)
         )

@@ -86,14 +86,13 @@ async def test_local_registry_install_errors(
             "unknown-field-plugin": {
                 "namespace": "unknown-field-plugin",
                 "type": "download",
-                "channels": {"latest": "1.0"},
                 "versions": {
-                    "1.0": {
-                        "version": "1.0",
+                    "1.0.0": {
+                        "version": "1.0.0",
                         "name": "unknown",
                         "author": "test",
                         "description": "unknown field test plugin",
-                        "artifact": "artifacts/unknown/1.0/Unknown.pm",
+                        "artifact": "artifacts/unknown/1.0.0/Unknown.pm",
                         "sha256": dummy_sha,
                         "published_at": generated_at,
                     },
@@ -116,14 +115,13 @@ async def test_local_registry_install_errors(
             "bad-published-at": {
                 "namespace": "bad-published-at",
                 "type": "download",
-                "channels": {"latest": "1.0"},
                 "versions": {
-                    "1.0": {
-                        "version": "1.0",
+                    "1.0.0": {
+                        "version": "1.0.0",
                         "name": "bad-published-at",
                         "author": "test",
                         "description": "bad published_at test plugin",
-                        "artifact": "artifacts/bad-published-at/1.0/BadPublishedAt.pm",
+                        "artifact": "artifacts/bad-published-at/1.0.0/BadPublishedAt.pm",
                         "sha256": dummy_sha,
                         "published_at": "2026-04-25T10:00:00+01:00",
                     },
@@ -145,14 +143,13 @@ async def test_local_registry_install_errors(
             "bad-sha": {
                 "namespace": "bad-sha",
                 "type": "download",
-                "channels": {"latest": "1.0"},
                 "versions": {
-                    "1.0": {
-                        "version": "1.0",
+                    "1.0.0": {
+                        "version": "1.0.0",
                         "name": "bad-sha",
                         "author": "test",
                         "description": "bad sha test plugin",
-                        "artifact": "artifacts/bad-sha/1.0/BadSha.pm",
+                        "artifact": "artifacts/bad-sha/1.0.0/BadSha.pm",
                         "sha256": "xyz",
                         "published_at": generated_at,
                     },
@@ -174,10 +171,9 @@ async def test_local_registry_install_errors(
             "traversal-plugin": {
                 "namespace": "traversal-plugin",
                 "type": "download",
-                "channels": {"latest": "1.0"},
                 "versions": {
-                    "1.0": {
-                        "version": "1.0",
+                    "1.0.0": {
+                        "version": "1.0.0",
                         "name": "traversal",
                         "author": "test",
                         "description": "traversal test plugin",
@@ -204,10 +200,9 @@ async def test_local_registry_install_errors(
             "absolute-plugin": {
                 "namespace": "absolute-plugin",
                 "type": "download",
-                "channels": {"latest": "1.0"},
                 "versions": {
-                    "1.0": {
-                        "version": "1.0",
+                    "1.0.0": {
+                        "version": "1.0.0",
                         "name": "absolute",
                         "author": "test",
                         "description": "absolute path test plugin",
@@ -242,10 +237,9 @@ async def test_local_registry_install_errors(
             "symlink-plugin": {
                 "namespace": "symlink-plugin",
                 "type": "download",
-                "channels": {"latest": "1.0"},
                 "versions": {
-                    "1.0": {
-                        "version": "1.0",
+                    "1.0.0": {
+                        "version": "1.0.0",
                         "name": "symlink",
                         "author": "test",
                         "description": "symlink escape test plugin",
@@ -262,14 +256,14 @@ async def test_local_registry_install_errors(
     assert not error, f"Expected refresh to succeed with symlink artifact entry (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="symlink-plugin", registry=reg_id, version="1.0")
+        InstallPluginRequest(namespace="symlink-plugin", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to fail for symlink escape"
     assert error.status == 400, f"Expected 400 for symlink escape install, got {error.status}"
     assert not list(environment.plugin_managed_dir.rglob("*.pm")), "No .pm files should be written for symlink escape"
     # <<<<< SYMLINK ESCAPE REJECTED <<<<<
 
-    plugin_rel_path = "artifacts/local-sample-downloader/1.0/LocalSample.pm"
+    plugin_rel_path = "artifacts/local-sample-downloader/1.0.0/LocalSample.pm"
     plugin_file = environment.local_registry_dir / plugin_rel_path
     plugin_file.parent.mkdir(parents=True, exist_ok=True)
     plugin_file.write_text("""\
@@ -305,10 +299,9 @@ sub provide_url {
             "local-sample-downloader": {
                 "namespace": "local-sample-downloader",
                 "type": "download",
-                "channels": {"latest": "1.0"},
                 "versions": {
-                    "1.0": {
-                        "version": "1.0",
+                    "1.0.0": {
+                        "version": "1.0.0",
                         "name": "Local Sample",
                         "author": "test",
                         "description": "local sample downloader",
@@ -325,7 +318,7 @@ sub provide_url {
     assert not error, f"Expected refresh to succeed with wrong sha entry (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="local-sample-downloader", registry=reg_id, version="1.0")
+        InstallPluginRequest(namespace="local-sample-downloader", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to fail for wrong sha256"
     assert error.status == 422, f"Expected 422 for wrong sha256 install, got {error.status}"
@@ -351,10 +344,9 @@ sub provide_url {
             "local-sample-downloader": {
                 "namespace": "local-sample-downloader",
                 "type": "download",
-                "channels": {"latest": "1.0"},
                 "versions": {
-                    "1.0": {
-                        "version": "1.0",
+                    "1.0.0": {
+                        "version": "1.0.0",
                         "name": "Local Sample",
                         "author": "test",
                         "description": "local sample downloader",
@@ -371,11 +363,11 @@ sub provide_url {
     assert not error, f"Expected refresh to succeed (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="local-sample-downloader", registry=reg_id, version="1.0")
+        InstallPluginRequest(namespace="local-sample-downloader", registry=reg_id, version="1.0.0")
     )
     assert not error, f"Expected install to succeed (status {error.status}): {error.error}"
     assert response.namespace == "local-sample-downloader"
-    assert response.version == "1.0", f"Expected version 1.0, got {response.version}"
+    assert response.version == "1.0.0", f"Expected version 1.0.0, got {response.version}"
     assert response.installed_registry == reg_id, (
         f"Expected provenance {reg_id}, got {response.installed_registry}"
     )
@@ -402,7 +394,7 @@ async def test_install_blocked_against_default_namespace(
     """
     environment.setup(with_api_key=True)
 
-    plugin_rel_path = "artifacts/copytags-impostor/1.0/CopyTagsImpostor.pm"
+    plugin_rel_path = "artifacts/copytags-impostor/1.0.0/CopyTagsImpostor.pm"
     plugin_file = environment.local_registry_dir / plugin_rel_path
     plugin_file.parent.mkdir(parents=True, exist_ok=True)
     plugin_file.write_text("""\
@@ -437,10 +429,9 @@ sub get_tags { return (); }
             "copytags": {
                 "namespace": "copytags",
                 "type": "metadata",
-                "channels": {"latest": "1.0"},
                 "versions": {
-                    "1.0": {
-                        "version": "1.0",
+                    "1.0.0": {
+                        "version": "1.0.0",
                         "name": "copytags-impostor",
                         "author": "test",
                         "description": "tries to shadow the built-in copytags plugin",
@@ -467,13 +458,13 @@ sub get_tags { return (); }
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
 
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="copytags", registry=reg_id, version="1.0")
+        InstallPluginRequest(namespace="copytags", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to be rejected over a default plugin namespace"
     assert error.status == 400, f"Expected 400 for default-namespace conflict, got {error.status}"
 
     response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="copytags", registry=reg_id, version="1.0", force=True)
+        InstallPluginRequest(namespace="copytags", registry=reg_id, version="1.0.0", force=True)
     )
     assert error is not None, "force=true must not bypass a default-plugin namespace conflict"
     assert error.status == 400, f"Expected 400 for default-namespace conflict (force), got {error.status}"
@@ -482,3 +473,52 @@ sub get_tags { return (); }
     assert not target_pm.exists(), f"Impostor plugin must not be written to disk: {target_pm}"
 
     expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+async def test_composite_registry(
+    environment: AbstractLRRDeploymentContext,
+    lrr_client: LRRClient,
+):
+    """
+    Test composite registry/plugin functionality. Use 3 local registries with metadata plugins.
+    Also tests duplicates and cross-registry/plugin.
+
+    Registry 1:
+    - shared-metadata-1
+        - v1.0.0 (appends " from registry 1 v1.0.0" to title)
+        - v2.0.0 (appends " from registry 1 v2.0.0" to title)
+    Registry 2:
+    - shared-metadata-1
+        - v1.0.0 (appends " from registry 2 v1.0.0" to title)
+        - v1.1.0 (appends " from registry 2 v1.1.0" to title)
+        - v2.0.0 (appends " from registry 2 v2.0.0" to title)
+    Registry 3:
+    - shared-metadata-1
+        - v1.0.0 (appends " from registry 3 v1.0.0" to title)
+        - v1.1.0 (appends " from registry 3 v1.1.0" to title)
+        - v2.0.0 (appends " from registry 3 v2.0.0" to title)
+
+    Steps:
+    1. Add registry 1 (default), registry 2, registry 3.
+    2. Set default to nonexistent registry, expect 404.
+    3. Install shared-metadata-1 from registry 1 (max-version resolution selects v2.0.0).
+    4. Expect shared-metadata-1 version is v2.0.0.
+    5. Upload archive and invoke plugin, expect processed title.
+    6. Reinstall same plugin/version with force, expect idempotent (provenance unchanged).
+    7. Uninstall shared-metadata-1.
+    8. Set registry 2 as default, install shared-metadata-1:v1.0.0 (explicit version).
+    9. Expect version: v1.0.0.
+    10. Invoke plugin, expect processed title.
+    11. Remove registry 2 (plugin now registry-orphaned), assert 2 registries total.
+    12. Install v1.0.0 from registry 3 without force, expect provenance mismatch error.
+    13. Set registry 3 as default, install v1.0.0 with force; verify provenance updated.
+    14. Test plugin run.
+    15. Regenerate registry 3 without version 1.0.0 (plugin becomes version orphan).
+    16. Install v2.0.0 and run plugin.
+
+    Every installation -> assert values for provenance + configuration, and assert title after running plugin.
+    Also reset the title after every plugin call.
+    """
+    pass

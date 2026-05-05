@@ -295,7 +295,7 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
     refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     assert refresh_response.index is not None, "Expected index after refresh"
-    sample_downloader_version = refresh_response.index["plugins"]["sample-downloader"]["channels"]["latest"]
+    sample_downloader_version = max(refresh_response.index["plugins"]["sample-downloader"]["versions"].keys())
     # <<<<< CREATE AND REFRESH <<<<<
 
     # >>>>> INSTALL PLUGIN BEFORE SOURCE CHANGE >>>>>
