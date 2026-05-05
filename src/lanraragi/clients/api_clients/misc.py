@@ -266,9 +266,9 @@ class _MiscApiClient(_ApiClient):
         POST /api/plugins/install
         """
         url = self.api_context.build_url("/api/plugins/install")
-        body: dict[str, Any] = {"namespace": request.namespace, "registry": request.registry, "version": request.version}
-        if request.installed_channel is not None:
-            body["installed_channel"] = request.installed_channel
+        body: dict[str, Any] = {"namespace": request.namespace, "registry": request.registry}
+        if request.version is not None:
+            body["version"] = request.version
         if request.force is not None:
             body["force"] = request.force
         status, content = await self.api_context.handle_request(
@@ -282,7 +282,6 @@ class _MiscApiClient(_ApiClient):
                 version=response_j["version"],
                 installed_registry=response_j["installed_registry"],
                 installed_sha256=response_j["installed_sha256"],
-                installed_channel=response_j.get("installed_channel"),
             ), None)
         return (None, _build_err_response(content, status))
 
