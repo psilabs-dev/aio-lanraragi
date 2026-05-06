@@ -18,6 +18,7 @@ from lanraragi.models.misc import (
     CreateRegistryResponse,
     GetAvailablePluginsRequest,
     GetAvailablePluginsResponse,
+    GetDefaultRegistryResponse,
     GetOpdsCatalogRequest,
     GetOpdsCatalogResponse,
     GetRegistryResponse,
@@ -31,6 +32,8 @@ from lanraragi.models.misc import (
     RegenerateThumbnailRequest,
     RegenerateThumbnailResponse,
     RegistryConfig,
+    RemoveDefaultRegistryResponse,
+    UpdateDefaultRegistryResponse,
     UpdatePluginConfigRequest,
     UpdateRegistryRequest,
     UpdateRegistryResponse,
@@ -248,6 +251,39 @@ class _MiscApiClient(_ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
         if status == 200:
             return (LanraragiResponse(), None)
+        return (None, _build_err_response(content, status))
+
+    async def get_default_registry(self) -> _LRRClientResponse[GetDefaultRegistryResponse]:
+        """
+        GET /api/registries/default
+        """
+        url = self.api_context.build_url("/api/registries/default")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
+        if status == 200:
+            response_j = json.loads(content)
+            return (GetDefaultRegistryResponse(registry_id=response_j["registry_id"]), None)
+        return (None, _build_err_response(content, status))
+
+    async def update_default_registry(self, registry_id: str) -> _LRRClientResponse[UpdateDefaultRegistryResponse]:
+        """
+        PUT /api/registries/default/{id}
+        """
+        url = self.api_context.build_url(f"/api/registries/default/{registry_id}")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers)
+        if status == 200:
+            response_j = json.loads(content)
+            return (UpdateDefaultRegistryResponse(registry_id=response_j["registry_id"]), None)
+        return (None, _build_err_response(content, status))
+
+    async def remove_default_registry(self) -> _LRRClientResponse[RemoveDefaultRegistryResponse]:
+        """
+        DELETE /api/registries/default
+        """
+        url = self.api_context.build_url("/api/registries/default")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
+        if status == 200:
+            response_j = json.loads(content)
+            return (RemoveDefaultRegistryResponse(registry_id=response_j["registry_id"]), None)
         return (None, _build_err_response(content, status))
 
     async def refresh_registry(self, registry_id: str) -> _LRRClientResponse[RefreshRegistryResponse]:
