@@ -303,14 +303,19 @@ async def test_plugin_install_failed_require_rolls_back(
     environment: AbstractLRRDeploymentContext,
 ):
     """
-    Test that a managed install rolls back when the plugin file fails to require.
+    Test that a managed install rolls back on require failure, for both fresh
+    install and same-path upgrade.
 
+    Fresh install:
     1. Create local registry with one broken plugin (valid Perl, BEGIN { die }).
-    2. Refresh registry.
-    3. Install the broken plugin; expect a non-2xx error response.
-    4. Assert plugin file is absent on the host.
-    5. Assert Redis hash for the namespace is empty.
-    6. Assert namespace is absent from GET /api/plugins/metadata.
+    2. Install the broken plugin; expect a non-2xx error response.
+    3. Assert file absent, Redis hash empty, namespace absent from listing.
+
+    Upgrade (same-path):
+    4. Register a second plugin with two versions sharing one package: 1.0.0 loadable, 1.1.0 BEGIN-die.
+    5. Install 1.0.0; capture file bytes, Redis hash, listing entry.
+    6. Install 1.1.0; expect non-2xx error.
+    7. Assert prior 1.0.0 bytes preserved on disk, Redis hash unchanged, listing unchanged.
     """
     environment.setup(with_api_key=True)
 
@@ -339,6 +344,50 @@ async def test_plugin_install_failed_require_rolls_back(
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     plugin_rel_path = f"artifacts/{broken_ns}/1.0.0/{broken_pm_name}"
 
+    upgrade_ns = "sample-upgrade-tx-1"
+    upgrade_pm_name = "SampleUpgradeTx1.pm"
+    upgrade_v1_body = (
+        "package LANraragi::Plugin::Managed::Metadata::SampleUpgradeTx1;\n"
+        "use strict;\n"
+        "use warnings;\n"
+        "no warnings 'uninitialized';\n"
+        "sub plugin_info {\n"
+        "    return (\n"
+        "        name      => 'sample-upgrade-tx-1',\n"
+        "        type      => 'metadata',\n"
+        f"        namespace => '{upgrade_ns}',\n"
+        "        author    => 'test',\n"
+        "        version   => '1.0.0',\n"
+        "    );\n"
+        "}\n"
+        "sub get_tags { return (); }\n"
+        "1;\n"
+    )
+    upgrade_v2_body = (
+        "package LANraragi::Plugin::Managed::Metadata::SampleUpgradeTx1;\n"
+        "use strict;\n"
+        "use warnings;\n"
+        "no warnings 'uninitialized';\n"
+        "BEGIN { die 'upgrade boom' }\n"
+        "sub plugin_info {\n"
+        "    return (\n"
+        "        name      => 'sample-upgrade-tx-1',\n"
+        "        type      => 'metadata',\n"
+        f"        namespace => '{upgrade_ns}',\n"
+        "        author    => 'test',\n"
+        "        version   => '1.1.0',\n"
+        "    );\n"
+        "}\n"
+        "sub get_tags { return (); }\n"
+        "1;\n"
+    )
+    upgrade_v1_bytes = upgrade_v1_body.encode("utf-8")
+    upgrade_v2_bytes = upgrade_v2_body.encode("utf-8")
+    upgrade_v1_sha = hashlib.sha256(upgrade_v1_bytes).hexdigest()
+    upgrade_v2_sha = hashlib.sha256(upgrade_v2_bytes).hexdigest()
+    upgrade_v1_rel_path = f"artifacts/{upgrade_ns}/1.0.0/{upgrade_pm_name}"
+    upgrade_v2_rel_path = f"artifacts/{upgrade_ns}/1.1.0/{upgrade_pm_name}"
+
     registry_data = {
         "version": 1,
         "generated_at": generated_at,
@@ -358,12 +407,43 @@ async def test_plugin_install_failed_require_rolls_back(
                     },
                 },
             },
+            upgrade_ns: {
+                "namespace": upgrade_ns,
+                "type": "metadata",
+                "versions": {
+                    "1.0.0": {
+                        "version": "1.0.0",
+                        "name": "sample-upgrade-tx-1",
+                        "author": "test",
+                        "description": "good baseline for upgrade rollback test",
+                        "artifact": upgrade_v1_rel_path,
+                        "sha256": upgrade_v1_sha,
+                        "published_at": generated_at,
+                    },
+                    "1.1.0": {
+                        "version": "1.1.0",
+                        "name": "sample-upgrade-tx-1",
+                        "author": "test",
+                        "description": "broken upgrade target for rollback test",
+                        "artifact": upgrade_v2_rel_path,
+                        "sha256": upgrade_v2_sha,
+                        "published_at": generated_at,
+                    },
+                },
+            },
         },
     }
 
     plugin_file = environment.local_registry_dir / plugin_rel_path
     plugin_file.parent.mkdir(parents=True, exist_ok=True)
     plugin_file.write_bytes(broken_pm_bytes)
+
+    upgrade_v1_file = environment.local_registry_dir / upgrade_v1_rel_path
+    upgrade_v1_file.parent.mkdir(parents=True, exist_ok=True)
+    upgrade_v1_file.write_bytes(upgrade_v1_bytes)
+    upgrade_v2_file = environment.local_registry_dir / upgrade_v2_rel_path
+    upgrade_v2_file.parent.mkdir(parents=True, exist_ok=True)
+    upgrade_v2_file.write_bytes(upgrade_v2_bytes)
 
     registry_json = environment.local_registry_dir / "registry.json"
     registry_json.write_text(json.dumps(registry_data), encoding="utf-8")
@@ -409,12 +489,70 @@ async def test_plugin_install_failed_require_rolls_back(
     assert broken_ns not in namespaces, f"{broken_ns} must be absent after failed install, got: {namespaces}"
     # <<<<< ROLLBACK ASSERTIONS <<<<<
 
+    # >>>>> INSTALL UPGRADE BASELINE v1.0.0 AND CAPTURE STATE >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace=upgrade_ns, registry=reg_id, version="1.0.0")
+    )
+    assert not error, f"Failed to install upgrade baseline (status {error.status}): {error.error}"
+
+    upgrade_target_pm = environment.plugin_managed_dir / "Metadata" / upgrade_pm_name
+    assert upgrade_target_pm.exists(), f"Upgrade baseline file missing after install: {upgrade_target_pm}"
+    captured_bytes = upgrade_target_pm.read_bytes()
+    assert captured_bytes == upgrade_v1_bytes, "Upgrade baseline bytes do not match registry artifact"
+
+    environment.redis_client.select(2)
+    upgrade_redis_key = f"LRR_PLUGIN_{upgrade_ns.upper()}"
+    captured_redis = environment.redis_client.hgetall(upgrade_redis_key)
+    assert captured_redis, f"Expected non-empty Redis hash for {upgrade_ns} after baseline install"
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list metadata plugins (status {error.status}): {error.error}"
+    captured_listing = next((p for p in response.plugins if p.namespace == upgrade_ns), None)
+    assert captured_listing is not None, f"{upgrade_ns} missing from listing after baseline install"
+    # <<<<< INSTALL UPGRADE BASELINE v1.0.0 AND CAPTURE STATE <<<<<
+
+    # >>>>> ATTEMPT UPGRADE TO BROKEN v1.1.0 >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace=upgrade_ns, registry=reg_id, version="1.1.0")
+    )
+    assert error is not None, "Expected error for broken upgrade install"
+    assert error.status >= 400, f"Expected non-2xx status for broken upgrade install, got {error.status}"
+    LOGGER.debug(f"Upgrade install: status={error.status}, error={error.error!r}")
+    # <<<<< ATTEMPT UPGRADE TO BROKEN v1.1.0 <<<<<
+
+    # >>>>> UPGRADE ROLLBACK ASSERTIONS >>>>>
+    assert upgrade_target_pm.exists(), f"Prior artifact must remain on disk after failed upgrade: {upgrade_target_pm}"
+    assert upgrade_target_pm.read_bytes() == captured_bytes, (
+        "Prior artifact bytes were mutated by failed upgrade; spec requires restore to last working plugin"
+    )
+
+    environment.redis_client.select(2)
+    after_redis = environment.redis_client.hgetall(upgrade_redis_key)
+    assert after_redis == captured_redis, (
+        f"Redis hash for {upgrade_ns} changed after failed upgrade.\nBefore: {captured_redis}\nAfter: {after_redis}"
+    )
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list metadata plugins (status {error.status}): {error.error}"
+    after_listing = next((p for p in response.plugins if p.namespace == upgrade_ns), None)
+    assert after_listing == captured_listing, (
+        f"Listing for {upgrade_ns} changed after failed upgrade.\nBefore: {captured_listing}\nAfter: {after_listing}"
+    )
+    # <<<<< UPGRADE ROLLBACK ASSERTIONS <<<<<
+
+    response, error = await lrr_client.misc_api.uninstall_plugin(upgrade_ns)
+    assert not error, f"Failed to uninstall upgrade baseline (status {error.status}): {error.error}"
+
     response, error = await lrr_client.misc_api.delete_registry(reg_id)
     assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
 
-    # expect_no_error_logs is intentionally omitted: the install attempt against
-    # a deliberately broken plugin causes LRR to log a server-side error
-    # describing the failed require/rollback. That log is expected, not a defect.
+    # expect_no_error_logs is intentionally omitted: the install attempts against
+    # deliberately broken plugins cause LRR to log server-side errors describing
+    # the failed require/rollback. Those logs are expected, not defects.
 
 
 @pytest.mark.asyncio
