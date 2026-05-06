@@ -143,6 +143,15 @@ class ListRegistriesResponse(LanraragiResponse):
 class RefreshRegistryResponse(LanraragiResponse):
     index: dict[str, Any] | None = Field(None)
 
+class GetDefaultRegistryResponse(LanraragiResponse):
+    registry_id: str = Field(...)
+
+class UpdateDefaultRegistryResponse(LanraragiResponse):
+    registry_id: str = Field(...)
+
+class RemoveDefaultRegistryResponse(LanraragiResponse):
+    registry_id: str = Field(...)
+
 class UpdatePluginConfigRequest(LanraragiRequest):
     enabled: bool | None = Field(None)
     hidden: bool | None = Field(None)
@@ -186,6 +195,9 @@ __all__ = [
     "GetRegistryResponse",
     "ListRegistriesResponse",
     "RefreshRegistryResponse",
+    "GetDefaultRegistryResponse",
+    "UpdateDefaultRegistryResponse",
+    "RemoveDefaultRegistryResponse",
     "UpdatePluginConfigRequest",
     "InstallPluginRequest",
     "InstallPluginResponse",
