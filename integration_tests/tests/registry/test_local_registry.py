@@ -2,10 +2,13 @@
 Local-registry validation, orphan, and install error paths.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
+import tempfile
 import time
+from pathlib import Path
 
 import pytest
 from lanraragi.clients.client import LRRClient
@@ -13,12 +16,14 @@ from lanraragi.models.misc import (
     CreateRegistryRequest,
     GetAvailablePluginsRequest,
     InstallPluginRequest,
+    UsePluginRequest,
 )
 
 from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
 )
+from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
 
 LOGGER = logging.getLogger(__name__)
 
@@ -483,7 +488,7 @@ async def test_composite_registry(
 ):
     """
     Test composite registry/plugin functionality. Use 3 local registries with metadata plugins.
-    Also tests duplicates and cross-registry/plugin.
+    Tests cross-registry provenance handoff via force-install, max-version SemVer resolution, and version/registry-orphan transitions.
 
     Registry 1:
     - shared-metadata-1
@@ -500,25 +505,323 @@ async def test_composite_registry(
         - v1.1.0 (appends " from registry 3 v1.1.0" to title)
         - v2.0.0 (appends " from registry 3 v2.0.0" to title)
 
+    Default-registry designation is covered separately in test_default_registry.py.
+
     Steps:
-    1. Add registry 1 (default), registry 2, registry 3.
-    2. Set default to nonexistent registry, expect 404.
-    3. Install shared-metadata-1 from registry 1 (max-version resolution selects v2.0.0).
-    4. Expect shared-metadata-1 version is v2.0.0.
-    5. Upload archive and invoke plugin, expect processed title.
-    6. Reinstall same plugin/version with force, expect idempotent (provenance unchanged).
-    7. Uninstall shared-metadata-1.
-    8. Set registry 2 as default, install shared-metadata-1:v1.0.0 (explicit version).
-    9. Expect version: v1.0.0.
-    10. Invoke plugin, expect processed title.
-    11. Remove registry 2 (plugin now registry-orphaned), assert 2 registries total.
-    12. Install v1.0.0 from registry 3 without force, expect provenance mismatch error.
-    13. Set registry 3 as default, install v1.0.0 with force; verify provenance updated.
-    14. Test plugin run.
-    15. Regenerate registry 3 without version 1.0.0 (plugin becomes version orphan).
-    16. Install v2.0.0 and run plugin.
+    1. Add registry 1, registry 2, registry 3.
+    2. Install shared-metadata-1 from registry 1 (max-version resolution selects v2.0.0).
+    3. Expect shared-metadata-1 version is v2.0.0.
+    4. Upload archive and invoke plugin, expect processed title.
+    5. Reinstall same plugin/version with force, expect idempotent (provenance unchanged).
+    6. Uninstall shared-metadata-1.
+    7. Install shared-metadata-1:v1.0.0 from registry 2 (explicit version).
+    8. Expect version: v1.0.0.
+    9. Invoke plugin, expect processed title.
+    10. Remove registry 2 (plugin now registry-orphaned), assert 2 registries total.
+    11. Install v1.0.0 from registry 3 without force, expect provenance mismatch error.
+    12. Install v1.0.0 from registry 3 with force; verify provenance updated.
+    13. Test plugin run.
+    14. Regenerate registry 3 without version 1.0.0 (plugin becomes version orphan).
+    15. Install v2.0.0 and run plugin.
 
     Every installation -> assert values for provenance + configuration, and assert title after running plugin.
-    Also reset the title after every plugin call.
+    `use_plugin` does not persist the returned title to the archive, so the stored title remains unchanged across runs.
     """
-    pass
+    environment.setup(with_api_key=True)
+
+    generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    def write_registry(reg_dir: Path, versions: list[tuple[str, int]], generated_at: str):
+        plugins: dict = {}
+        plugin_versions: dict = {}
+        for version, registry_n in versions:
+            rel_path = f"artifacts/shared-metadata-1/{version}/SharedMetadata1.pm"
+            plugin_file = reg_dir / rel_path
+            plugin_file.parent.mkdir(parents=True, exist_ok=True)
+            suffix = f" from registry {registry_n} v{version}"
+            plugin_file.write_text(f"""\
+package LANraragi::Plugin::Managed::Metadata::SharedMetadata1;
+
+use strict;
+use warnings;
+no warnings 'uninitialized';
+
+sub plugin_info {{
+    return (
+        name        => "shared-metadata-1",
+        type        => "metadata",
+        namespace   => "shared-metadata-1",
+        author      => "test",
+        version     => "{version}",
+        description => "shared-metadata-1 test plugin",
+    );
+}}
+
+sub get_tags {{
+    shift;
+    my $lrr_info = shift;
+    my $title = $lrr_info->{{archive_title}} . "{suffix}";
+    return (title => $title);
+}}
+
+1;
+""", encoding="utf-8")
+            sha = hashlib.sha256(plugin_file.read_bytes()).hexdigest()
+            plugin_versions[version] = {
+                "version": version,
+                "name": "shared-metadata-1",
+                "author": "test",
+                "description": f"shared metadata 1 v{version} from registry {registry_n}",
+                "artifact": rel_path,
+                "sha256": sha,
+                "published_at": generated_at,
+            }
+        plugins["shared-metadata-1"] = {
+            "namespace": "shared-metadata-1",
+            "type": "metadata",
+            "versions": plugin_versions,
+        }
+        (reg_dir / "registry.json").write_text(json.dumps({
+            "version": 1,
+            "generated_at": generated_at,
+            "plugins": plugins,
+        }), encoding="utf-8")
+
+    reg1_dir = environment.local_registry_dir / "registry-1"
+    reg2_dir = environment.local_registry_dir / "registry-2"
+    reg3_dir = environment.local_registry_dir / "registry-3"
+
+    reg1_dir.mkdir(parents=True, exist_ok=True)
+    reg2_dir.mkdir(parents=True, exist_ok=True)
+    reg3_dir.mkdir(parents=True, exist_ok=True)
+
+    write_registry(reg1_dir, [("1.0.0", 1), ("2.0.0", 1)], generated_at)
+    write_registry(reg2_dir, [("1.0.0", 2), ("1.1.0", 2), ("2.0.0", 2)], generated_at)
+    write_registry(reg3_dir, [("1.0.0", 3), ("1.1.0", 3), ("2.0.0", 3)], generated_at)
+
+    # >>>>> SETUP THREE REGISTRIES >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="registry-1",
+            type="local",
+            path=f"{environment.local_registry_path}/registry-1",
+        )
+    )
+    assert not error, f"Failed to create registry 1 (status {error.status}): {error.error}"
+    reg1_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg1_id)
+    assert not error, f"Failed to refresh registry 1 (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="registry-2",
+            type="local",
+            path=f"{environment.local_registry_path}/registry-2",
+        )
+    )
+    assert not error, f"Failed to create registry 2 (status {error.status}): {error.error}"
+    reg2_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg2_id)
+    assert not error, f"Failed to refresh registry 2 (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="registry-3",
+            type="local",
+            path=f"{environment.local_registry_path}/registry-3",
+        )
+    )
+    assert not error, f"Failed to create registry 3 (status {error.status}): {error.error}"
+    reg3_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg3_id)
+    assert not error, f"Failed to refresh registry 3 (status {error.status}): {error.error}"
+    # <<<<< SETUP THREE REGISTRIES <<<<<
+
+    # >>>>> UPLOAD ARCHIVE >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_path = create_archive_file(Path(tmpdir), "test_composite_1", num_pages=1)
+        response, error = await upload_archive(
+            lrr_client, archive_path, archive_path.name, asyncio.Semaphore(1),
+            title="base title", tags="test:composite",
+        )
+    assert not error, f"Upload failed (status {error.status}): {error.error}"
+    arcid = response.arcid
+    # <<<<< UPLOAD ARCHIVE <<<<<
+
+    # >>>>> MAX-VERSION INSTALL AND INVOKE FROM REGISTRY 1 >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="shared-metadata-1", registry=reg1_id)
+    )
+    assert not error, f"Failed to install from registry 1 (status {error.status}): {error.error}"
+    assert response.version == "2.0.0", f"Expected max version 2.0.0, got {response.version}"
+    assert response.installed_registry == reg1_id, (
+        f"Expected installed_registry {reg1_id}, got {response.installed_registry}"
+    )
+
+    response, error = await lrr_client.misc_api.use_plugin(
+        UsePluginRequest(plugin="shared-metadata-1", arcid=arcid)
+    )
+    assert not error, f"Plugin execution failed (status {error.status}): {error.error}"
+    assert response.data is not None, "Plugin response did not include data payload"
+    assert response.data.get("title") == "base title from registry 1 v2.0.0", (
+        f"Unexpected title after registry 1 v2.0.0 run: {response.data.get('title')!r}"
+    )
+    # <<<<< MAX-VERSION INSTALL AND INVOKE FROM REGISTRY 1 <<<<<
+
+    # >>>>> IDEMPOTENT FORCE REINSTALL >>>>>
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list plugins before reinstall (status {error.status}): {error.error}"
+    pre_reinstall_version = None
+    pre_reinstall_sha256 = None
+    pre_reinstall_registry = None
+    for plugin in response.plugins:
+        if plugin.namespace == "shared-metadata-1":
+            pre_reinstall_version = plugin.installed_version
+            pre_reinstall_sha256 = plugin.installed_sha256
+            pre_reinstall_registry = plugin.installed_registry
+            break
+    else:
+        pytest.fail("shared-metadata-1 not found before force reinstall")
+
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="shared-metadata-1", registry=reg1_id, version="2.0.0", force=True)
+    )
+    assert not error, f"Force reinstall failed (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list plugins after reinstall (status {error.status}): {error.error}"
+    for plugin in response.plugins:
+        if plugin.namespace == "shared-metadata-1":
+            assert plugin.installed_version == pre_reinstall_version, "installed_version changed after force reinstall"
+            assert plugin.installed_sha256 == pre_reinstall_sha256, "installed_sha256 changed after force reinstall"
+            assert plugin.installed_registry == pre_reinstall_registry, "installed_registry changed after force reinstall"
+            break
+    else:
+        pytest.fail("shared-metadata-1 not found after force reinstall")
+    # <<<<< IDEMPOTENT FORCE REINSTALL <<<<<
+
+    # >>>>> UNINSTALL >>>>>
+    response, error = await lrr_client.misc_api.uninstall_plugin("shared-metadata-1")
+    assert not error, f"Failed to uninstall plugin (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list plugins after uninstall (status {error.status}): {error.error}"
+    namespaces = {p.namespace for p in response.plugins}
+    assert "shared-metadata-1" not in namespaces, (
+        f"Plugin still listed after uninstall: {namespaces}"
+    )
+    # <<<<< UNINSTALL <<<<<
+
+    # >>>>> EXPLICIT VERSION INSTALL AND INVOKE FROM REGISTRY 2 >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="shared-metadata-1", registry=reg2_id, version="1.0.0")
+    )
+    assert not error, f"Failed to install v1.0.0 from registry 2 (status {error.status}): {error.error}"
+    assert response.version == "1.0.0", f"Expected version 1.0.0, got {response.version}"
+    assert response.installed_registry == reg2_id, (
+        f"Expected installed_registry {reg2_id}, got {response.installed_registry}"
+    )
+
+    response, error = await lrr_client.misc_api.use_plugin(
+        UsePluginRequest(plugin="shared-metadata-1", arcid=arcid)
+    )
+    assert not error, f"Plugin execution failed (status {error.status}): {error.error}"
+    assert response.data is not None, "Plugin response did not include data payload"
+    assert response.data.get("title") == "base title from registry 2 v1.0.0", (
+        f"Unexpected title after registry 2 v1.0.0 run: {response.data.get('title')!r}"
+    )
+
+    # <<<<< EXPLICIT VERSION INSTALL AND INVOKE FROM REGISTRY 2 <<<<<
+
+    # >>>>> REGISTRY-ORPHAN (DELETE REGISTRY 2) >>>>>
+    response, error = await lrr_client.misc_api.delete_registry(reg2_id)
+    assert not error, f"Failed to delete registry 2 (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.list_registries()
+    assert not error, f"Failed to list registries (status {error.status}): {error.error}"
+    assert len(response.registries) == 2, (
+        f"Expected 2 registries after deleting registry 2, got {len(response.registries)}"
+    )
+
+    # provenance still queryable even though registry is gone
+    response, error = await lrr_client.misc_api.get_available_plugins(
+        GetAvailablePluginsRequest(type="metadata")
+    )
+    assert not error, f"Failed to list plugins after registry delete (status {error.status}): {error.error}"
+    for plugin in response.plugins:
+        if plugin.namespace == "shared-metadata-1":
+            assert plugin.installed_registry == reg2_id, (
+                f"Expected orphaned provenance {reg2_id}, got {plugin.installed_registry}"
+            )
+            break
+    else:
+        pytest.fail("shared-metadata-1 should still be listed after registry delete")
+    # <<<<< REGISTRY-ORPHAN (DELETE REGISTRY 2) <<<<<
+
+    # >>>>> CROSS-REGISTRY WITHOUT FORCE (400) >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="shared-metadata-1", registry=reg3_id, version="1.0.0")
+    )
+    assert error is not None, "Expected 400 for cross-registry install without force"
+    assert error.status == 400, f"Expected 400 for cross-registry conflict, got {error.status}"
+    # <<<<< CROSS-REGISTRY WITHOUT FORCE (400) <<<<<
+
+    # >>>>> CROSS-REGISTRY WITH FORCE AND INVOKE >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="shared-metadata-1", registry=reg3_id, version="1.0.0", force=True)
+    )
+    assert not error, f"Failed to force install from registry 3 (status {error.status}): {error.error}"
+    assert response.installed_registry == reg3_id, (
+        f"Expected installed_registry {reg3_id}, got {response.installed_registry}"
+    )
+
+    response, error = await lrr_client.misc_api.use_plugin(
+        UsePluginRequest(plugin="shared-metadata-1", arcid=arcid)
+    )
+    assert not error, f"Plugin execution failed (status {error.status}): {error.error}"
+    assert response.data is not None, "Plugin response did not include data payload"
+    assert response.data.get("title") == "base title from registry 3 v1.0.0", (
+        f"Unexpected title after registry 3 v1.0.0 run: {response.data.get('title')!r}"
+    )
+
+    # <<<<< CROSS-REGISTRY WITH FORCE AND INVOKE <<<<<
+
+    # >>>>> VERSION-ORPHAN (DROP v1.0.0 FROM REGISTRY 3) >>>>>
+    # rewrite registry-3 to list only v1.1.0 and v2.0.0; v1.0.0 is gone
+    write_registry(reg3_dir, [("1.1.0", 3), ("2.0.0", 3)], generated_at)
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg3_id)
+    assert not error, f"Failed to refresh registry 3 after version drop (status {error.status}): {error.error}"
+    # <<<<< VERSION-ORPHAN (DROP v1.0.0 FROM REGISTRY 3) <<<<<
+
+    # >>>>> UPGRADE FROM VERSION-ORPHAN STATE AND INVOKE >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="shared-metadata-1", registry=reg3_id, version="2.0.0", force=True)
+    )
+    assert not error, f"Failed to install v2.0.0 from registry 3 (status {error.status}): {error.error}"
+    assert response.version == "2.0.0", f"Expected version 2.0.0, got {response.version}"
+    assert response.installed_registry == reg3_id, (
+        f"Expected installed_registry {reg3_id}, got {response.installed_registry}"
+    )
+
+    response, error = await lrr_client.misc_api.use_plugin(
+        UsePluginRequest(plugin="shared-metadata-1", arcid=arcid)
+    )
+    assert not error, f"Plugin execution failed (status {error.status}): {error.error}"
+    assert response.data is not None, "Plugin response did not include data payload"
+    assert response.data.get("title") == "base title from registry 3 v2.0.0", (
+        f"Unexpected title after registry 3 v2.0.0 run: {response.data.get('title')!r}"
+    )
+
+    # <<<<< UPGRADE FROM VERSION-ORPHAN STATE AND INVOKE <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
