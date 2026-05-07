@@ -814,6 +814,7 @@ sub provide_url { return; }
         )
 
         sideloaded_redis_key = "LRR_PLUGIN_SAMPLE-DOWNLOADER"
+        environment.redis_client.select(2)
         sideloaded_initial_path = environment.redis_client.hget(sideloaded_redis_key, "installed_path")
         assert sideloaded_initial_path and "Plugin/Sideloaded/" in sideloaded_initial_path, (
             f"Sideloaded fixture not registered with a Sideloaded path: {sideloaded_initial_path!r}"
@@ -906,6 +907,7 @@ sub provide_url { return; }
         # <<<<< FORCE INSTALL ALSO BLOCKED <<<<<
 
         # >>>>> SIDELOADED PROVENANCE UNTOUCHED, MANAGED ARTIFACT NOT WRITTEN >>>>>
+        environment.redis_client.select(2)
         assert environment.redis_client.hget(sideloaded_redis_key, "installed_path") == sideloaded_initial_path, (
             "Sideloaded plugin's installed_path changed after rejected managed install"
         )
