@@ -1362,6 +1362,118 @@ async def test_managed_plugin_upgrade_reloads_across_workers(
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
 @pytest.mark.ratelimit
+async def test_managed_plugin_upgrade_reloads_across_workers_via_list_plugins(
+    lrr_client: LRRClient,
+    environment: AbstractLRRDeploymentContext,
+):
+    """
+    User expectation: after upgrading a plugin from a registry, the plugin
+    settings page (and any other UI listing plugins by type) reflects the
+    new version immediately on every request, regardless of which prefork
+    worker handles the listing call.
+
+    This is the listing-path counterpart to
+    `test_managed_plugin_upgrade_reloads_across_workers`. That sibling
+    exercises the invocation path (`use_plugin`); this one exercises the
+    listing path (`list_plugins` -> `get_plugins`), which is the path the
+    settings page UI consumes.
+
+    1. Install sample-script v1.0 from the demo registry under default multi-worker prefork.
+    2. Prime every prefork worker via concurrent `list_plugins` calls so each
+       loads the v1.0 class through the listing path.
+    3. Upgrade to v1.1 (different ref publishes a new artifact bytes).
+    4. Fire concurrent `list_plugins` calls; assert every worker reports v1.1.
+       A worker that returns v1.0 indicates the listing path short-circuited
+       on cached %INC without checking for an upgrade.
+    """
+    environment.setup(with_api_key=True)
+
+    # >>>>> INSTALL v1.0 FROM main >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    main_refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+    main_version = max(main_refresh_response.index["plugins"]["sample-script"]["versions"].keys())
+
+    _, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-script", registry=reg_id, version=main_version)
+    )
+    assert not error, f"Failed to install sample-script v1.0 (status {error.status}): {error.error}"
+    # <<<<< INSTALL v1.0 FROM main <<<<<
+
+    # >>>>> PRIME EVERY WORKER VIA list_plugins >>>>>
+    # Concurrent listing requests force the client to open multiple connections,
+    # spreading across workers. Each prefork worker loads the v1.0 class into
+    # its own %INC + symbol table the first time it serves a list_plugins call
+    # for the script type.
+    prime_results = await asyncio.gather(*[
+        lrr_client.misc_api.get_available_plugins(GetAvailablePluginsRequest(type="script"))
+        for _ in range(40)
+    ])
+    for i, (response, error) in enumerate(prime_results):
+        assert not error, f"Prime listing {i} failed (status {error.status}): {error.error}"
+        sample = next((p for p in response.plugins if p.namespace == "sample-script"), None)
+        assert sample is not None, f"sample-script missing from prime listing {i}"
+        assert sample.version == main_version, (
+            f"Prime listing {i}: expected v{main_version}, got {sample.version!r}"
+        )
+    # <<<<< PRIME EVERY WORKER VIA list_plugins <<<<<
+
+    # >>>>> UPGRADE TO v1.1 >>>>>
+    _, error = await lrr_client.misc_api.update_registry(
+        reg_id, UpdateRegistryRequest(ref="v1.1")
+    )
+    assert not error, f"Failed to update registry ref (status {error.status}): {error.error}"
+
+    v11_refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry after ref change (status {error.status}): {error.error}"
+    v11_version = max(v11_refresh_response.index["plugins"]["sample-script"]["versions"].keys())
+    assert v11_version != main_version, (
+        f"Demo registry must publish a different version on the v1.1 ref; got {v11_version!r}"
+    )
+
+    _, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-script", registry=reg_id, version=v11_version, force=True)
+    )
+    assert not error, f"Failed to upgrade sample-script to v1.1 (status {error.status}): {error.error}"
+    # <<<<< UPGRADE TO v1.1 <<<<<
+
+    # >>>>> VERIFY v1.1 IN LISTING ACROSS WORKERS >>>>>
+    verify_results = await asyncio.gather(*[
+        lrr_client.misc_api.get_available_plugins(GetAvailablePluginsRequest(type="script"))
+        for _ in range(40)
+    ])
+    stale_listings = []
+    for i, (response, error) in enumerate(verify_results):
+        assert not error, f"Verify listing {i} failed (status {error.status}): {error.error}"
+        sample = next((p for p in response.plugins if p.namespace == "sample-script"), None)
+        assert sample is not None, f"sample-script missing from verify listing {i}"
+        if sample.version != v11_version:
+            stale_listings.append((i, sample.version))
+
+    assert not stale_listings, (
+        f"{len(stale_listings)} of 40 list_plugins responses still report the old "
+        f"version after upgrade: {stale_listings[:5]}. The listing path is "
+        f"serving cached plugin_info() from %INC without checking for upgrades."
+    )
+    # <<<<< VERIFY v1.1 IN LISTING ACROSS WORKERS <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+@pytest.mark.ratelimit
 async def test_managed_plugin_survives_restart(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test that a managed plugin file persists across LRR restart and scan_plugins does not orphan it.

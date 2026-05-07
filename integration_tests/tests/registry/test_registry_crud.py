@@ -168,7 +168,8 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
     3. Delete nonexistent registry, expect 404.
     4. Create registry, update with empty body, expect error.
     5. Update with non-HTTPS url, expect error.
-    6. Update ref field, verify index_cleared.
+    6. Update with fields invalid for the registry's type, expect error.
+    7. Update ref field, verify index_cleared.
     """
     environment.setup(with_api_key=True)
 
@@ -209,12 +210,28 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
     # <<<<< EMPTY UPDATE <<<<<
 
     # >>>>> NON-HTTPS URL ON UPDATE >>>>>
+    # User expectation: updating a registry must reject plaintext HTTP just like
+    # creation does, so plugin artifacts can't be fetched over an insecure channel.
+    # The provider field is supplied so the missing-provider guard does not mask
+    # the URL pattern enforcement we are exercising here.
     response, error = await lrr_client.misc_api.update_registry(
-        reg_id, UpdateRegistryRequest(type="git", url="http://example.com/repo.git")
+        reg_id, UpdateRegistryRequest(type="git", url="http://example.com/repo.git", provider="github")
     )
     assert error is not None, "Expected error for non-HTTPS URL on update"
     assert error.status == 400, f"Expected 400 for non-HTTPS URL on update, got {error.status}"
     # <<<<< NON-HTTPS URL ON UPDATE <<<<<
+
+    # >>>>> UPDATE WITH FIELDS INVALID FOR LOCAL TYPE >>>>>
+    # User expectation: an update that supplies fields meaningless for the
+    # registry's stored type fails loudly. A 200 OK must mean LRR changed
+    # something the caller asked for; silently dropping `provider` on a local
+    # registry would mislead the operator.
+    response, error = await lrr_client.misc_api.update_registry(
+        reg_id, UpdateRegistryRequest(provider="github")
+    )
+    assert error is not None, "Expected error for type-invalid field on update"
+    assert error.status == 400, f"Expected 400 for type-invalid field on update, got {error.status}"
+    # <<<<< UPDATE WITH FIELDS INVALID FOR LOCAL TYPE <<<<<
 
     # >>>>> UPDATE REF CLEARS INDEX >>>>>
     response, error = await lrr_client.misc_api.delete_registry(reg_id)
