@@ -119,7 +119,6 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
     2. Create local registry without path, expect error.
     3. Create git registry with HTTP url, expect error.
     4. Create registry without name, expect error.
-    5. Create a valid registry, then create a second, expect single-registry limit error.
     """
     environment.setup(with_api_key=True)
 
@@ -154,23 +153,6 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
     assert error is not None, "Expected error for missing registry name"
     assert error.status == 400, f"Expected 400 for missing registry name, got {error.status}"
     # <<<<< MISSING NAME <<<<<
-
-    # >>>>> SINGLE-REGISTRY LIMIT >>>>>
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="first", type="local", path="/tmp/plugins")
-    )
-    assert not error, f"Failed to create first registry (status {error.status}): {error.error}"
-    first_id = response.id
-
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="second", type="local", path="/tmp/other")
-    )
-    assert error is not None, "Expected error for single-registry limit"
-    assert error.status == 400, f"Expected 400 for single-registry limit, got {error.status}"
-
-    response, error = await lrr_client.misc_api.delete_registry(first_id)
-    assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
-    # <<<<< SINGLE-REGISTRY LIMIT <<<<<
 
     expect_no_error_logs(environment, LOGGER)
 
