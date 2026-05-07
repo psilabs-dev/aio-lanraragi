@@ -44,11 +44,12 @@ async def test_local_registry_install_errors(
     3. Unknown plugin field: refresh 400.
     4. Invalid published_at: refresh 400.
     5. Invalid sha256 format: refresh 400.
-    6. Traversal path: refresh 400.
-    7. Absolute path: refresh 400.
-    8. Symlink escape path: install 400.
-    9. Wrong sha256: install 422, target path absent.
-    10. Correct sha256: install 200, file present on host.
+    6. Uppercase sha256: refresh 400 (canonical form is lowercase).
+    7. Traversal path: refresh 400.
+    8. Absolute path: refresh 400.
+    9. Symlink escape path: install 400.
+    10. Wrong sha256: install 422, target path absent.
+    11. Correct sha256: install 200, file present on host.
     """
     environment.setup(with_api_key=True)
 
@@ -167,6 +168,88 @@ async def test_local_registry_install_errors(
     assert error is not None, "Expected refresh to fail on invalid sha256 format"
     assert error.status == 400, f"Expected 400 for invalid sha256 format, got {error.status}"
     # <<<<< INVALID SHA256 FORMAT <<<<<
+
+    # >>>>> UPPERCASE SHA256 REJECTED AT REFRESH >>>>>
+    # User expectation (publisher-facing): LRR and registry publishers agree on a
+    # single canonical lowercase form for SHA-256. A manifest that deviates is
+    # rejected at refresh with a clear error, not silently accepted into the
+    # cached index where it would later cause a misleading integrity-mismatch
+    # at install time.
+    registry_json.write_text(json.dumps({
+        "version": 1,
+        "generated_at": generated_at,
+        "plugins": {
+            "uppercase-sha": {
+                "namespace": "uppercase-sha",
+                "type": "download",
+                "versions": {
+                    "1.0.0": {
+                        "version": "1.0.0",
+                        "name": "uppercase-sha",
+                        "author": "test",
+                        "description": "uppercase sha format test",
+                        "artifact": "artifacts/uppercase-sha/1.0.0/UppercaseSha.pm",
+                        "sha256": "AB" * 32,
+                        "published_at": generated_at,
+                    },
+                },
+            },
+        },
+    }))
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert error is not None, "Expected refresh to fail on uppercase sha256"
+    assert error.status == 400, f"Expected 400 for uppercase sha256, got {error.status}"
+    # <<<<< UPPERCASE SHA256 REJECTED AT REFRESH <<<<<
+
+    # >>>>> UNKNOWN ROOT FIELD REJECTED AT REFRESH >>>>>
+    # User expectation: registry manifests follow a strict schema. An unknown
+    # field at the root level (e.g. a typo or an experimental publisher
+    # extension) is rejected at refresh, not silently accepted.
+    registry_json.write_text(json.dumps({
+        "version": 1,
+        "generated_at": generated_at,
+        "plugins": {},
+        "generator": "publisher-tool-v9",
+    }))
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert error is not None, "Expected refresh to fail on unknown root field"
+    assert error.status == 400, f"Expected 400 for unknown root field, got {error.status}"
+    # <<<<< UNKNOWN ROOT FIELD REJECTED AT REFRESH <<<<<
+
+    # >>>>> VERSION KEY DIVERGES FROM INNER VERSION REJECTED AT REFRESH >>>>>
+    # User expectation: in a registry manifest, the version key (e.g. "1.0.0")
+    # must equal the inner `version` field of that record. Otherwise the
+    # version selected by `resolve_max_version` (which sorts on outer keys)
+    # would not equal the version recorded in install provenance — admins
+    # could not reliably reason about which version is installed.
+    registry_json.write_text(json.dumps({
+        "version": 1,
+        "generated_at": generated_at,
+        "plugins": {
+            "version-key-mismatch": {
+                "namespace": "version-key-mismatch",
+                "type": "download",
+                "versions": {
+                    "1.0.0": {
+                        "version": "9.9.9",
+                        "name": "version-key-mismatch",
+                        "author": "test",
+                        "description": "outer key vs inner version mismatch",
+                        "artifact": "artifacts/version-key-mismatch/1.0.0/VersionKeyMismatch.pm",
+                        "sha256": dummy_sha,
+                        "published_at": generated_at,
+                    },
+                },
+            },
+        },
+    }))
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert error is not None, "Expected refresh to fail when version key != inner version"
+    assert error.status == 400, f"Expected 400 for version-key/inner-version mismatch, got {error.status}"
+    # <<<<< VERSION KEY DIVERGES FROM INNER VERSION REJECTED AT REFRESH <<<<<
 
     # >>>>> TRAVERSAL PATH REJECTED >>>>>
     registry_json.write_text(json.dumps({
@@ -478,6 +561,364 @@ sub get_tags { return (); }
     assert not target_pm.exists(), f"Impostor plugin must not be written to disk: {target_pm}"
 
     expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+async def test_install_blocked_against_invalid_filename(
+    environment: AbstractLRRDeploymentContext,
+    lrr_client: LRRClient,
+):
+    """
+    User expectation: a registry publisher who ships an artifact whose
+    filename contains characters outside the safe ASCII allowlist
+    (spaces, exotic punctuation) is rejected at install time, before any
+    bytes land in `Plugin/Managed/`. This protects deployments where
+    spaces in plugin filenames cause subtle Perl module-load issues.
+
+    1. Publish a plugin file at `My Plugin.pm` (space in filename) with
+       a valid SHA-256 in the manifest.
+    2. Refresh succeeds — manifest validation only checks for null bytes,
+       absolute paths, and dot segments, none of which apply here.
+    3. Install fails 422 with "Invalid plugin filename".
+    4. No file lands in `Plugin/Managed/Download/`.
+    """
+    environment.setup(with_api_key=True)
+
+    plugin_rel_path = "artifacts/filename-test/1.0.0/My Plugin.pm"
+    plugin_file = environment.local_registry_dir / plugin_rel_path
+    plugin_file.parent.mkdir(parents=True, exist_ok=True)
+    plugin_file.write_text("""\
+package LANraragi::Plugin::Managed::Download::SafePackage;
+
+use strict;
+use warnings;
+no warnings 'uninitialized';
+
+sub plugin_info {
+    return (
+        name      => "filename-test",
+        type      => "download",
+        namespace => "filename-test",
+        author    => "test",
+        version   => "1.0",
+    );
+}
+
+sub provide_url { return; }
+
+1;
+""", encoding="utf-8")
+    real_sha = hashlib.sha256(plugin_file.read_bytes()).hexdigest()
+    generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    registry_json = environment.local_registry_dir / "registry.json"
+    registry_json.write_text(json.dumps({
+        "version": 1,
+        "generated_at": generated_at,
+        "plugins": {
+            "filename-test": {
+                "namespace": "filename-test",
+                "type": "download",
+                "versions": {
+                    "1.0.0": {
+                        "version": "1.0.0",
+                        "name": "filename-test",
+                        "author": "test",
+                        "description": "tests filename character allowlist",
+                        "artifact": plugin_rel_path,
+                        "sha256": real_sha,
+                        "published_at": generated_at,
+                    },
+                },
+            },
+        },
+    }))
+
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(name="filename-test", type="local", path=environment.local_registry_path)
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Refresh should accept the manifest (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="filename-test", registry=reg_id, version="1.0.0")
+    )
+    assert error is not None, "Expected install to fail for invalid filename"
+    assert error.status == 422, f"Expected 422 for invalid filename, got {error.status}: {error.error}"
+    assert "Invalid plugin filename" in (error.error or ""), (
+        f"Expected error message to mention 'Invalid plugin filename', got: {error.error!r}. "
+        f"A different rejection reason indicates the filename allowlist did not fire — install reached a later validation."
+    )
+
+    assert not list(environment.plugin_managed_dir.rglob("*.pm")), (
+        "No .pm files should be written for an invalid-filename install"
+    )
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+async def test_install_blocked_against_package_mismatch(
+    environment: AbstractLRRDeploymentContext,
+    lrr_client: LRRClient,
+):
+    """
+    User expectation: a plugin file whose `package` declaration does not
+    match the package implied by its artifact filename is rejected at
+    install time. This prevents namespace squatting where a publisher
+    ships `Foo.pm` declaring `LANraragi::Plugin::Managed::Download::Bar`
+    and then later legitimate `Bar` plugins collide against the
+    orphaned mismatched file.
+
+    1. Publish a plugin at `Foo.pm` whose content declares
+       `package LANraragi::Plugin::Managed::Download::Bar`.
+    2. Refresh succeeds; sha256 verification at install time will pass.
+    3. Install fails 422 with "Package mismatch".
+    4. No file lands in `Plugin/Managed/Download/`.
+    """
+    environment.setup(with_api_key=True)
+
+    plugin_rel_path = "artifacts/package-mismatch/1.0.0/Foo.pm"
+    plugin_file = environment.local_registry_dir / plugin_rel_path
+    plugin_file.parent.mkdir(parents=True, exist_ok=True)
+    plugin_file.write_text("""\
+package LANraragi::Plugin::Managed::Download::Bar;
+
+use strict;
+use warnings;
+no warnings 'uninitialized';
+
+sub plugin_info {
+    return (
+        name      => "package-mismatch",
+        type      => "download",
+        namespace => "package-mismatch",
+        author    => "test",
+        version   => "1.0",
+    );
+}
+
+sub provide_url { return; }
+
+1;
+""", encoding="utf-8")
+    real_sha = hashlib.sha256(plugin_file.read_bytes()).hexdigest()
+    generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    registry_json = environment.local_registry_dir / "registry.json"
+    registry_json.write_text(json.dumps({
+        "version": 1,
+        "generated_at": generated_at,
+        "plugins": {
+            "package-mismatch": {
+                "namespace": "package-mismatch",
+                "type": "download",
+                "versions": {
+                    "1.0.0": {
+                        "version": "1.0.0",
+                        "name": "package-mismatch",
+                        "author": "test",
+                        "description": "tests package vs filename mismatch detection",
+                        "artifact": plugin_rel_path,
+                        "sha256": real_sha,
+                        "published_at": generated_at,
+                    },
+                },
+            },
+        },
+    }))
+
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(name="package-mismatch", type="local", path=environment.local_registry_path)
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Refresh should accept the manifest (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="package-mismatch", registry=reg_id, version="1.0.0")
+    )
+    assert error is not None, "Expected install to fail for package mismatch"
+    assert error.status == 422, f"Expected 422 for package mismatch, got {error.status}: {error.error}"
+    assert "Package mismatch" in (error.error or ""), (
+        f"Expected error message to mention 'Package mismatch', got: {error.error!r}. "
+        f"A different rejection reason indicates the package check did not fire — install reached a later validation."
+    )
+
+    assert not list(environment.plugin_managed_dir.rglob("*.pm")), (
+        "No .pm files should be written for a package-mismatch install"
+    )
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+async def test_plugin_install_blocked_against_sideloaded(
+    environment: AbstractLRRDeploymentContext,
+    lrr_client: LRRClient,
+):
+    """
+    User expectation: installing a managed plugin from a registry over an
+    existing sideloaded plugin of the same namespace requires the user to
+    remove the sideloaded plugin first, just like for builtin plugins.
+    A registry install must not silently overwrite a sideloaded plugin,
+    and `force=true` must not bypass this protection.
+
+    1. Seed a sideloaded plugin (namespace `sample-downloader`) before LRR
+       starts so it is discovered and registered as the existing copy.
+    2. Confirm the plugin is registered with a `Plugin/Sideloaded/` path
+       and no `installed_registry` provenance.
+    3. Create a local registry that publishes namespace `sample-downloader`.
+    4. Refresh succeeds; install without force is rejected with 400.
+    5. Force install is rejected with the same status.
+    6. Redis provenance for the sideloaded plugin is unchanged (still a
+       Sideloaded path, still no `installed_registry`).
+    7. No `Plugin/Managed/Download/SampleDownload.pm` is written.
+    """
+    sideloaded_body = """\
+package LANraragi::Plugin::Sideloaded::Testing::SideSample;
+
+use strict;
+use warnings;
+no warnings 'uninitialized';
+
+sub plugin_info {
+    return (
+        name      => "sample-downloader-sideloaded",
+        type      => "download",
+        namespace => "sample-downloader",
+        author    => "test",
+        version   => "0.9",
+    );
+}
+
+sub provide_url { return; }
+
+1;
+"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sideloaded_src = Path(tmpdir) / "SideSample.pm"
+        sideloaded_src.write_bytes(sideloaded_body.encode("utf-8"))
+
+        environment.setup(
+            with_api_key=True,
+            plugin_paths={"Sideloaded": [str(sideloaded_src)]},
+        )
+
+        sideloaded_redis_key = "LRR_PLUGIN_SAMPLE-DOWNLOADER"
+        sideloaded_initial_path = environment.redis_client.hget(sideloaded_redis_key, "installed_path")
+        assert sideloaded_initial_path and "Plugin/Sideloaded/" in sideloaded_initial_path, (
+            f"Sideloaded fixture not registered with a Sideloaded path: {sideloaded_initial_path!r}"
+        )
+        assert environment.redis_client.hget(sideloaded_redis_key, "installed_registry") is None, (
+            "Sideloaded fixture must not have installed_registry set"
+        )
+
+        plugin_rel_path = "artifacts/sample-downloader/1.0.0/SampleDownload.pm"
+        plugin_file = environment.local_registry_dir / plugin_rel_path
+        plugin_file.parent.mkdir(parents=True, exist_ok=True)
+        plugin_file.write_text("""\
+package LANraragi::Plugin::Managed::Download::SampleDownload;
+
+use strict;
+use warnings;
+no warnings 'uninitialized';
+
+sub plugin_info {
+    return (
+        name      => "sample-downloader",
+        type      => "download",
+        namespace => "sample-downloader",
+        author    => "test",
+        version   => "1.0",
+    );
+}
+
+sub provide_url { return; }
+
+1;
+""", encoding="utf-8")
+        real_sha = hashlib.sha256(plugin_file.read_bytes()).hexdigest()
+        generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        registry_json = environment.local_registry_dir / "registry.json"
+        registry_json.write_text(json.dumps({
+            "version": 1,
+            "generated_at": generated_at,
+            "plugins": {
+                "sample-downloader": {
+                    "namespace": "sample-downloader",
+                    "type": "download",
+                    "versions": {
+                        "1.0.0": {
+                            "version": "1.0.0",
+                            "name": "sample-downloader",
+                            "author": "test",
+                            "description": "managed sample downloader",
+                            "artifact": plugin_rel_path,
+                            "sha256": real_sha,
+                            "published_at": generated_at,
+                        },
+                    },
+                },
+            },
+        }))
+
+        response, error = await lrr_client.misc_api.create_registry(
+            CreateRegistryRequest(
+                name="sideloaded-conflict",
+                type="local",
+                path=environment.local_registry_path,
+            )
+        )
+        assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+        reg_id = response.id
+
+        response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+        assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+
+        # >>>>> INSTALL BLOCKED AGAINST SIDELOADED >>>>>
+        response, error = await lrr_client.misc_api.install_plugin(
+            InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version="1.0.0")
+        )
+        assert error is not None, "Expected install to be rejected over a sideloaded plugin"
+        assert error.status == 400, (
+            f"Expected 400 for sideloaded conflict, got {error.status}: {error.error}"
+        )
+        # <<<<< INSTALL BLOCKED AGAINST SIDELOADED <<<<<
+
+        # >>>>> FORCE INSTALL ALSO BLOCKED >>>>>
+        response, error = await lrr_client.misc_api.install_plugin(
+            InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version="1.0.0", force=True)
+        )
+        assert error is not None, "force=true must not bypass a sideloaded namespace conflict"
+        assert error.status == 400, (
+            f"Expected 400 for sideloaded conflict (force), got {error.status}: {error.error}"
+        )
+        # <<<<< FORCE INSTALL ALSO BLOCKED <<<<<
+
+        # >>>>> SIDELOADED PROVENANCE UNTOUCHED, MANAGED ARTIFACT NOT WRITTEN >>>>>
+        assert environment.redis_client.hget(sideloaded_redis_key, "installed_path") == sideloaded_initial_path, (
+            "Sideloaded plugin's installed_path changed after rejected managed install"
+        )
+        assert environment.redis_client.hget(sideloaded_redis_key, "installed_registry") is None, (
+            "Sideloaded plugin gained installed_registry after rejected managed install"
+        )
+        target_pm = environment.plugin_managed_dir / "Download" / "SampleDownload.pm"
+        assert not target_pm.exists(), (
+            f"Managed plugin must not be written when sideloaded conflict is present: {target_pm}"
+        )
+        # <<<<< SIDELOADED PROVENANCE UNTOUCHED, MANAGED ARTIFACT NOT WRITTEN <<<<<
+
+        expect_no_error_logs(environment, LOGGER)
 
 
 @pytest.mark.asyncio
