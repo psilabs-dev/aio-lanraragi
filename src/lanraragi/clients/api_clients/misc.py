@@ -34,7 +34,7 @@ from lanraragi.models.misc import (
     RegistryConfig,
     RemoveDefaultRegistryResponse,
     UpdateDefaultRegistryResponse,
-    UpdatePluginConfigRequest,
+    UpdateMetadataPluginConfigRequest,
     UpdateRegistryRequest,
     UpdateRegistryResponse,
     UsePluginAsyncRequest,
@@ -331,11 +331,11 @@ class _MiscApiClient(_ApiClient):
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))
 
-    async def update_plugin_config(self, namespace: str, request: UpdatePluginConfigRequest) -> _LRRClientResponse[LanraragiResponse]:
+    async def update_metadata_plugin_config(self, namespace: str, request: UpdateMetadataPluginConfigRequest) -> _LRRClientResponse[LanraragiResponse]:
         """
-        PUT /api/plugins/installed/{namespace}/config
+        PUT /api/plugins/installed/{namespace}/metadata-config
         """
-        url = self.api_context.build_url(f"/api/plugins/installed/{namespace}/config")
+        url = self.api_context.build_url(f"/api/plugins/installed/{namespace}/metadata-config")
         body = {}
         if request.enabled is not None:
             body["enabled"] = request.enabled

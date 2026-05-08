@@ -14,7 +14,7 @@ from lanraragi.models.misc import (
     CreateRegistryRequest,
     GetAvailablePluginsRequest,
     InstallPluginRequest,
-    UpdatePluginConfigRequest,
+    UpdateMetadataPluginConfigRequest,
 )
 
 from aio_lanraragi_tests.deployment.base import (
@@ -89,8 +89,8 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     # <<<<< DEFAULT FIELD VALUES <<<<<
 
     # >>>>> HIDE PLUGIN >>>>>
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "sample-metadata", UpdatePluginConfigRequest(hidden=True)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "sample-metadata", UpdateMetadataPluginConfigRequest(hidden=True)
     )
     assert not error, f"Failed to update plugin config (status {error.status}): {error.error}"
 
@@ -107,8 +107,8 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     # <<<<< HIDE PLUGIN <<<<<
 
     # >>>>> UNHIDE PLUGIN >>>>>
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "sample-metadata", UpdatePluginConfigRequest(hidden=False)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "sample-metadata", UpdateMetadataPluginConfigRequest(hidden=False)
     )
     assert not error, f"Failed to update plugin config (status {error.status}): {error.error}"
 
@@ -125,8 +125,8 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     # <<<<< UNHIDE PLUGIN <<<<<
 
     # >>>>> CONFIG SURVIVES UNINSTALL/REINSTALL >>>>>
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "sample-metadata", UpdatePluginConfigRequest(hidden=True, priority=7)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "sample-metadata", UpdateMetadataPluginConfigRequest(hidden=True, priority=7)
     )
     assert not error, f"Failed to set hidden+priority (status {error.status}): {error.error}"
 
@@ -152,8 +152,8 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     # <<<<< CONFIG SURVIVES UNINSTALL/REINSTALL <<<<<
 
     # >>>>> HIDE BUILT-IN PLUGIN >>>>>
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "copytags", UpdatePluginConfigRequest(hidden=True)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "copytags", UpdateMetadataPluginConfigRequest(hidden=True)
     )
     assert not error, f"Failed to hide built-in plugin (status {error.status}): {error.error}"
 
@@ -168,8 +168,8 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     else:
         pytest.fail("Built-in plugin copytags not found in list after hide")
 
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "copytags", UpdatePluginConfigRequest(hidden=False)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "copytags", UpdateMetadataPluginConfigRequest(hidden=False)
     )
     assert not error, f"Failed to unhide built-in plugin (status {error.status}): {error.error}"
     # <<<<< HIDE BUILT-IN PLUGIN <<<<<
@@ -183,8 +183,8 @@ async def test_plugin_config_nonexistent_namespace(lrr_client: LRRClient, enviro
     """Updating config for a never-installed namespace returns 404."""
     environment.setup(with_api_key=True)
 
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "definitely-not-real", UpdatePluginConfigRequest(hidden=True)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "definitely-not-real", UpdateMetadataPluginConfigRequest(hidden=True)
     )
     assert error is not None, "Expected 404 error for nonexistent namespace"
     assert error.status == 404, f"Expected 404 for nonexistent namespace, got {error.status}"
@@ -197,13 +197,12 @@ async def test_plugin_config_nonexistent_namespace(lrr_client: LRRClient, enviro
 @pytest.mark.ratelimit
 async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
-    Test plugin priority via update_plugin_config.
+    Test plugin priority via update_metadata_plugin_config.
 
     1. Create registry, refresh, install sample-metadata.
     2. Verify default priority is 0.
     3. Set priority to 5, verify it persists in plugin list.
     4. Set distinct priorities on sample-metadata and a default metadata plugin, verify both.
-    5. Set priority on a non-metadata plugin, verify it is stored.
     """
     environment.setup(with_api_key=True)
 
@@ -223,7 +222,6 @@ async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDe
     refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     sample_metadata_version = max(refresh_response.index["plugins"]["sample-metadata"]["versions"].keys())
-    sample_downloader_version = max(refresh_response.index["plugins"]["sample-downloader"]["versions"].keys())
 
     response, error = await lrr_client.misc_api.install_plugin(
         InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version)
@@ -245,8 +243,8 @@ async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDe
     # <<<<< VERIFY DEFAULT PRIORITY <<<<<
 
     # >>>>> SET PRIORITY >>>>>
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "sample-metadata", UpdatePluginConfigRequest(priority=5)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "sample-metadata", UpdateMetadataPluginConfigRequest(priority=5)
     )
     assert not error, f"Failed to set priority (status {error.status}): {error.error}"
 
@@ -263,8 +261,8 @@ async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDe
     # <<<<< SET PRIORITY <<<<<
 
     # >>>>> DISTINCT PRIORITIES ON TWO METADATA PLUGINS >>>>>
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "copytags", UpdatePluginConfigRequest(priority=3)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "copytags", UpdateMetadataPluginConfigRequest(priority=3)
     )
     assert not error, f"Failed to set copytags priority (status {error.status}): {error.error}"
 
@@ -280,30 +278,69 @@ async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDe
     assert priorities["copytags"] == 3, f"Expected copytags priority 3, got {priorities.get('copytags')}"
     # <<<<< DISTINCT PRIORITIES ON TWO METADATA PLUGINS <<<<<
 
-    # >>>>> PRIORITY ON NON-METADATA PLUGIN >>>>>
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+@pytest.mark.ratelimit
+async def test_plugin_config_rejects_non_metadata_fields(
+    lrr_client: LRRClient, environment: AbstractLRRDeploymentContext
+):
+    """
+    Test that update_metadata_plugin_config rejects metadata-only fields on non-metadata plugins.
+
+    Per spec: enabled, priority, and hidden are properties of metadata plugins.
+    Non-metadata plugins (login, download, script) cannot carry these fields.
+
+    1. Create registry, refresh, install sample-downloader (a download plugin).
+    2. Attempt to set enabled=True; expect 400.
+    3. Attempt to set priority=2; expect 400.
+    4. Attempt to set hidden=True; expect 400.
+    """
+    environment.setup(with_api_key=True)
+
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            type="git",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+    sample_downloader_version = max(refresh_response.index["plugins"]["sample-downloader"]["versions"].keys())
+
     response, error = await lrr_client.misc_api.install_plugin(
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
     )
     assert not error, f"Failed to install sample-downloader (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "sample-downloader", UpdatePluginConfigRequest(priority=2)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "sample-downloader", UpdateMetadataPluginConfigRequest(enabled=True)
     )
-    assert not error, f"Failed to set sample-downloader priority (status {error.status}): {error.error}"
-
-    response, error = await lrr_client.misc_api.get_available_plugins(
-        GetAvailablePluginsRequest(type="download")
+    assert error and error.status == 400, (
+        f"Expected 400 rejecting enabled on download plugin, got status={error.status if error else 'no error'}"
     )
-    assert not error, f"Failed to list download plugins (status {error.status}): {error.error}"
-    for plugin in response.plugins:
-        if plugin.namespace == "sample-downloader":
-            assert plugin.priority == 2, f"Expected sample-downloader priority 2, got {plugin.priority}"
-            break
-    else:
-        pytest.fail("sample-downloader not found in download plugin list")
-    # <<<<< PRIORITY ON NON-METADATA PLUGIN <<<<<
 
-    expect_no_error_logs(environment, LOGGER)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "sample-downloader", UpdateMetadataPluginConfigRequest(priority=2)
+    )
+    assert error and error.status == 400, (
+        f"Expected 400 rejecting priority on download plugin, got status={error.status if error else 'no error'}"
+    )
+
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "sample-downloader", UpdateMetadataPluginConfigRequest(hidden=True)
+    )
+    assert error and error.status == 400, (
+        f"Expected 400 rejecting hidden on download plugin, got status={error.status if error else 'no error'}"
+    )
 
 
 @pytest.mark.asyncio
@@ -349,26 +386,26 @@ async def test_plugin_priority_execution_order(lrr_client: LRRClient, environmen
     # <<<<< INSTALL ALL THREE <<<<<
 
     # >>>>> SET PRIORITIES: 2, 1, 3 >>>>>
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "title-suffix-2", UpdatePluginConfigRequest(priority=1)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "title-suffix-2", UpdateMetadataPluginConfigRequest(priority=1)
     )
     assert not error, f"Failed to set suffix-2 priority (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "title-suffix-1", UpdatePluginConfigRequest(priority=2)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "title-suffix-1", UpdateMetadataPluginConfigRequest(priority=2)
     )
     assert not error, f"Failed to set suffix-1 priority (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "title-suffix-3", UpdatePluginConfigRequest(priority=3)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "title-suffix-3", UpdateMetadataPluginConfigRequest(priority=3)
     )
     assert not error, f"Failed to set suffix-3 priority (status {error.status}): {error.error}"
     # <<<<< SET PRIORITIES <<<<<
 
     # >>>>> ENABLE ALL THREE >>>>>
     for ns in ("title-suffix-1", "title-suffix-2", "title-suffix-3"):
-        response, error = await lrr_client.misc_api.update_plugin_config(
-            ns, UpdatePluginConfigRequest(enabled=True)
+        response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+            ns, UpdateMetadataPluginConfigRequest(enabled=True)
         )
         assert not error, f"Failed to enable {ns} (status {error.status}): {error.error}"
     # <<<<< ENABLE ALL THREE <<<<<
@@ -389,18 +426,18 @@ async def test_plugin_priority_execution_order(lrr_client: LRRClient, environmen
     # <<<<< UPLOAD AND VERIFY ORDER 2-1-3 <<<<<
 
     # >>>>> CHANGE PRIORITIES: 3, 2, 1 >>>>>
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "title-suffix-3", UpdatePluginConfigRequest(priority=1)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "title-suffix-3", UpdateMetadataPluginConfigRequest(priority=1)
     )
     assert not error, f"Failed to set suffix-3 priority (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "title-suffix-2", UpdatePluginConfigRequest(priority=2)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "title-suffix-2", UpdateMetadataPluginConfigRequest(priority=2)
     )
     assert not error, f"Failed to set suffix-2 priority (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "title-suffix-1", UpdatePluginConfigRequest(priority=3)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "title-suffix-1", UpdateMetadataPluginConfigRequest(priority=3)
     )
     assert not error, f"Failed to set suffix-1 priority (status {error.status}): {error.error}"
     # <<<<< CHANGE PRIORITIES <<<<<
