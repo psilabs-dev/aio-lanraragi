@@ -94,3 +94,23 @@ async def test_metrics_endpoint(lrr_client: LRRClient):
     assert "lanraragi_pages_read_total" in content, "Missing lanraragi_pages_read_total metric"
     assert "lanraragi_api_requests_total" in content, "Missing lanraragi_api_requests_total metric"
     # <<<<< FETCH AND VERIFY METRICS <<<<<
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(reason="requires LRR-side fix: metrics endpoint uses session-only auth under nofun mode", strict=False)
+async def test_metrics_endpoint_nofun(environment: AbstractLRRDeploymentContext, lrr_client: LRRClient):
+    """
+    Test metrics endpoint is reachable with API key auth when nofun mode is enabled.
+
+    1. Enable nofun mode and restart.
+    2. Fetch metrics with API key, verify 200 response with expected content.
+    """
+    environment.enable_nofun_mode()
+    environment.restart()
+
+    response, error = await lrr_client.metrics_api.get_metrics()
+    assert not error, f"Failed to get metrics (status {error.status}): {error.error}"
+
+    content = response.content
+    assert "# EOF" in content, "Metrics response missing EOF marker"
+    assert "lanraragi_nofun_mode 1" in content, "Missing or incorrect lanraragi_nofun_mode metric"

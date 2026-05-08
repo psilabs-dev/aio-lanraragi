@@ -487,10 +487,6 @@ async def test_custom_namespaces(
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="hidecompleted Lua path crashes with empty cjson result when all archives are completed",
-    strict=False,
-)
 async def test_hidecompleted(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,

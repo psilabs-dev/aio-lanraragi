@@ -416,3 +416,173 @@ async def test_reader_to_index_cross_dt(
             await bc.close()
             await browser.close()
     # <<<<< UI STAGE <<<<<
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.xfail(reason="requires LRR-side fix: PR #1518 history push deduplication", strict=False)
+async def test_forward_history_after_redraw(
+        lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+):
+    """
+    Test that forward history is preserved after a datatables redraw.
+
+    1. Upload 1 archive.
+    2. Navigate to index with search filter matching the archive.
+    3. Click archive to enter reader.
+    4. Browser back to index, then reload (triggers non-popstate drawCallback).
+    5. Browser forward, verify return to reader.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_path = create_archive_file(Path(tmpdir), "archive_1", num_pages=3)
+        response, error = await upload_archive(
+            lrr_client, archive_path, archive_path.name, semaphore,
+            title="History 1", tags="",
+        )
+        assert not error, f"Upload failed (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await browser.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            # Navigate to index with search filter.
+            await page.goto(f"{lrr_client.lrr_base_url}/?q=History")
+            await page.wait_for_load_state("networkidle")
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+
+            # Find the archive in DT results.
+            search_response_body = None
+            for resp in responses:
+                if "/search" not in resp.url or resp.request.method != "GET" or resp.status != 200:
+                    continue
+                body = json.loads(await resp.text())
+                if "data" in body and len(body["data"]) == 1:
+                    search_response_body = body
+                    break
+            assert search_response_body is not None, "Did not find search response with 1 archive"
+            dt_title = search_response_body["data"][0]["title"]
+            responses.clear()
+            console_evts.clear()
+
+            # Click archive to enter reader.
+            await page.locator("#thumbs_container a", has_text=dt_title).first.click()
+            await page.wait_for_load_state("networkidle")
+            assert "/reader" in page.url
+            LOGGER.debug(f"Entered reader: {page.url}")
+
+            # Browser back to index (popstate-guarded, pushState skipped).
+            responses.clear()
+            console_evts.clear()
+            await page.go_back(wait_until="networkidle")
+            LOGGER.debug(f"After back: {page.url}")
+            assert "/reader" not in page.url
+
+            # Reload triggers a fresh drawCallback (not popstate-guarded).
+            responses.clear()
+            console_evts.clear()
+            await page.reload(wait_until="networkidle")
+            LOGGER.debug(f"After reload: {page.url}")
+
+            # Browser forward should return to reader.
+            responses.clear()
+            console_evts.clear()
+            await page.go_forward(wait_until="networkidle")
+            forward_url = page.url
+            LOGGER.debug(f"After forward: {forward_url}")
+            assert "/reader" in forward_url, f"Forward history was wiped by drawCallback pushState, got {forward_url}"
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.xfail(reason="requires LRR-side fix: PR #1518 history push deduplication", strict=False)
+async def test_back_stack_no_growth_on_reload(
+        lrr_client: LRRClient,
+):
+    """
+    Test that reloading the index does not add duplicate history entries.
+
+    1. Navigate to login page (anchor).
+    2. Navigate to index with search filter.
+    3. Reload the page.
+    4. Press back twice, verify arrival at login page (no duplicate entries).
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await browser.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            # Navigate to login page as anchor.
+            await page.goto(f"{lrr_client.lrr_base_url}/login")
+            await page.wait_for_load_state("networkidle")
+            responses.clear()
+            console_evts.clear()
+
+            # Navigate to index with search filter.
+            await page.goto(f"{lrr_client.lrr_base_url}/?q=test")
+            await page.wait_for_load_state("networkidle")
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+            responses.clear()
+            console_evts.clear()
+
+            # Reload (drawCallback fires with non-popstate pushState).
+            await page.reload(wait_until="networkidle")
+            LOGGER.debug(f"After reload: {page.url}")
+            responses.clear()
+            console_evts.clear()
+
+            # Back twice should reach the login anchor.
+            # Without fix: reload added a duplicate, so 2 backs only reaches
+            # the goto entry (still index).
+            # With fix: reload pushState was skipped, so 2 backs reaches login.
+            await page.go_back(wait_until="networkidle")
+            LOGGER.debug(f"After first back: {page.url}")
+            await page.go_back(wait_until="networkidle")
+            back_url = page.url
+            LOGGER.debug(f"After second back: {back_url}")
+            assert "/login" in back_url, f"Back stack has duplicate entries from reload, got {back_url}"
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<

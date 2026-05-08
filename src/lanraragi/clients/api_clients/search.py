@@ -96,6 +96,8 @@ class _SearchApiClient(_ApiClient):
                 c["newonly"] = clause.newonly
             if clause.untaggedonly is not None:
                 c["untaggedonly"] = clause.untaggedonly
+            if clause.hidecompleted is not None:
+                c["hidecompleted"] = clause.hidecompleted
             clauses.append(c)
         body["clauses"] = clauses
         if request.start is not None:
