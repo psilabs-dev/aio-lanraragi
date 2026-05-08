@@ -146,7 +146,7 @@ class UpdateDefaultRegistryResponse(LanraragiResponse):
 class RemoveDefaultRegistryResponse(LanraragiResponse):
     registry_id: str = Field(...)
 
-class UpdatePluginConfigRequest(LanraragiRequest):
+class UpdateMetadataPluginConfigRequest(LanraragiRequest):
     enabled: bool | None = Field(None)
     hidden: bool | None = Field(None)
     priority: int | None = Field(None)
@@ -192,7 +192,7 @@ __all__ = [
     "GetDefaultRegistryResponse",
     "UpdateDefaultRegistryResponse",
     "RemoveDefaultRegistryResponse",
-    "UpdatePluginConfigRequest",
+    "UpdateMetadataPluginConfigRequest",
     "InstallPluginRequest",
     "InstallPluginResponse",
 ]

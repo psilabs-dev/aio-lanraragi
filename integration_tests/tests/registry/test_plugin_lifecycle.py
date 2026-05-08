@@ -17,7 +17,7 @@ from lanraragi.models.misc import (
     CreateRegistryRequest,
     GetAvailablePluginsRequest,
     InstallPluginRequest,
-    UpdatePluginConfigRequest,
+    UpdateMetadataPluginConfigRequest,
     UpdateRegistryRequest,
     UsePluginRequest,
 )
@@ -852,8 +852,8 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     # <<<<< VERIFY REINSTALLED <<<<<
 
     # >>>>> ENABLE AND VERIFY EXECUTION >>>>>
-    response, error = await lrr_client.misc_api.update_plugin_config(
-        "title-suffix-1", UpdatePluginConfigRequest(enabled=True)
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "title-suffix-1", UpdateMetadataPluginConfigRequest(enabled=True)
     )
     assert not error, f"Failed to enable plugin (status {error.status}): {error.error}"
 
@@ -936,7 +936,8 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
         conflict_path = Path(tmpdir) / "SampleMetadata.pm"
         conflict_path.write_text(
             'package LANraragi::Plugin::Metadata::Testing::SampleMetadata;\n'
-            'sub plugin_info { return ( name => "Conflict", namespace => "sample-metadata" ); }\n'
+            'sub plugin_info { return ( name => "Conflict", namespace => "sample-metadata", type => "metadata" ); }\n'
+            'sub get_tags { return (); }\n'
             '1;\n'
         )
         environment.setup(
