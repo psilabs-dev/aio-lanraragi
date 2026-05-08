@@ -297,7 +297,7 @@ async def test_plugin_install_error_paths(lrr_client: LRRClient, environment: Ab
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("registry-tx") # transactional (tx)
+@pytest.mark.dev("registry")
 async def test_plugin_install_failed_require_rolls_back(
     lrr_client: LRRClient,
     environment: AbstractLRRDeploymentContext,
@@ -556,7 +556,7 @@ async def test_plugin_install_failed_require_rolls_back(
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("registry-tx") # transactional (tx)
+@pytest.mark.dev("registry")
 async def test_install_failure_preserves_other_plugins(
     lrr_client: LRRClient,
     environment: AbstractLRRDeploymentContext,
