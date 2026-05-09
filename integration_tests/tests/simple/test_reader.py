@@ -624,7 +624,7 @@ async def test_slideshow_continue_navigation(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1492", strict=False)
+@pytest.mark.xfail(reason="flaky: stale wait_for(state='hidden') resolves on a previous overlay-hide cycle rather than the edit-step's hide; PR #1492 reduced the rate but did not eliminate", strict=False)
 async def test_toc_reader(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 ):

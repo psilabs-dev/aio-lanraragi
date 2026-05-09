@@ -5,6 +5,7 @@ These tests cover search result handling including:
 - Pagination (start=0, start=N, start=-1, edge cases)
 - Random archive search
 - Custom namespace sorting (sortby=artist, sortby=parody)
+- hidecompleted filter
 """
 
 import asyncio

@@ -74,11 +74,12 @@ class LRRClient(ApiContextManager):
 
     @property
     def metrics_api(self) -> _MetricsApiClient:
-        # PR: https://github.com/Difegue/LANraragi/pull/1301
+        """
+        https://github.com/Difegue/LANraragi/pull/1301
+        """
         return self._metrics_api
     @metrics_api.setter
     def metrics_api(self, value: _MetricsApiClient):
-        # PR: https://github.com/Difegue/LANraragi/pull/1301
         self._metrics_api = value
 
     @property

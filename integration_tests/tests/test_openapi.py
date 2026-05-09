@@ -253,18 +253,16 @@ async def test_bypass_via_redis_config(request: pytest.FixtureRequest, resource_
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.xfail(reason="category= empty string violates minLength:14 in openapi.yaml", strict=False)
 async def test_validation_carousel_search(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int):
     """
-    Reproduce the browser's inbox carousel request that fails when OpenAPI
-    validation is enabled. The index page JS constructs:
-    /api/search?filter=&category=&newonly=true&sortby=date_added&order=desc&start=-1
-
-    The empty "category=" param violates the schema's minLength:14 constraint.
+    Verify the inbox carousel does not send empty `filter=`/`category=` params
+    that would violate openapi.yaml's minLength:14 constraint on `category`.
+    Regression guard against https://github.com/Difegue/LANraragi/pull/1490.
 
     1. Start LRR with validation enabled (no bypass).
     2. Open index page with carousel type set to "inbox".
-    3. Assert the /api/search carousel response returns 200.
+    3. Assert the /api/search carousel response returns 200 and the URL omits
+       the empty params.
     """
     env: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
     try:
@@ -295,16 +293,21 @@ async def test_validation_carousel_search(request: pytest.FixtureRequest, resour
                     await page.goto(f"{client.lrr_base_url}/")
                     await page.wait_for_load_state("networkidle")
 
-                    # Find carousel search responses (not /random, not /cache)
-                    search_responses = [
-                        r for r in responses
-                        if "/api/search" in r.url and "random" not in r.url and "cache" not in r.url
-                    ]
+                    search_responses: list[playwright.async_api._generated.Response] = []
+                    for r in responses:
+                        if "/api/search" in r.url and "random" not in r.url and "cache" not in r.url:
+                            search_responses.append(r)
                     assert len(search_responses) > 0, "No /api/search response captured from carousel"
 
                     for r in search_responses:
                         assert r.status == 200, (
                             f"Carousel search returned {r.status}, expected 200. URL: {r.url}"
+                        )
+                        assert "category=&" not in r.url and not r.url.endswith("category="), (
+                            f"Carousel URL contains empty category= param: {r.url}"
+                        )
+                        assert "filter=&" not in r.url and not r.url.endswith("filter="), (
+                            f"Carousel URL contains empty filter= param: {r.url}"
                         )
 
                     await assert_browser_responses_ok(responses, client, logger=LOGGER)

@@ -116,7 +116,7 @@ async def test_browser_back_and_forward(
         bc = await browser.new_context()
 
         try:
-            page = await browser.new_page()
+            page = await bc.new_page()
             responses: list[playwright.async_api._generated.Response] = []
             console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
@@ -239,7 +239,7 @@ async def test_reader_to_index(
         bc = await browser.new_context()
 
         try:
-            page = await browser.new_page()
+            page = await bc.new_page()
             responses: list[playwright.async_api._generated.Response] = []
             console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
@@ -340,7 +340,7 @@ async def test_reader_to_index_cross_dt(
         bc = await browser.new_context()
 
         try:
-            page = await browser.new_page()
+            page = await bc.new_page()
             responses: list[playwright.async_api._generated.Response] = []
             console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
@@ -456,7 +456,7 @@ async def test_forward_history_after_redraw(
         bc = await browser.new_context()
 
         try:
-            page = await browser.new_page()
+            page = await bc.new_page()
             responses: list[playwright.async_api._generated.Response] = []
             console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
@@ -543,7 +543,7 @@ async def test_back_stack_no_growth_on_reload(
         bc = await browser.new_context()
 
         try:
-            page = await browser.new_page()
+            page = await bc.new_page()
             responses: list[playwright.async_api._generated.Response] = []
             console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))

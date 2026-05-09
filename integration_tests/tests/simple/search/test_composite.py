@@ -209,18 +209,19 @@ async def test_composite_search(
     # Two identical clauses should produce same results as single clause
     single_clause = CompositeSearchClause(filter="artist:wada rco")
 
-    response_single, error = await lrr_client.search_api.composite_search(
+    response_a, error = await lrr_client.search_api.composite_search(
         CompositeSearchRequest(clauses=[single_clause], groupby_tanks=True)
     )
     assert not error, f"Single clause search failed (status {error.status}): {error.error}"
 
-    response_dup, error = await lrr_client.search_api.composite_search(
+    response_b, error = await lrr_client.search_api.composite_search(
         CompositeSearchRequest(clauses=[single_clause, single_clause], groupby_tanks=True)
     )
     assert not error, f"Duplicate clause search failed (status {error.status}): {error.error}"
 
-    single_arcids = [r.arcid for r in response_single.data]
-    dup_arcids = [r.arcid for r in response_dup.data]
+    single_arcids = [r.arcid for r in response_a.data]
+    dup_arcids = [r.arcid for r in response_b.data]
+    assert len(single_arcids) > 0, "Single clause returned 0 archives; cannot validate dedup"
     assert len(dup_arcids) == len(set(dup_arcids)), f"Duplicate clauses produced duplicate arcids: {dup_arcids}"
     assert set(dup_arcids) == set(single_arcids), f"Duplicate clauses should match single clause: single={single_arcids}, dup={dup_arcids}"
 
@@ -234,18 +235,19 @@ async def test_composite_search(
     clause_broad = CompositeSearchClause(filter="artist:wada rco")
     clause_narrow = CompositeSearchClause(filter="artist:wada rco, character:ereshkigal")
 
-    response_broad, error = await lrr_client.search_api.composite_search(
+    response_a, error = await lrr_client.search_api.composite_search(
         CompositeSearchRequest(clauses=[clause_broad], groupby_tanks=True)
     )
     assert not error, f"Broad clause search failed (status {error.status}): {error.error}"
 
-    response_combined, error = await lrr_client.search_api.composite_search(
+    response_b, error = await lrr_client.search_api.composite_search(
         CompositeSearchRequest(clauses=[clause_broad, clause_narrow], groupby_tanks=True)
     )
     assert not error, f"Combined clause search failed (status {error.status}): {error.error}"
 
-    broad_arcids = [r.arcid for r in response_broad.data]
-    combined_arcids = [r.arcid for r in response_combined.data]
+    broad_arcids = [r.arcid for r in response_a.data]
+    combined_arcids = [r.arcid for r in response_b.data]
+    assert len(broad_arcids) > 0, "Broad clause returned 0 archives; cannot validate absorption"
     assert set(combined_arcids) == set(broad_arcids), f"Subset clause should be absorbed: broad={broad_arcids}, combined={combined_arcids}"
     assert len(combined_arcids) == len(broad_arcids), "Subset absorption should not increase result count"
 
@@ -318,18 +320,19 @@ async def test_composite_search(
     clause_x = CompositeSearchClause(filter="artist:wada rco")
     clause_y = CompositeSearchClause(filter="artist:shirow masamune")
 
-    response_xy, error = await lrr_client.search_api.composite_search(
+    response_a, error = await lrr_client.search_api.composite_search(
         CompositeSearchRequest(clauses=[clause_x, clause_y], sortby="title", order="asc", groupby_tanks=True)
     )
     assert not error, f"XY order search failed (status {error.status}): {error.error}"
 
-    response_yx, error = await lrr_client.search_api.composite_search(
+    response_b, error = await lrr_client.search_api.composite_search(
         CompositeSearchRequest(clauses=[clause_y, clause_x], sortby="title", order="asc", groupby_tanks=True)
     )
     assert not error, f"YX order search failed (status {error.status}): {error.error}"
 
-    xy_arcids = [r.arcid for r in response_xy.data]
-    yx_arcids = [r.arcid for r in response_yx.data]
+    xy_arcids = [r.arcid for r in response_a.data]
+    yx_arcids = [r.arcid for r in response_b.data]
+    assert len(xy_arcids) > 0, "XY clause order returned 0 archives; cannot validate idempotence"
     assert xy_arcids == yx_arcids, f"Clause order should not affect results: xy={xy_arcids}, yx={yx_arcids}"
 
     LOGGER.debug("Clause order idempotence test passed.")
@@ -402,11 +405,6 @@ async def test_composite_hidecompleted(
         assert not error, f"Failed to set progress for {arcid} (status {error.status}): {error.error}"
     LOGGER.debug(f"Set all {len(arcids)} archives to page 9/{num_pages}.")
     # <<<<< SET READING PROGRESS <<<<<
-
-    # >>>>> DISCARD SEARCH CACHE >>>>>
-    response, error = await lrr_client.search_api.discard_search_cache()
-    assert not error, f"Failed to discard search cache (status {error.status}): {error.error}"
-    # <<<<< DISCARD SEARCH CACHE <<<<<
 
     # >>>>> HIDECOMPLETED COMPOSITE SEARCH >>>>>
     response, error = await lrr_client.search_api.composite_search(

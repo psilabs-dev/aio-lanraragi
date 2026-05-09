@@ -33,13 +33,11 @@ def environment(request: pytest.FixtureRequest, resource_prefix: str, port_offse
     is_lrr_debug_mode: bool = request.config.getoption("--lrr-debug")
     environment: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
 
-    environments: dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
-    request.session.lrr_environments = environments
-
     try:
         environment.setup(with_api_key=True, lrr_debug_mode=is_lrr_debug_mode)
         environment.enable_metrics()
         environment.restart()
+        request.session.lrr_environments = {resource_prefix: environment}
         yield environment
     finally:
         environment.teardown(remove_data=True)
@@ -75,12 +73,12 @@ async def test_metrics_endpoint(lrr_client: LRRClient):
     assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
     del response, error
 
-    # wait for flush interval to elapse, then make a throwaway call to trigger flush
+    # wait for >REQUEST_METRICS_FLUSH_INTERVAL (1s, lib/LANraragi/Model/Metrics.pm)
+    # so the throwaway call's after_dispatch hook performs an opportunistic flush
     await asyncio.sleep(2)
     response, error = await lrr_client.misc_api.get_server_info()
     assert not error, f"Throwaway call failed (status {error.status}): {error.error}"
     del response, error
-    await asyncio.sleep(2)
     # <<<<< GENERATE METRICS <<<<<
 
     # >>>>> FETCH AND VERIFY METRICS >>>>>
@@ -97,7 +95,6 @@ async def test_metrics_endpoint(lrr_client: LRRClient):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="requires LRR-side fix: metrics endpoint uses session-only auth under nofun mode", strict=False)
 async def test_metrics_endpoint_nofun(environment: AbstractLRRDeploymentContext, lrr_client: LRRClient):
     """
     Test metrics endpoint is reachable with API key auth when nofun mode is enabled.
