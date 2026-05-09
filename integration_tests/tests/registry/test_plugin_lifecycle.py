@@ -1485,12 +1485,16 @@ async def test_managed_plugin_survives_restart(lrr_client: LRRClient, environmen
     """
     Test that a managed plugin file persists across LRR restart and scan_plugins does not orphan it.
 
+    Also exercises type self-heal: pre-PR Redis state lacks the `type` field; on restart,
+    scan_plugins repopulates it from plugin_info() discovery.
+
     1. Create registry, refresh, install sample-downloader -> 200.
     2. Capture installed_version and expected host path under plugin_managed_dir.
     3. Assert host path exists before restart.
-    4. Restart LRR.
-    5. Assert host path still exists after restart.
-    6. GET download plugins -> sample-downloader present, registry provenance unchanged.
+    4. Delete the `type` field from Redis to simulate a pre-PR install.
+    5. Restart LRR.
+    6. Assert host path still exists after restart and `type` was self-healed to "download".
+    7. GET download plugins -> sample-downloader present, registry provenance unchanged.
     """
     environment.setup(with_api_key=True)
 
@@ -1519,6 +1523,13 @@ async def test_managed_plugin_survives_restart(lrr_client: LRRClient, environmen
     installed_sha256 = response.installed_sha256
     # <<<<< SETUP AND INSTALL <<<<<
 
+    # >>>>> SIMULATE PRE-PR STATE: TYPE FIELD ABSENT >>>>>
+    environment.redis_client.select(2)
+    assert environment.redis_client.hdel("LRR_PLUGIN_SAMPLE-DOWNLOADER", "type") == 1, (
+        "Expected `type` field to exist before deletion"
+    )
+    # <<<<< SIMULATE PRE-PR STATE <<<<<
+
     # >>>>> RESTART >>>>>
     environment.restart()
     # <<<<< RESTART <<<<<
@@ -1526,6 +1537,10 @@ async def test_managed_plugin_survives_restart(lrr_client: LRRClient, environmen
     # >>>>> ASSERT FILE AND PROVENANCE SURVIVE RESTART >>>>>
     plugin_file = environment.plugin_managed_dir / "Download" / "SampleDownload.pm"
     assert plugin_file.exists(), f"Expected plugin file at {plugin_file} after restart"
+
+    environment.redis_client.select(2)
+    healed_type = environment.redis_client.hget("LRR_PLUGIN_SAMPLE-DOWNLOADER", "type")
+    assert healed_type == "download", f"Expected scan_plugins to self-heal type=download, got {healed_type!r}"
 
     response, error = await lrr_client.misc_api.get_available_plugins(
         GetAvailablePluginsRequest(type="download")

@@ -342,6 +342,35 @@ async def test_plugin_config_rejects_non_metadata_fields(
         f"Expected 400 rejecting hidden on download plugin, got status={error.status if error else 'no error'}"
     )
 
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+async def test_plugin_config_returns_500_on_corrupt_type(
+    lrr_client: LRRClient, environment: AbstractLRRDeploymentContext
+):
+    """
+    Test that update_metadata_plugin_config returns 500 when a plugin's type is missing from Redis.
+
+    Simulates a corrupt registration state by deleting the `type` field from a built-in metadata
+    plugin's Redis hash, then calling the config endpoint. The handler logs an error and returns 500.
+
+    1. Set up environment with a known built-in metadata plugin (copytags).
+    2. Delete the `type` field from its Redis hash.
+    3. Attempt to set hidden=True; expect 500.
+    """
+    environment.setup(with_api_key=True)
+
+    environment.redis_client.hdel("LRR_PLUGIN_COPYTAGS", "type")
+
+    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+        "copytags", UpdateMetadataPluginConfigRequest(hidden=True)
+    )
+    assert error and error.status == 500, (
+        f"Expected 500 on corrupt type, got status={error.status if error else 'no error'}"
+    )
+
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
