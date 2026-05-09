@@ -57,9 +57,6 @@ async def test_registry_crud(lrr_client: LRRClient, environment: AbstractLRRDepl
     reg_id = response.id
     assert reg_id.startswith("REG_"), f"Expected REG_ prefix, got: {reg_id}"
     assert len(reg_id) == 14, f"Expected 14 char ID, got {len(reg_id)}: {reg_id}"
-    assert response.registry.name == "demo plugins"
-    assert response.registry.type == "git"
-    assert response.registry.url == "https://github.com/psilabs-dev/lrr-plugins-demo.git"
     # <<<<< CREATE GIT REGISTRY <<<<<
 
     # >>>>> GET BY ID >>>>>
@@ -76,8 +73,11 @@ async def test_registry_crud(lrr_client: LRRClient, environment: AbstractLRRDepl
         reg_id, UpdateRegistryRequest(name="renamed plugins")
     )
     assert not error, f"Failed to update registry (status {error.status}): {error.error}"
-    assert response.registry.name == "renamed plugins"
     assert response.index_cleared is False, "Name-only update should not clear index"
+
+    response, error = await lrr_client.misc_api.get_registry(reg_id)
+    assert not error, f"Failed to get registry (status {error.status}): {error.error}"
+    assert response.registry.name == "renamed plugins"
     # <<<<< UPDATE NAME ONLY <<<<<
 
     # >>>>> DELETE >>>>>
@@ -94,9 +94,12 @@ async def test_registry_crud(lrr_client: LRRClient, environment: AbstractLRRDepl
         CreateRegistryRequest(name="local plugins", type="local", path="/home/koyomi/plugins")
     )
     assert not error, f"Failed to create local registry (status {error.status}): {error.error}"
+    local_reg_id = response.id
+
+    response, error = await lrr_client.misc_api.get_registry(local_reg_id)
+    assert not error, f"Failed to get local registry (status {error.status}): {error.error}"
     assert response.registry.type == "local"
     assert response.registry.path == "/home/koyomi/plugins"
-    local_reg_id = response.id
 
     response, error = await lrr_client.misc_api.delete_registry(local_reg_id)
     assert not error, f"Failed to delete local registry (status {error.status}): {error.error}"
@@ -338,6 +341,9 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
     )
     assert not error, f"Failed to switch type (status {error.status}): {error.error}"
     assert response.index_cleared is True, "Type change should clear index"
+
+    response, error = await lrr_client.misc_api.get_registry(reg_id)
+    assert not error, f"Failed to get registry (status {error.status}): {error.error}"
     assert response.registry.type == "local", "Type should be local"
     assert response.registry.path == "/tmp/plugins", "Path should be set"
     assert response.registry.url is None, "Stale git field 'url' should be absent"
