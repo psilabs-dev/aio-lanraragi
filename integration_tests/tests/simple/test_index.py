@@ -29,6 +29,7 @@ from aio_lanraragi_tests.utils.api_wrappers import (
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
+    switch_display_mode,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -106,8 +107,7 @@ async def test_header_click_sort(
             responses.clear()
             console_evts.clear()
 
-            compact_toggle = page.locator(".thumbnail-toggle")
-            await compact_toggle.click()
+            await switch_display_mode(page, "compact")
             await page.wait_for_load_state("networkidle")
             await page.wait_for_timeout(500)
 
@@ -309,8 +309,7 @@ async def test_compact_column_sort_with_three_columns(
                 await asyncio.sleep(0.3)
 
             # switch to compact mode
-            compact_toggle = page.locator(".thumbnail-toggle")
-            await compact_toggle.click()
+            await switch_display_mode(page, "compact")
             await page.wait_for_load_state("networkidle")
             await page.wait_for_timeout(500)
 
@@ -623,8 +622,7 @@ async def test_custom_column_sort_display(
             responses.clear()
             console_evts.clear()
 
-            compact_toggle = page.locator(".thumbnail-toggle")
-            await compact_toggle.click()
+            await switch_display_mode(page, "compact")
             await page.wait_for_load_state("networkidle")
 
             artist_header = page.locator("#customheader1")
@@ -638,8 +636,7 @@ async def test_custom_column_sort_display(
             responses.clear()
             console_evts.clear()
 
-            thumbnail_toggle = page.locator(".compact-toggle")
-            await thumbnail_toggle.click()
+            await switch_display_mode(page, "thumbnail")
             await page.wait_for_load_state("networkidle")
             await page.wait_for_timeout(500)
 
