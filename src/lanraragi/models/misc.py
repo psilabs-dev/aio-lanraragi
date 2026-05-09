@@ -118,7 +118,6 @@ class CreateRegistryRequest(LanraragiRequest):
 
 class CreateRegistryResponse(LanraragiResponse):
     id: str = Field(...)
-    registry: RegistryConfig = Field(...)
 
 class UpdateRegistryRequest(LanraragiRequest):
     name: str | None = Field(None)
@@ -130,7 +129,6 @@ class UpdateRegistryRequest(LanraragiRequest):
 
 class UpdateRegistryResponse(LanraragiResponse):
     id: str = Field(...)
-    registry: RegistryConfig = Field(...)
     index_cleared: bool = Field(...)
 
 class GetRegistryResponse(LanraragiResponse):

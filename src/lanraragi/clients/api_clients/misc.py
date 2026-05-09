@@ -196,8 +196,7 @@ class _MiscApiClient(_ApiClient):
         )
         if status == 200:
             response_j = json.loads(content)
-            registry = RegistryConfig.model_validate(response_j.get("registry"))
-            return (CreateRegistryResponse(id=response_j["id"], registry=registry), None)
+            return (CreateRegistryResponse(id=response_j["id"]), None)
         return (None, _build_err_response(content, status))
 
     async def get_registry(self, registry_id: str) -> _LRRClientResponse[GetRegistryResponse]:
@@ -235,10 +234,8 @@ class _MiscApiClient(_ApiClient):
         )
         if status == 200:
             response_j = json.loads(content)
-            registry = RegistryConfig.model_validate(response_j.get("registry"))
             return (UpdateRegistryResponse(
                 id=response_j["id"],
-                registry=registry,
                 index_cleared=response_j.get("index_cleared", False),
             ), None)
         return (None, _build_err_response(content, status))
