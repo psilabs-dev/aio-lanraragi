@@ -318,37 +318,41 @@ async def test_local_registry_install_errors(
         symlink_path.unlink()
     symlink_path.symlink_to(escape_target)
 
-    registry_json.write_text(json.dumps({
-        "version": 1,
-        "generated_at": generated_at,
-        "plugins": {
-            "symlink-plugin": {
-                "namespace": "symlink-plugin",
-                "type": "download",
-                "versions": {
-                    "1.0.0": {
-                        "version": "1.0.0",
-                        "name": "symlink",
-                        "author": "test",
-                        "description": "symlink escape test plugin",
-                        "artifact": "artifacts/escape-link.pm",
-                        "sha256": dummy_sha,
-                        "published_at": generated_at,
+    try:
+        registry_json.write_text(json.dumps({
+            "version": 1,
+            "generated_at": generated_at,
+            "plugins": {
+                "symlink-plugin": {
+                    "namespace": "symlink-plugin",
+                    "type": "download",
+                    "versions": {
+                        "1.0.0": {
+                            "version": "1.0.0",
+                            "name": "symlink",
+                            "author": "test",
+                            "description": "symlink escape test plugin",
+                            "artifact": "artifacts/escape-link.pm",
+                            "sha256": dummy_sha,
+                            "published_at": generated_at,
+                        },
                     },
                 },
             },
-        },
-    }))
+        }))
 
-    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
-    assert not error, f"Expected refresh to succeed with symlink artifact entry (status {error.status}): {error.error}"
+        response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+        assert not error, f"Expected refresh to succeed with symlink artifact entry (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.install_plugin(
-        InstallPluginRequest(namespace="symlink-plugin", registry=reg_id, version="1.0.0")
-    )
-    assert error is not None, "Expected install to fail for symlink escape"
-    assert error.status == 400, f"Expected 400 for symlink escape install, got {error.status}"
-    assert not list(environment.plugin_managed_dir.rglob("*.pm")), "No .pm files should be written for symlink escape"
+        response, error = await lrr_client.misc_api.install_plugin(
+            InstallPluginRequest(namespace="symlink-plugin", registry=reg_id, version="1.0.0")
+        )
+        assert error is not None, "Expected install to fail for symlink escape"
+        assert error.status == 400, f"Expected 400 for symlink escape install, got {error.status}"
+        assert not list(environment.plugin_managed_dir.rglob("*.pm")), "No .pm files should be written for symlink escape"
+    finally:
+        symlink_path.unlink(missing_ok=True)
+        escape_target.unlink(missing_ok=True)
     # <<<<< SYMLINK ESCAPE REJECTED <<<<<
 
     plugin_rel_path = "artifacts/local-sample-downloader/1.0.0/LocalSample.pm"
