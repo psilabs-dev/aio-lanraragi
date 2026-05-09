@@ -1176,21 +1176,19 @@ async def test_managed_plugin_upgrade_reloads_class(
     environment: AbstractLRRDeploymentContext,
 ):
     """
-    Test that managed plugin upgrade reloads the class in the installing worker.
+    Test that managed plugin upgrade reloads the class metadata in every prefork worker.
 
-    The uploading worker has the plugin's source file cached in %INC. Without an
-    explicit delete, require short-circuits and the new file contents are not
-    loaded into the worker interpreter until server restart.
+    Each worker forks from master with the plugin's source file cached in %INC.
+    Without cross-worker coherence, only the installing worker sees the new file
+    after upgrade; other workers report stale plugin_info() until restart.
+    Round-robin routing across the connection pool exposes the inconsistency.
 
-    1. Install sample-script from the main ref (version 1.0).
-    2. Verify plugin_info returns version "1.0".
-    3. Update the registry to the v1.1 ref (same namespace, version "1.1").
-    4. Refresh and force-install sample-script.
-    5. Verify plugin_info returns version "1.1" across multiple requests.
+    1. Install sample-script v1.0; prime every worker so each loads v1.0 into its %INC.
+    2. Verify every response reports v1.0.
+    3. Update the registry to v1.1, refresh, force-install.
+    4. Fan out get_available_plugins concurrently; assert every response reports v1.1.
     """
-    # Single worker deterministically routes the verification request to the
-    # same process that handled the install/upgrade, where %INC is populated.
-    environment.setup(with_api_key=True, environment={"MOJO_WORKERS": "1"})
+    environment.setup(with_api_key=True)
 
     # >>>>> INSTALL v1.0 FROM main >>>>>
     response, error = await lrr_client.misc_api.create_registry(
@@ -1213,17 +1211,21 @@ async def test_managed_plugin_upgrade_reloads_class(
         InstallPluginRequest(namespace="sample-script", registry=reg_id, version=main_version)
     )
     assert not error, f"Failed to install sample-script v1.0 (status {error.status}): {error.error}"
-    # <<<<< INSTALL v1.0 FROM main <<<<<
 
-    # >>>>> VERIFY v1.0 IN LOADED CLASS >>>>>
-    response, error = await lrr_client.misc_api.get_available_plugins(
-        GetAvailablePluginsRequest(type="script")
-    )
-    assert not error, f"Failed to list scripts (status {error.status}): {error.error}"
-    sample = next((p for p in response.plugins if p.namespace == "sample-script"), None)
-    assert sample is not None, "sample-script not listed after install"
-    assert sample.version == main_version, f"Expected v{main_version} after initial install, got {sample.version!r}"
-    # <<<<< VERIFY v1.0 IN LOADED CLASS <<<<<
+    # Prime every prefork worker concurrently so each loads v1.0 into its own %INC.
+    # Concurrent requests force the client to open multiple connections, spreading across workers.
+    prime_results = await asyncio.gather(*[
+        lrr_client.misc_api.get_available_plugins(GetAvailablePluginsRequest(type="script"))
+        for _ in range(40)
+    ])
+    for i, (response, error) in enumerate(prime_results):
+        assert not error, f"Prime attempt {i} failed (status {error.status}): {error.error}"
+        sample = next((p for p in response.plugins if p.namespace == "sample-script"), None)
+        assert sample is not None, f"Prime attempt {i}: sample-script not listed"
+        assert sample.version == main_version, (
+            f"Prime attempt {i}: expected v{main_version}, got {sample.version!r}"
+        )
+    # <<<<< INSTALL v1.0 FROM main <<<<<
 
     # >>>>> SWITCH REGISTRY TO v1.1 AND UPGRADE >>>>>
     _, error = await lrr_client.misc_api.update_registry(
@@ -1241,22 +1243,26 @@ async def test_managed_plugin_upgrade_reloads_class(
     assert not error, f"Failed to upgrade sample-script to v1.1 (status {error.status}): {error.error}"
     # <<<<< SWITCH REGISTRY TO v1.1 AND UPGRADE <<<<<
 
-    # >>>>> VERIFY v1.1 IN LOADED CLASS >>>>>
-    # Fire several reads to cover any transient scheduling; every one must see v1.1
-    # because plugin_info() returns data from the in-memory class, which should have
-    # been re-required against the new file contents.
-    for attempt in range(5):
-        response, error = await lrr_client.misc_api.get_available_plugins(
-            GetAvailablePluginsRequest(type="script")
-        )
-        assert not error, f"Failed to list scripts (status {error.status}): {error.error}"
+    # >>>>> VERIFY v1.1 IN LOADED CLASS ACROSS WORKERS >>>>>
+    # Fan out concurrent reads to spread across workers. Every response must report v1.1;
+    # any stale v1.0 indicates a worker whose %INC short-circuited require after upgrade.
+    verify_results = await asyncio.gather(*[
+        lrr_client.misc_api.get_available_plugins(GetAvailablePluginsRequest(type="script"))
+        for _ in range(40)
+    ])
+    stale_responses = []
+    for i, (response, error) in enumerate(verify_results):
+        assert not error, f"Verify attempt {i}: list scripts failed (status {error.status}): {error.error}"
         sample = next((p for p in response.plugins if p.namespace == "sample-script"), None)
-        assert sample is not None, f"sample-script not listed on attempt {attempt}"
-        assert sample.version == v11_version, (
-            f"Attempt {attempt}: loaded class still reports version {sample.version!r} "
-            f"after upgrade; %INC short-circuited require so the new file was not re-read"
-        )
-    # <<<<< VERIFY v1.1 IN LOADED CLASS <<<<<
+        assert sample is not None, f"Verify attempt {i}: sample-script not listed"
+        if sample.version != v11_version:
+            stale_responses.append((i, sample.version))
+
+    assert not stale_responses, (
+        f"{len(stale_responses)} of 40 responses from stale workers still report v{main_version} "
+        f"plugin_info after upgrade: {stale_responses[:5]}. %INC reload not converging."
+    )
+    # <<<<< VERIFY v1.1 IN LOADED CLASS ACROSS WORKERS <<<<<
 
     expect_no_error_logs(environment, LOGGER)
 
