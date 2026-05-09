@@ -107,6 +107,8 @@ class RegistryConfig(BaseModel):
     url: str | None = Field(None)
     ref: str | None = Field(None)
     path: str | None = Field(None)
+    created: int = Field(...)
+    updated: int = Field(...)
 
 class CreateRegistryRequest(LanraragiRequest):
     name: str = Field(...)
