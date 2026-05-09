@@ -51,8 +51,10 @@ def environment(request: pytest.FixtureRequest, resource_prefix: str, port_offse
     environments: dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
     request.session.lrr_environments = environments
 
-    yield environment
-    environment.teardown(remove_data=True)
+    try:
+        yield environment
+    finally:
+        environment.teardown(remove_data=True)
 
 @pytest.fixture
 def symlink_archive_dir(environment: AbstractLRRDeploymentContext) -> Generator[Path, None, None]:

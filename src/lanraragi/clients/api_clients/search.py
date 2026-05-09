@@ -40,11 +40,12 @@ class _SearchApiClient(_ApiClient):
             ("hidecompleted", request.hidecompleted),
             ("groupby_tanks", request.groupby_tanks),
         ]:
-            if value:
-                if isinstance(value, bool):
-                    params[key] = str(value).lower()
-                else:
-                    params[key] = value
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                params[key] = str(value).lower()
+            elif value:
+                params[key] = value
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers, params=params)
         if status == 200:
             return (_process_search_archive_index_response(content), None)
@@ -67,11 +68,12 @@ class _SearchApiClient(_ApiClient):
             ("hidecompleted", request.hidecompleted),
             ("groupby_tanks", request.groupby_tanks),
         ]:
-            if value:
-                if isinstance(value, bool):
-                    params[key] = str(value).lower()
-                else:
-                    params[key] = value
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                params[key] = str(value).lower()
+            elif value:
+                params[key] = value
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers, params=params)
         if status == 200:
             return (_process_get_random_archives_response(content), None)
