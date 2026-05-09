@@ -52,6 +52,17 @@ async def assert_console_logs_ok(
 
         assert evt.type != "error", f"Console logged at error level: {evt.text}"
 
+async def switch_display_mode(page: playwright.async_api._generated.Page, mode: str) -> None:
+    """Open the index settings cog menu, pick the requested display mode ('thumbnail' or 'compact'), and close the menu."""
+    value = "1" if mode == "thumbnail" else "0"
+    await page.locator("#settings-menu").click()
+    await page.locator(
+        f"li.context-menu-input:has(input[name='context-menu-input-displayMode'][value='{value}'])"
+    ).click()
+    # the radio item keeps the contextMenu open; dismiss it so subsequent clicks aren't intercepted
+    await page.keyboard.press("Escape")
+    await page.locator("ul.context-menu-list").wait_for(state="hidden")
+
 async def assert_no_spinner(page: playwright.async_api.Page, timeout_ms: int = 3000):
     """Assert that the reader loading spinner is gone within timeout_ms."""
     await page.wait_for_function(

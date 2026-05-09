@@ -686,6 +686,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.enable_cors()
         else:
             self.disable_cors()
+        self.disable_openapi_bypass()
         self.logger.debug("Redis post-connect configuration complete.")
 
         # start lrr

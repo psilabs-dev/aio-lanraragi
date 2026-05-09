@@ -40,7 +40,7 @@ def _process_get_minion_job_detail_response(content: str) -> GetMinionJobDetailR
         error=result_j.get("error"),
         data=result_j.get("data"),
         errors=result_j.get("errors")
-    ) if result_j else None
+    ) if isinstance(result_j, dict) else None
     return GetMinionJobDetailResponse(
         id=_id,
         args=args,

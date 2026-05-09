@@ -296,6 +296,7 @@ class WindowsLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.enable_cors()
         else:
             self.disable_cors()
+        self.disable_openapi_bypass()
         self.logger.debug("Redis post-connect configuration complete.")
 
         if is_port_available(lrr_port):

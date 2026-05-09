@@ -4,11 +4,13 @@ on:
   pull_request:
     branches: 
       - main
+      - dev
       - 'dev-**/main'    # Run tests on main dev branches
       - 'devt-**/main'   # Run tests on main test branches
   push:
     branches: 
       - main
+      - dev
   schedule:
     - cron: '0 0 * * 4' # Run tests on main branch every Thursday at 00:00
   workflow_call:
@@ -32,7 +34,7 @@ jobs:
   tests-ubuntu:
     name: Tests (Ubuntu)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 80
 
     permissions:
       contents: read
@@ -93,7 +95,7 @@ jobs:
 
       - name: Run integration tests
         working-directory: aio-lanraragi/integration_tests
-        timeout-minutes: 50
+        timeout-minutes: 70
         run: |
           export CI=true
           uv run pytest tests --log-cli-level=INFO \
@@ -101,6 +103,7 @@ jobs:
             --staging "$GITHUB_WORKSPACE/staging" \
             --server-logs "$GITHUB_WORKSPACE/server-logs" \
             --playwright \
+            --no-rate-limit \
             --npseed 42
         env:
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -159,7 +162,8 @@ jobs:
           $repo = $env:LRR_REPOSITORY
           $ref = $env:LRR_REF
           $sha = gh api "repos/$repo/commits/$ref" --jq '.sha'
-          "WINDIST_KEY=windist-${{ runner.os }}-$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $toolsTreeSha = gh api "repos/$repo/git/trees/$sha" --jq '.tree[] | select(.path == "tools") | .sha'
+          "WINDIST_KEY=windist-${{ runner.os }}-$toolsTreeSha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Restore windist cache
         id: cache-windist
@@ -167,6 +171,14 @@ jobs:
         with:
           path: ${{ github.workspace }}\windist\win-dist.zip
           key: ${{ env.WINDIST_KEY }}
+
+      - name: Checkout LANraragi repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LRR_REPOSITORY }}
+          ref: ${{ env.LRR_REF }}
+          submodules: true
+          path: LANraragi
 
       - name: Unzip windist from cache
         if: steps.cache-windist.outputs.cache-hit == 'true'
@@ -176,15 +188,6 @@ jobs:
           New-Item -ItemType Directory -Path $dest -Force | Out-Null
           $zip = Join-Path $env:GITHUB_WORKSPACE "windist\win-dist.zip"
           Expand-Archive -Path $zip -DestinationPath $dest -Force
-
-      - name: Checkout LANraragi repository
-        if: steps.cache-windist.outputs.cache-hit != 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.LRR_REPOSITORY }}
-          ref: ${{ env.LRR_REF }}
-          submodules: true
-          path: LANraragi
 
       - name: Setup MSYS2 UCRT64
         if: steps.cache-windist.outputs.cache-hit != 'true'
@@ -233,6 +236,18 @@ jobs:
           path: ${{ github.workspace }}\windist\win-dist.zip
           key: ${{ env.WINDIST_KEY }}
 
+      - name: Copy app code to windist
+        shell: bash
+        working-directory: LANraragi
+        run: |
+          cp ./package.json ./win-dist
+          cp ./lrr.conf ./win-dist
+          cp -R ./lib ./win-dist
+          cp -R ./public ./win-dist
+          cp -R ./script ./win-dist
+          cp -R ./templates ./win-dist
+          cp -R ./locales ./win-dist
+
       - name: Create staging directory
         run: |
           New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE\staging" -Force | Out-Null
@@ -248,6 +263,7 @@ jobs:
           --staging "$env:GITHUB_WORKSPACE\staging" `
           --server-logs "$env:GITHUB_WORKSPACE\server-logs" `
           --playwright `
+          --no-rate-limit `
           --npseed 42
 
       - name: Upload server logs

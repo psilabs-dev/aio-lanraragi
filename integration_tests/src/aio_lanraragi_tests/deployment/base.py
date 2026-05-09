@@ -415,6 +415,20 @@ class AbstractLRRDeploymentContext(abc.ABC):
         self.redis_client.select(2)
         self.redis_client.hset("LRR_CONFIG", "authprogress", "0")
 
+    def enable_metrics(self):
+        """
+        Enable metrics collection. Requires server restart to take effect.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "enablemetrics", "1")
+
+    def disable_metrics(self):
+        """
+        Disable metrics collection. Requires server restart to take effect.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "enablemetrics", "0")
+
     def enable_openapi_bypass(self):
         """
         Disable OpenAPI request/response validation (bypass mode).
@@ -442,6 +456,13 @@ class AbstractLRRDeploymentContext(abc.ABC):
         """
         self.redis_client.select(2)
         self.redis_client.hset("LRR_CONFIG", "localprogress", "0")
+
+    def set_pagesize(self, pagesize: int):
+        """
+        Set the number of archives displayed per datatables page.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "pagesize", str(pagesize))
 
     def test_lrr_connection(self, port: int, test_connection_max_retries: int=4):
         """

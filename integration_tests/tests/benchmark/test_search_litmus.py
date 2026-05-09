@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.database import GetDatabaseStatsRequest
 from lanraragi.models.search import SearchArchiveIndexRequest
 
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
@@ -241,6 +242,17 @@ async def test_search_litmus(
             search_filter="series:series-0",
         ),
 
+        # Exact match (exercises = / LOWER() / CITEXT path in PgSearch)
+        "filter_artist_exact": SearchArchiveIndexRequest(
+            search_filter="artist:artist-0$",
+        ),
+        "filter_series_exact": SearchArchiveIndexRequest(
+            search_filter="series:series-0$",
+        ),
+        "filter_tag_exact": SearchArchiveIndexRequest(
+            search_filter="tag-0$",
+        ),
+
         # Namespace sort with keyed/unkeyed partition (the #1473 pattern)
         "sort_by_artist_asc": SearchArchiveIndexRequest(
             sortby="artist", order="asc",
@@ -298,4 +310,24 @@ async def test_search_litmus(
             LOGGER.info(
                 f"  {query_name} iter={iteration}: {elapsed:.4f}s ({count} results)"
             )
+
+    # >>>>> STATS BENCHMARK QUERIES >>>>>
+    for iteration in range(search_iterations):
+        start = time.perf_counter()
+        response, error = await lrr_client.database_api.get_database_stats(
+            GetDatabaseStatsRequest(minweight=2, hide_excluded_namespaces=True)
+        )
+        elapsed = time.perf_counter() - start
+        assert not error, f"tag_stats failed: {error.error}"
+        benchmark_collector.record("tag_stats", iteration, elapsed)
+        LOGGER.info(f"  tag_stats iter={iteration}: {elapsed:.4f}s ({len(response.data)} tags)")
+
+    for iteration in range(search_iterations):
+        start = time.perf_counter()
+        response, error = await lrr_client.misc_api.get_server_info()
+        elapsed = time.perf_counter() - start
+        assert not error, f"server_info failed: {error.error}"
+        benchmark_collector.record("server_info", iteration, elapsed)
+        LOGGER.info(f"  server_info iter={iteration}: {elapsed:.4f}s")
+    # <<<<< STATS BENCHMARK QUERIES <<<<<
     # <<<<< BENCHMARK QUERIES <<<<<
