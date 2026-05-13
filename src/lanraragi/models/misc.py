@@ -102,7 +102,7 @@ class RegenerateThumbnailResponse(LanraragiResponse):
 class RegistryConfig(BaseModel):
     id: str = Field(...)
     name: str = Field(...)
-    type: Literal["git", "local"] = Field(...)
+    type: Literal["git", "cdn", "local"] = Field(...)
     provider: Literal["github", "gitlab", "gitea"] | None = Field(None)
     url: str | None = Field(None)
     ref: str | None = Field(None)
@@ -112,7 +112,7 @@ class RegistryConfig(BaseModel):
 
 class CreateRegistryRequest(LanraragiRequest):
     name: str = Field(...)
-    type: Literal["git", "local"] = Field(...)
+    type: Literal["git", "cdn", "local"] = Field(...)
     provider: Literal["github", "gitlab", "gitea"] | None = Field(None)
     url: str | None = Field(None)
     ref: str | None = Field(None)
@@ -123,7 +123,7 @@ class CreateRegistryResponse(LanraragiResponse):
 
 class UpdateRegistryRequest(LanraragiRequest):
     name: str | None = Field(None)
-    type: Literal["git", "local"] | None = Field(None)
+    type: Literal["git", "cdn", "local"] | None = Field(None)
     provider: Literal["github", "gitlab", "gitea"] | None = Field(None)
     url: str | None = Field(None)
     ref: str | None = Field(None)
