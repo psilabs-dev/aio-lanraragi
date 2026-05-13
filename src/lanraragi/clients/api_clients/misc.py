@@ -258,7 +258,7 @@ class _MiscApiClient(_ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
-            return (GetDefaultRegistryResponse(registry_id=response_j["registry_id"]), None)
+            return (GetDefaultRegistryResponse(id=response_j["id"]), None)
         return (None, _build_err_response(content, status))
 
     async def update_default_registry(self, registry_id: str) -> _LRRClientResponse[UpdateDefaultRegistryResponse]:
@@ -269,7 +269,7 @@ class _MiscApiClient(_ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
-            return (UpdateDefaultRegistryResponse(registry_id=response_j["registry_id"]), None)
+            return (UpdateDefaultRegistryResponse(id=response_j["id"]), None)
         return (None, _build_err_response(content, status))
 
     async def remove_default_registry(self) -> _LRRClientResponse[RemoveDefaultRegistryResponse]:
@@ -280,7 +280,7 @@ class _MiscApiClient(_ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
-            return (RemoveDefaultRegistryResponse(registry_id=response_j["registry_id"]), None)
+            return (RemoveDefaultRegistryResponse(id=response_j["id"]), None)
         return (None, _build_err_response(content, status))
 
     async def refresh_registry(self, registry_id: str) -> _LRRClientResponse[RefreshRegistryResponse]:

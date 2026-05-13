@@ -4,6 +4,7 @@ Plugin install/uninstall lifecycle integration tests.
 
 import asyncio
 import hashlib
+import http
 import json
 import logging
 import tempfile
@@ -248,6 +249,7 @@ async def test_plugin_install_error_paths(lrr_client: LRRClient, environment: Ab
     1. Install from nonexistent registry, expect 404.
     2. Create registry without refresh, install, expect 409.
     3. Refresh, then install nonexistent namespace, expect 404.
+    4. Install with empty version string, expect schema rejection.
     """
     environment.setup(with_api_key=True)
 
@@ -289,6 +291,25 @@ async def test_plugin_install_error_paths(lrr_client: LRRClient, environment: Ab
     assert error is not None, "Expected error for nonexistent namespace"
     assert error.status == 404, f"Expected 404 for unknown namespace, got {error.status}"
     # <<<<< INSTALL NONEXISTENT NAMESPACE <<<<<
+
+    # >>>>> INSTALL EMPTY VERSION >>>>>
+    # Pydantic does not constrain version length; send raw to confirm OpenAPI
+    # rejects empty string via minLength: 1 before reaching the controller.
+    status, content = await lrr_client.handle_request(
+        http.HTTPMethod.POST,
+        lrr_client.build_url("/api/plugins/install"),
+        lrr_client.headers,
+        json_data={
+            "namespace": "sample-downloader",
+            "registry": reg_id,
+            "version": "",
+        },
+    )
+    body = json.loads(content)
+    assert status == 400, f"Expected 400 for empty version, got {status}: {body}"
+    version_error = next((e for e in body.get("errors", []) if e.get("path") == "/body/version"), None)
+    assert version_error is not None, f"Expected length violation on /body/version, got: {body}"
+    # <<<<< INSTALL EMPTY VERSION <<<<<
 
     response, error = await lrr_client.misc_api.delete_registry(reg_id)
     assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
