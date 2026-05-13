@@ -125,6 +125,7 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
     3. Create git registry with HTTP url, expect error.
     4. Create registry without name, expect error.
     5. Create registry with invalid type enum value, expect error.
+    6. Create git registry with empty ref, expect error.
     """
     environment.setup(with_api_key=True)
 
@@ -180,6 +181,27 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
     assert type_error is not None, f"Expected enum violation on /body/type, got: {body}"
     assert "enum" in type_error.get("message", "").lower(), f"Expected enum-list message, got: {type_error}"
     # <<<<< INVALID TYPE ENUM <<<<<
+
+    # >>>>> EMPTY REF >>>>>
+    # Pydantic ref: str | None accepts ""; send raw to assert OpenAPI rejects
+    # before an empty ref is stored and propagates to malformed git raw URLs.
+    status, content = await lrr_client.handle_request(
+        http.HTTPMethod.POST,
+        lrr_client.build_url("/api/registries"),
+        lrr_client.headers,
+        json_data={
+            "name": "empty ref",
+            "type": "git",
+            "provider": "github",
+            "url": "https://github.com/owner/repo.git",
+            "ref": "",
+        },
+    )
+    body = json.loads(content)
+    assert status == 400, f"Expected 400 for empty ref, got {status}: {body}"
+    ref_error = next((e for e in body.get("errors", []) if e.get("path") == "/body/ref"), None)
+    assert ref_error is not None, f"Expected length violation on /body/ref, got: {body}"
+    # <<<<< EMPTY REF <<<<<
 
     expect_no_error_logs(environment, LOGGER)
 
