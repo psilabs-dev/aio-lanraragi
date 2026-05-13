@@ -109,6 +109,38 @@ async def test_registry_crud(lrr_client: LRRClient, environment: AbstractLRRDepl
     assert len(response.registries) == 0, f"Expected empty list after local delete, got: {response.registries}"
     # <<<<< CREATE LOCAL REGISTRY <<<<<
 
+    # >>>>> CREATE CDN REGISTRY (https) >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(name="cdn plugins", type="cdn", url="https://cdn.example.com/plugins")
+    )
+    assert not error, f"Failed to create CDN registry (status {error.status}): {error.error}"
+    cdn_reg_id = response.id
+    assert cdn_reg_id.startswith("REG_"), f"Expected REG_ prefix, got: {cdn_reg_id}"
+
+    response, error = await lrr_client.misc_api.get_registry(cdn_reg_id)
+    assert not error, f"Failed to get CDN registry (status {error.status}): {error.error}"
+    assert response.registry.type == "cdn"
+    assert response.registry.url == "https://cdn.example.com/plugins"
+    assert response.registry.provider is None, "CDN registry should not carry a provider"
+    assert response.registry.ref is None, "CDN registry should not carry a ref"
+    assert response.registry.path is None, "CDN registry should not carry a path"
+
+    response, error = await lrr_client.misc_api.delete_registry(cdn_reg_id)
+    assert not error, f"Failed to delete CDN registry (status {error.status}): {error.error}"
+    # <<<<< CREATE CDN REGISTRY <<<<<
+
+    # >>>>> CREATE CDN REGISTRY (http allowed) >>>>>
+    # Spec: CDN transport accepts http:// in addition to https://. Git remains HTTPS-only.
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(name="cdn http", type="cdn", url="http://cdn.example.com/plugins")
+    )
+    assert not error, f"Failed to create http CDN registry (status {error.status}): {error.error}"
+    cdn_http_reg_id = response.id
+
+    response, error = await lrr_client.misc_api.delete_registry(cdn_http_reg_id)
+    assert not error, f"Failed to delete http CDN registry (status {error.status}): {error.error}"
+    # <<<<< CREATE CDN REGISTRY (http allowed) <<<<<
+
     expect_no_error_logs(environment, LOGGER)
 
 
@@ -148,6 +180,23 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
     assert error is not None, "Expected error for non-HTTPS git URL"
     assert error.status == 400, f"Expected 400 for non-HTTPS git URL, got {error.status}"
     # <<<<< NON-HTTPS URL <<<<<
+
+    # >>>>> MISSING URL FOR CDN >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(name="bad cdn", type="cdn")
+    )
+    assert error is not None, "Expected error for CDN registry without url"
+    assert error.status == 400, f"Expected 400 for CDN registry without url, got {error.status}"
+    # <<<<< MISSING URL FOR CDN <<<<<
+
+    # >>>>> NON-HTTP(S) SCHEME FOR CDN >>>>>
+    # CDN spec allows http:// or https:// only. ftp:// must be rejected.
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(name="ftp cdn", type="cdn", url="ftp://cdn.example.com/plugins")
+    )
+    assert error is not None, "Expected error for non-http(s) CDN URL"
+    assert error.status == 400, f"Expected 400 for non-http(s) CDN URL, got {error.status}"
+    # <<<<< NON-HTTP(S) SCHEME FOR CDN <<<<<
 
     # >>>>> MISSING NAME >>>>>
     response, error = await lrr_client.misc_api.create_registry(
