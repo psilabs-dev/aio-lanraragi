@@ -2,6 +2,7 @@
 Plugin registry CRUD integration tests.
 """
 
+import http
 import logging
 
 import pytest
@@ -122,6 +123,7 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
     2. Create local registry without path, expect error.
     3. Create git registry with HTTP url, expect error.
     4. Create registry without name, expect error.
+    5. Create registry with invalid type enum value, expect error.
     """
     environment.setup(with_api_key=True)
 
@@ -156,6 +158,23 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
     assert error is not None, "Expected error for missing registry name"
     assert error.status == 400, f"Expected 400 for missing registry name, got {error.status}"
     # <<<<< MISSING NAME <<<<<
+
+    # >>>>> INVALID TYPE ENUM >>>>>
+    # Pydantic Literal["git", "local"] blocks case typos at the client; send raw
+    # to confirm OpenAPI rejects before the controller derefs $TYPE_FIELDS{$type}.
+    status, _ = await lrr_client.handle_request(
+        http.HTTPMethod.POST,
+        lrr_client.build_url("/api/registries"),
+        lrr_client.headers,
+        json_data={
+            "name": "bad type",
+            "type": "Git",
+            "provider": "github",
+            "url": "https://github.com/owner/repo.git",
+        },
+    )
+    assert status == 400, f"Expected 400 for invalid type enum, got {status}"
+    # <<<<< INVALID TYPE ENUM <<<<<
 
     expect_no_error_logs(environment, LOGGER)
 
