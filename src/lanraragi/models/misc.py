@@ -144,13 +144,13 @@ class RefreshRegistryResponse(LanraragiResponse):
     index: dict[str, Any] | None = Field(None)
 
 class GetDefaultRegistryResponse(LanraragiResponse):
-    registry_id: str = Field(...)
+    id: str = Field(...)
 
 class UpdateDefaultRegistryResponse(LanraragiResponse):
-    registry_id: str = Field(...)
+    id: str = Field(...)
 
 class RemoveDefaultRegistryResponse(LanraragiResponse):
-    registry_id: str = Field(...)
+    id: str = Field(...)
 
 class UpdateMetadataPluginConfigRequest(LanraragiRequest):
     enabled: bool | None = Field(None)

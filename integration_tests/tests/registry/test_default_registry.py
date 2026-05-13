@@ -41,13 +41,13 @@ async def test_default_registry_lifecycle(
     # >>>>> GET WHEN UNSET >>>>>
     response, error = await lrr_client.misc_api.get_default_registry()
     assert not error, f"Failed to get default registry (status {error.status}): {error.error}"
-    assert response.registry_id == "", f"Expected empty string when unset, got: {response.registry_id!r}"
+    assert response.id == "", f"Expected empty string when unset, got: {response.id!r}"
     # <<<<< GET WHEN UNSET <<<<<
 
     # >>>>> DELETE WHEN UNSET >>>>>
     response, error = await lrr_client.misc_api.remove_default_registry()
     assert not error, f"Failed to clear unset default registry (status {error.status}): {error.error}"
-    assert response.registry_id == "", f"Expected empty string when no default was set, got: {response.registry_id!r}"
+    assert response.id == "", f"Expected empty string when no default was set, got: {response.id!r}"
     # <<<<< DELETE WHEN UNSET <<<<<
 
     # >>>>> SET WRONG-LENGTH ID >>>>>
@@ -69,7 +69,7 @@ async def test_default_registry_lifecycle(
 
     response, error = await lrr_client.misc_api.get_default_registry()
     assert not error, f"Failed to get default registry (status {error.status}): {error.error}"
-    assert response.registry_id == "", f"Default must remain unset after failed PUT, got: {response.registry_id!r}"
+    assert response.id == "", f"Default must remain unset after failed PUT, got: {response.id!r}"
     # <<<<< SET NONEXISTENT ID <<<<<
 
     # >>>>> SET VALID ID >>>>>
@@ -81,21 +81,21 @@ async def test_default_registry_lifecycle(
 
     response, error = await lrr_client.misc_api.update_default_registry(reg_id)
     assert not error, f"Failed to set default registry (status {error.status}): {error.error}"
-    assert response.registry_id == reg_id, f"Expected default {reg_id}, got: {response.registry_id}"
+    assert response.id == reg_id, f"Expected default {reg_id}, got: {response.id}"
 
     response, error = await lrr_client.misc_api.get_default_registry()
     assert not error, f"Failed to get default registry (status {error.status}): {error.error}"
-    assert response.registry_id == reg_id, f"Expected default {reg_id}, got: {response.registry_id}"
+    assert response.id == reg_id, f"Expected default {reg_id}, got: {response.id}"
     # <<<<< SET VALID ID <<<<<
 
     # >>>>> EXPLICIT DELETE >>>>>
     response, error = await lrr_client.misc_api.remove_default_registry()
     assert not error, f"Failed to clear default registry (status {error.status}): {error.error}"
-    assert response.registry_id == reg_id, f"Expected previous id {reg_id}, got: {response.registry_id}"
+    assert response.id == reg_id, f"Expected previous id {reg_id}, got: {response.id}"
 
     response, error = await lrr_client.misc_api.get_default_registry()
     assert not error, f"Failed to get default registry (status {error.status}): {error.error}"
-    assert response.registry_id == "", f"Expected empty string after clear, got: {response.registry_id!r}"
+    assert response.id == "", f"Expected empty string after clear, got: {response.id!r}"
     # <<<<< EXPLICIT DELETE <<<<<
 
     # >>>>> AUTO-CLEAR ON REGISTRY DELETE >>>>>
@@ -107,8 +107,8 @@ async def test_default_registry_lifecycle(
 
     response, error = await lrr_client.misc_api.get_default_registry()
     assert not error, f"Failed to get default registry (status {error.status}): {error.error}"
-    assert response.registry_id == "", (
-        f"Default must auto-clear when its registry is deleted, got: {response.registry_id!r}"
+    assert response.id == "", (
+        f"Default must auto-clear when its registry is deleted, got: {response.id!r}"
     )
     # <<<<< AUTO-CLEAR ON REGISTRY DELETE <<<<<
 
