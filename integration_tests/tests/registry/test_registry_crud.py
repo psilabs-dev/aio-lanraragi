@@ -3,6 +3,7 @@ Plugin registry CRUD integration tests.
 """
 
 import http
+import json
 import logging
 
 import pytest
@@ -162,7 +163,7 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
     # >>>>> INVALID TYPE ENUM >>>>>
     # Pydantic Literal["git", "local"] blocks case typos at the client; send raw
     # to confirm OpenAPI rejects before the controller derefs $TYPE_FIELDS{$type}.
-    status, _ = await lrr_client.handle_request(
+    status, content = await lrr_client.handle_request(
         http.HTTPMethod.POST,
         lrr_client.build_url("/api/registries"),
         lrr_client.headers,
@@ -173,7 +174,11 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
             "url": "https://github.com/owner/repo.git",
         },
     )
-    assert status == 400, f"Expected 400 for invalid type enum, got {status}"
+    body = json.loads(content)
+    assert status == 400, f"Expected 400 for invalid type enum, got {status}: {body}"
+    type_error = next((e for e in body.get("errors", []) if e.get("path") == "/body/type"), None)
+    assert type_error is not None, f"Expected enum violation on /body/type, got: {body}"
+    assert "enum" in type_error.get("message", "").lower(), f"Expected enum-list message, got: {type_error}"
     # <<<<< INVALID TYPE ENUM <<<<<
 
     expect_no_error_logs(environment, LOGGER)
