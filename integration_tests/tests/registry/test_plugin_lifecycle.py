@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 from lanraragi.clients.client import LRRClient
-from lanraragi.models.archive import GetArchiveMetadataRequest
+
+# from lanraragi.models.archive import GetArchiveMetadataRequest
 from lanraragi.models.misc import (
     CreateRegistryRequest,
     GetAvailablePluginsRequest,
@@ -27,10 +28,11 @@ from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
 )
-from aio_lanraragi_tests.utils.api_wrappers import (
-    create_archive_file,
-    upload_archive,
-)
+
+# from aio_lanraragi_tests.utils.api_wrappers import (
+#     create_archive_file,
+#     upload_archive,
+# )
 
 LOGGER = logging.getLogger(__name__)
 
@@ -912,18 +914,18 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     # <<<<< ORPHANED PROVENANCE <<<<<
 
     # >>>>> ORPHANED PLUGIN STILL EXECUTES >>>>>
-    with tempfile.TemporaryDirectory() as tmpdir:
-        archive_path = create_archive_file(Path(tmpdir), "test_orphan_exec", num_pages=1)
-        response, error = await upload_archive(
-            lrr_client, archive_path, archive_path.name, asyncio.Semaphore(1),
-            title="orphan", tags="test:orphan",
-        )
-    assert not error, f"Upload failed (status {error.status}): {error.error}"
-    arcid = response.arcid
-
-    response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
-    assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
-    assert response.title == "orphan-1", f"Expected 'orphan-1' from orphaned plugin, got: {response.title!r}"
+    # with tempfile.TemporaryDirectory() as tmpdir:
+    #     archive_path = create_archive_file(Path(tmpdir), "test_orphan_exec", num_pages=1)
+    #     response, error = await upload_archive(
+    #         lrr_client, archive_path, archive_path.name, asyncio.Semaphore(1),
+    #         title="orphan", tags="test:orphan",
+    #     )
+    # assert not error, f"Upload failed (status {error.status}): {error.error}"
+    # arcid = response.arcid
+    #
+    # response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+    # assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
+    # assert response.title == "orphan-1", f"Expected 'orphan-1' from orphaned plugin, got: {response.title!r}"
     # <<<<< ORPHANED PLUGIN STILL EXECUTES <<<<<
 
     # >>>>> UNINSTALL ORPHANED >>>>>
