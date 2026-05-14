@@ -64,10 +64,20 @@ async def test_registry_crud(lrr_client: LRRClient, environment: AbstractLRRDepl
     # >>>>> GET BY ID >>>>>
     response, error = await lrr_client.misc_api.get_registry(reg_id)
     assert not error, f"Failed to get registry (status {error.status}): {error.error}"
+    assert response.registry.id == reg_id, f"Expected registry.id {reg_id}, got: {response.registry.id}"
     assert response.registry.name == "demo plugins"
     assert response.registry.type == "git"
     assert response.registry.url == "https://github.com/psilabs-dev/lrr-plugins-demo.git"
     assert response.registry.ref == "main"
+
+    # The id lives inside the metadata object; the outer body must not duplicate it.
+    status, content = await lrr_client.handle_request(
+        http.HTTPMethod.GET, lrr_client.build_url(f"/api/registries/{reg_id}"), lrr_client.headers
+    )
+    body = json.loads(content)
+    assert status == 200, f"Expected 200 from get registry, got {status}: {body}"
+    assert "id" not in body, f"Outer id should be absent (lives in registry.id), got: {body}"
+    assert body["registry"]["id"] == reg_id, f"Expected registry.id {reg_id}, got: {body['registry'].get('id')}"
     # <<<<< GET BY ID <<<<<
 
     # >>>>> UPDATE NAME ONLY >>>>>
@@ -218,7 +228,9 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
     4. Create registry, update with empty body, expect error.
     5. Update with non-HTTPS url, expect error.
     6. Update with fields invalid for the registry's type, expect error.
-    7. Update ref field, verify index_cleared.
+    7. Update with mixed valid + type-invalid fields, expect error.
+    8. Update with empty name, expect error.
+    9. Update ref field, verify index_cleared.
     """
     environment.setup(with_api_key=True)
 
@@ -281,6 +293,32 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
     assert error is not None, "Expected error for type-invalid field on update"
     assert error.status == 400, f"Expected 400 for type-invalid field on update, got {error.status}"
     # <<<<< UPDATE WITH FIELDS INVALID FOR LOCAL TYPE <<<<<
+
+    # >>>>> UPDATE WITH MIXED VALID AND TYPE-INVALID FIELDS >>>>>
+    # Same loud-failure expectation when a valid field is bundled with an
+    # irrelevant one. The relevant field must not mask the irrelevant one and
+    # the cached index must not be invalidated by the meaningless field.
+    response, error = await lrr_client.misc_api.update_registry(
+        reg_id, UpdateRegistryRequest(name="renamed local", provider="github")
+    )
+    assert error is not None, "Expected error for mixed valid + type-invalid update"
+    assert error.status == 400, f"Expected 400 for mixed valid + type-invalid update, got {error.status}"
+    # <<<<< UPDATE WITH MIXED VALID AND TYPE-INVALID FIELDS <<<<<
+
+    # >>>>> UPDATE WITH EMPTY NAME >>>>>
+    # Pydantic name: str | None accepts ""; send raw to assert OpenAPI rejects
+    # empty before it would silently blank the registry's display name.
+    status, content = await lrr_client.handle_request(
+        http.HTTPMethod.PUT,
+        lrr_client.build_url(f"/api/registries/{reg_id}"),
+        lrr_client.headers,
+        json_data={"name": ""},
+    )
+    body = json.loads(content)
+    assert status == 400, f"Expected 400 for empty name update, got {status}: {body}"
+    name_error = next((e for e in body.get("errors", []) if e.get("path") == "/body/name"), None)
+    assert name_error is not None, f"Expected length violation on /body/name, got: {body}"
+    # <<<<< UPDATE WITH EMPTY NAME <<<<<
 
     # >>>>> UPDATE REF CLEARS INDEX >>>>>
     response, error = await lrr_client.misc_api.delete_registry(reg_id)

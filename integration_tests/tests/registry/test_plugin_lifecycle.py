@@ -18,7 +18,7 @@ from lanraragi.models.misc import (
     CreateRegistryRequest,
     GetAvailablePluginsRequest,
     InstallPluginRequest,
-    UpdateMetadataPluginConfigRequest,
+    # UpdateMetadataPluginConfigRequest,  # metadata-plugin feature removed; see test_plugin_config.py
     UpdateRegistryRequest,
     UsePluginRequest,
 )
@@ -873,23 +873,26 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     # <<<<< VERIFY REINSTALLED <<<<<
 
     # >>>>> ENABLE AND VERIFY EXECUTION >>>>>
-    response, error = await lrr_client.misc_api.update_metadata_plugin_config(
-        "title-suffix-1", UpdateMetadataPluginConfigRequest(enabled=True)
-    )
-    assert not error, f"Failed to enable plugin (status {error.status}): {error.error}"
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        archive_path = create_archive_file(Path(tmpdir), "test_reinstall_exec", num_pages=1)
-        response, error = await upload_archive(
-            lrr_client, archive_path, archive_path.name, asyncio.Semaphore(1),
-            title="base", tags="test:reinstall",
-        )
-    assert not error, f"Upload failed (status {error.status}): {error.error}"
-    arcid = response.arcid
-
-    response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
-    assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
-    assert response.title == "base-1", f"Expected 'base-1' after enabled plugin execution, got: {response.title!r}"
+    # Commented out: depended on metadata-plugin feature (update_metadata_plugin_config) removed
+    # from dev-registry/backend. The reinstall lifecycle and orphaned-provenance assertions
+    # below still exercise registry-side behavior.
+    # response, error = await lrr_client.misc_api.update_metadata_plugin_config(
+    #     "title-suffix-1", UpdateMetadataPluginConfigRequest(enabled=True)
+    # )
+    # assert not error, f"Failed to enable plugin (status {error.status}): {error.error}"
+    #
+    # with tempfile.TemporaryDirectory() as tmpdir:
+    #     archive_path = create_archive_file(Path(tmpdir), "test_reinstall_exec", num_pages=1)
+    #     response, error = await upload_archive(
+    #         lrr_client, archive_path, archive_path.name, asyncio.Semaphore(1),
+    #         title="base", tags="test:reinstall",
+    #     )
+    # assert not error, f"Upload failed (status {error.status}): {error.error}"
+    # arcid = response.arcid
+    #
+    # response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+    # assert not error, f"Failed to get metadata (status {error.status}): {error.error}"
+    # assert response.title == "base-1", f"Expected 'base-1' after enabled plugin execution, got: {response.title!r}"
     # <<<<< ENABLE AND VERIFY EXECUTION <<<<<
 
     # >>>>> ORPHANED PROVENANCE >>>>>
