@@ -27,7 +27,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("registry")
+@pytest.mark.dev("metadata-plugin")
 @pytest.mark.ratelimit
 async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
@@ -178,7 +178,7 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("registry")
+@pytest.mark.dev("metadata-plugin")
 async def test_plugin_config_nonexistent_namespace(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """Updating config for a never-installed namespace returns 404."""
     environment.setup(with_api_key=True)
@@ -193,7 +193,7 @@ async def test_plugin_config_nonexistent_namespace(lrr_client: LRRClient, enviro
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("registry")
+@pytest.mark.dev("metadata-plugin")
 @pytest.mark.ratelimit
 async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
@@ -282,7 +282,7 @@ async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDe
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("registry")
+@pytest.mark.dev("metadata-plugin")
 @pytest.mark.ratelimit
 async def test_plugin_config_rejects_non_metadata_fields(
     lrr_client: LRRClient, environment: AbstractLRRDeploymentContext
@@ -346,7 +346,7 @@ async def test_plugin_config_rejects_non_metadata_fields(
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("registry")
+@pytest.mark.dev("metadata-plugin")
 async def test_plugin_config_returns_500_on_corrupt_type(
     lrr_client: LRRClient, environment: AbstractLRRDeploymentContext
 ):
@@ -373,7 +373,7 @@ async def test_plugin_config_returns_500_on_corrupt_type(
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("registry")
+@pytest.mark.dev("metadata-plugin")
 @pytest.mark.ratelimit
 async def test_plugin_priority_execution_order(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """

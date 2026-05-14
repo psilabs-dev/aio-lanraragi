@@ -134,7 +134,6 @@ class UpdateRegistryResponse(LanraragiResponse):
     index_cleared: bool = Field(...)
 
 class GetRegistryResponse(LanraragiResponse):
-    id: str = Field(...)
     registry: RegistryConfig = Field(...)
 
 class ListRegistriesResponse(LanraragiResponse):
