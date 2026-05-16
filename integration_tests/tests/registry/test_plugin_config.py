@@ -76,13 +76,13 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
         if plugin.namespace == "sample-metadata":
             found_managed = True
             assert plugin.hidden is False, f"Fresh install expected hidden=False, got {plugin.hidden}"
-            assert plugin.installed_registry == reg_id, (
-                f"Managed plugin expected installed_registry={reg_id}, got {plugin.installed_registry}"
+            assert plugin.registry == reg_id, (
+                f"Managed plugin expected registry={reg_id}, got {plugin.registry}"
             )
         if plugin.namespace == "copytags":
             found_default = True
-            assert plugin.installed_registry is None, (
-                f"Default plugin expected installed_registry=None, got {plugin.installed_registry}"
+            assert plugin.registry is None, (
+                f"Default plugin expected registry=None, got {plugin.registry}"
             )
     assert found_managed, "sample-metadata not found in plugin list after install"
     assert found_default, "default plugin copytags not found in plugin list"

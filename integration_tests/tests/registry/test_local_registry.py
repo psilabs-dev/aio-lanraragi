@@ -460,8 +460,8 @@ sub provide_url {
     assert not error, f"Expected install to succeed (status {error.status}): {error.error}"
     assert response.namespace == "local-sample-downloader"
     assert response.version == "1.0.0", f"Expected version 1.0.0, got {response.version}"
-    assert response.installed_registry == reg_id, (
-        f"Expected provenance {reg_id}, got {response.installed_registry}"
+    assert response.registry == reg_id, (
+        f"Expected provenance {reg_id}, got {response.registry}"
     )
 
     assert target_pm.exists(), f"Plugin file should exist after successful install: {target_pm}"
@@ -1104,8 +1104,8 @@ sub get_tags {{
     )
     assert not error, f"Failed to install from registry 1 (status {error.status}): {error.error}"
     assert response.version == "2.0.0", f"Expected max version 2.0.0, got {response.version}"
-    assert response.installed_registry == reg1_id, (
-        f"Expected installed_registry {reg1_id}, got {response.installed_registry}"
+    assert response.registry == reg1_id, (
+        f"Expected registry {reg1_id}, got {response.registry}"
     )
 
     response, error = await lrr_client.misc_api.use_plugin(
@@ -1128,9 +1128,9 @@ sub get_tags {{
     pre_reinstall_registry = None
     for plugin in response.plugins:
         if plugin.namespace == "shared-metadata-1":
-            pre_reinstall_version = plugin.installed_version
-            pre_reinstall_sha256 = plugin.installed_sha256
-            pre_reinstall_registry = plugin.installed_registry
+            pre_reinstall_version = plugin.version
+            pre_reinstall_sha256 = plugin.sha256
+            pre_reinstall_registry = plugin.registry
             break
     else:
         pytest.fail("shared-metadata-1 not found before force reinstall")
@@ -1146,9 +1146,9 @@ sub get_tags {{
     assert not error, f"Failed to list plugins after reinstall (status {error.status}): {error.error}"
     for plugin in response.plugins:
         if plugin.namespace == "shared-metadata-1":
-            assert plugin.installed_version == pre_reinstall_version, "installed_version changed after force reinstall"
-            assert plugin.installed_sha256 == pre_reinstall_sha256, "installed_sha256 changed after force reinstall"
-            assert plugin.installed_registry == pre_reinstall_registry, "installed_registry changed after force reinstall"
+            assert plugin.version == pre_reinstall_version, "version changed after force reinstall"
+            assert plugin.sha256 == pre_reinstall_sha256, "sha256 changed after force reinstall"
+            assert plugin.registry == pre_reinstall_registry, "registry changed after force reinstall"
             break
     else:
         pytest.fail("shared-metadata-1 not found after force reinstall")
@@ -1174,8 +1174,8 @@ sub get_tags {{
     )
     assert not error, f"Failed to install v1.0.0 from registry 2 (status {error.status}): {error.error}"
     assert response.version == "1.0.0", f"Expected version 1.0.0, got {response.version}"
-    assert response.installed_registry == reg2_id, (
-        f"Expected installed_registry {reg2_id}, got {response.installed_registry}"
+    assert response.registry == reg2_id, (
+        f"Expected registry {reg2_id}, got {response.registry}"
     )
 
     response, error = await lrr_client.misc_api.use_plugin(
@@ -1206,8 +1206,8 @@ sub get_tags {{
     assert not error, f"Failed to list plugins after registry delete (status {error.status}): {error.error}"
     for plugin in response.plugins:
         if plugin.namespace == "shared-metadata-1":
-            assert plugin.installed_registry == reg2_id, (
-                f"Expected orphaned provenance {reg2_id}, got {plugin.installed_registry}"
+            assert plugin.registry == reg2_id, (
+                f"Expected orphaned provenance {reg2_id}, got {plugin.registry}"
             )
             break
     else:
@@ -1227,8 +1227,8 @@ sub get_tags {{
         InstallPluginRequest(namespace="shared-metadata-1", registry=reg3_id, version="1.0.0", force=True)
     )
     assert not error, f"Failed to force install from registry 3 (status {error.status}): {error.error}"
-    assert response.installed_registry == reg3_id, (
-        f"Expected installed_registry {reg3_id}, got {response.installed_registry}"
+    assert response.registry == reg3_id, (
+        f"Expected registry {reg3_id}, got {response.registry}"
     )
 
     response, error = await lrr_client.misc_api.use_plugin(
@@ -1256,8 +1256,8 @@ sub get_tags {{
     )
     assert not error, f"Failed to install v2.0.0 from registry 3 (status {error.status}): {error.error}"
     assert response.version == "2.0.0", f"Expected version 2.0.0, got {response.version}"
-    assert response.installed_registry == reg3_id, (
-        f"Expected installed_registry {reg3_id}, got {response.installed_registry}"
+    assert response.registry == reg3_id, (
+        f"Expected registry {reg3_id}, got {response.registry}"
     )
 
     response, error = await lrr_client.misc_api.use_plugin(
