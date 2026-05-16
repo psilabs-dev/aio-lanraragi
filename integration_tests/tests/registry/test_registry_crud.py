@@ -438,7 +438,7 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
-    assert response.installed_registry == reg_id
+    assert response.registry == reg_id
     # <<<<< INSTALL PLUGIN BEFORE SOURCE CHANGE <<<<<
 
     # >>>>> UPDATE URL (SOURCE CHANGE) >>>>>
@@ -454,7 +454,7 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
     assert not error, f"Failed to list plugins after source change (status {error.status}): {error.error}"
     for plugin in response.plugins:
         if plugin.namespace == "sample-downloader":
-            assert plugin.installed_registry == reg_id, f"Expected provenance {reg_id} after source change, got: {plugin.installed_registry}"
+            assert plugin.registry == reg_id, f"Expected provenance {reg_id} after source change, got: {plugin.registry}"
             break
     else:
         pytest.fail("Installed plugin should survive registry source change")

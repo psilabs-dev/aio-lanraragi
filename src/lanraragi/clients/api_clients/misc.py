@@ -313,8 +313,8 @@ class _MiscApiClient(_ApiClient):
                 name=response_j["name"],
                 namespace=response_j["namespace"],
                 version=response_j["version"],
-                installed_registry=response_j["installed_registry"],
-                installed_sha256=response_j["installed_sha256"],
+                registry=response_j["registry"],
+                sha256=response_j["sha256"],
             ), None)
         return (None, _build_err_response(content, status))
 
