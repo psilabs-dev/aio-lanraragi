@@ -79,7 +79,7 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
     assert response.namespace == "sample-downloader"
     assert response.name == "Sample Downloader"
-    assert response.installed_registry == reg_id, f"Expected provenance {reg_id}, got: {response.installed_registry}"
+    assert response.registry == reg_id, f"Expected provenance {reg_id}, got: {response.registry}"
     # <<<<< INSTALL PLUGIN <<<<<
 
     # >>>>> VERIFY INSTALLED >>>>>
@@ -89,8 +89,8 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
     sample = next((p for p in response.plugins if p.namespace == "sample-downloader"), None)
     assert sample is not None, "sample-downloader missing from download plugin list after install"
-    assert sample.installed_registry == reg_id, (
-        f"Expected managed provenance {reg_id}, got: {sample.installed_registry}"
+    assert sample.registry == reg_id, (
+        f"Expected managed provenance {reg_id}, got: {sample.registry}"
     )
     # <<<<< VERIFY INSTALLED <<<<<
 
@@ -149,7 +149,7 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
 @pytest.mark.ratelimit
 async def test_plugin_install_provenance_roundtrip(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
-    Test that installed_registry, installed_version, and installed_sha256 survive restart and explicit reinstall.
+    Test that registry, version, and sha256 provenance fields survive restart and explicit reinstall.
 
     1. Install sample-downloader, capture provenance from install response.
     2. Verify provenance fields in plugin list.
@@ -181,9 +181,9 @@ async def test_plugin_install_provenance_roundtrip(lrr_client: LRRClient, enviro
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=version_key)
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
-    assert response.installed_registry == reg_id, f"Expected provenance {reg_id}, got: {response.installed_registry}"
-    assert response.installed_sha256 == expected_sha, (
-        f"Expected install sha256 {expected_sha}, got {response.installed_sha256}"
+    assert response.registry == reg_id, f"Expected provenance {reg_id}, got: {response.registry}"
+    assert response.sha256 == expected_sha, (
+        f"Expected install sha256 {expected_sha}, got {response.sha256}"
     )
 
     response, error = await lrr_client.misc_api.get_available_plugins(
@@ -192,12 +192,12 @@ async def test_plugin_install_provenance_roundtrip(lrr_client: LRRClient, enviro
     assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
     plugin = next((p for p in response.plugins if p.namespace == "sample-downloader"), None)
     assert plugin is not None, "sample-downloader missing from plugin list after install"
-    assert plugin.installed_registry == reg_id, f"Expected managed provenance {reg_id}, got: {plugin.installed_registry}"
-    assert plugin.installed_version == version_key, (
-        f"Expected installed_version {version_key!r}, got {plugin.installed_version!r}"
+    assert plugin.registry == reg_id, f"Expected managed provenance {reg_id}, got: {plugin.registry}"
+    assert plugin.version == version_key, (
+        f"Expected version {version_key!r}, got {plugin.version!r}"
     )
-    assert plugin.installed_sha256 == expected_sha, (
-        f"Expected installed_sha256 {expected_sha}, got {plugin.installed_sha256!r}"
+    assert plugin.sha256 == expected_sha, (
+        f"Expected sha256 {expected_sha}, got {plugin.sha256!r}"
     )
 
     environment.restart()
@@ -208,14 +208,14 @@ async def test_plugin_install_provenance_roundtrip(lrr_client: LRRClient, enviro
     assert not error, f"Failed to list plugins after restart (status {error.status}): {error.error}"
     plugin = next((p for p in response.plugins if p.namespace == "sample-downloader"), None)
     assert plugin is not None, "sample-downloader missing from plugin list after restart"
-    assert plugin.installed_registry == reg_id, (
-        f"Expected provenance {reg_id} after restart, got {plugin.installed_registry!r}"
+    assert plugin.registry == reg_id, (
+        f"Expected provenance {reg_id} after restart, got {plugin.registry!r}"
     )
-    assert plugin.installed_version == version_key, (
-        f"Expected installed_version {version_key!r} after restart, got {plugin.installed_version!r}"
+    assert plugin.version == version_key, (
+        f"Expected version {version_key!r} after restart, got {plugin.version!r}"
     )
-    assert plugin.installed_sha256 == expected_sha, (
-        f"Expected installed_sha256 {expected_sha} after restart, got {plugin.installed_sha256!r}"
+    assert plugin.sha256 == expected_sha, (
+        f"Expected sha256 {expected_sha} after restart, got {plugin.sha256!r}"
     )
 
     response, error = await lrr_client.misc_api.uninstall_plugin("sample-downloader")
@@ -225,11 +225,11 @@ async def test_plugin_install_provenance_roundtrip(lrr_client: LRRClient, enviro
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=version_key)
     )
     assert not error, f"Failed to reinstall plugin (status {error.status}): {error.error}"
-    assert response.installed_registry == reg_id, (
-        f"Expected provenance {reg_id} after reinstall, got {response.installed_registry!r}"
+    assert response.registry == reg_id, (
+        f"Expected provenance {reg_id} after reinstall, got {response.registry!r}"
     )
-    assert response.installed_sha256 == expected_sha, (
-        f"Expected installed_sha256 {expected_sha} after reinstall, got {response.installed_sha256}"
+    assert response.sha256 == expected_sha, (
+        f"Expected sha256 {expected_sha} after reinstall, got {response.sha256}"
     )
     assert response.version == version_key, (
         f"Expected version {version_key!r} after reinstall, got {response.version!r}"
@@ -823,7 +823,7 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
         InstallPluginRequest(namespace="title-suffix-1", registry=reg_id, version=title_suffix_1_version)
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
-    assert response.installed_registry == reg_id, f"Expected provenance {reg_id}, got: {response.installed_registry}"
+    assert response.registry == reg_id, f"Expected provenance {reg_id}, got: {response.registry}"
     # <<<<< INSTALL <<<<<
 
     # >>>>> VERIFY INSTALLED >>>>>
@@ -833,7 +833,7 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     assert not error, f"Failed to list plugins (status {error.status}): {error.error}"
     for plugin in response.plugins:
         if plugin.namespace == "title-suffix-1":
-            assert plugin.installed_registry == reg_id, f"Expected managed provenance {reg_id}, got: {plugin.installed_registry}"
+            assert plugin.registry == reg_id, f"Expected managed provenance {reg_id}, got: {plugin.registry}"
             break
     else:
         pytest.fail("title-suffix-1 not found after install")
@@ -858,7 +858,7 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
         InstallPluginRequest(namespace="title-suffix-1", registry=reg_id, version=title_suffix_1_version)
     )
     assert not error, f"Failed to reinstall plugin (status {error.status}): {error.error}"
-    assert response.installed_registry == reg_id, f"Expected provenance on reinstall {reg_id}, got: {response.installed_registry}"
+    assert response.registry == reg_id, f"Expected provenance on reinstall {reg_id}, got: {response.registry}"
     # <<<<< REINSTALL <<<<<
 
     # >>>>> VERIFY REINSTALLED >>>>>
@@ -868,7 +868,7 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     assert not error, f"Failed to list plugins after reinstall (status {error.status}): {error.error}"
     for plugin in response.plugins:
         if plugin.namespace == "title-suffix-1":
-            assert plugin.installed_registry == reg_id, f"Expected managed provenance {reg_id}, got: {plugin.installed_registry}"
+            assert plugin.registry == reg_id, f"Expected managed provenance {reg_id}, got: {plugin.registry}"
             break
     else:
         pytest.fail("title-suffix-1 not found after reinstall")
@@ -907,7 +907,7 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     assert not error, f"Failed to list plugins after registry delete (status {error.status}): {error.error}"
     for plugin in response.plugins:
         if plugin.namespace == "title-suffix-1":
-            assert plugin.installed_registry == reg_id, f"Expected orphaned provenance {reg_id}, got: {plugin.installed_registry}"
+            assert plugin.registry == reg_id, f"Expected orphaned provenance {reg_id}, got: {plugin.registry}"
             break
     else:
         pytest.fail("title-suffix-1 should still be listed after registry delete")
@@ -1014,7 +1014,7 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
         )
         assert not error, f"Failed to install non-conflicting plugin (status {error.status}): {error.error}"
         assert response.namespace == "sample-downloader"
-        assert response.installed_registry == reg_id, f"Expected provenance {reg_id}, got: {response.installed_registry}"
+        assert response.registry == reg_id, f"Expected provenance {reg_id}, got: {response.registry}"
         # <<<<< INSTALL WITHOUT CONFLICT <<<<<
 
         # >>>>> UPGRADE (REINSTALL) >>>>>
@@ -1124,7 +1124,7 @@ async def test_plugin_cross_provenance_force(lrr_client: LRRClient, environment:
         InstallPluginRequest(namespace="sample-downloader", registry=reg_a_id, version=sample_downloader_version)
     )
     assert not error, f"Failed to install sample-downloader from reg A (status {error.status}): {error.error}"
-    assert response.installed_registry == reg_a_id, f"Expected provenance {reg_a_id}, got: {response.installed_registry}"
+    assert response.registry == reg_a_id, f"Expected provenance {reg_a_id}, got: {response.registry}"
     # <<<<< INSTALL FROM REG A <<<<<
 
     # >>>>> DELETE REG A -> ORPHAN >>>>>
@@ -1175,7 +1175,7 @@ async def test_plugin_cross_provenance_force(lrr_client: LRRClient, environment:
         InstallPluginRequest(namespace="sample-downloader", registry=reg_b_id, version=sample_downloader_version_b, force=True)
     )
     assert not error, f"Expected force install to succeed (status {error.status}): {error.error}"
-    assert response.installed_registry == reg_b_id, f"Expected provenance {reg_b_id} after force install, got: {response.installed_registry}"
+    assert response.registry == reg_b_id, f"Expected provenance {reg_b_id} after force install, got: {response.registry}"
     # <<<<< INSTALL FROM REG B WITH FORCE -> 200 <<<<<
 
     # >>>>> VERIFY PROVENANCE UPDATED >>>>>
@@ -1185,7 +1185,7 @@ async def test_plugin_cross_provenance_force(lrr_client: LRRClient, environment:
     assert not error, f"Failed to list download plugins (status {error.status}): {error.error}"
     for plugin in response.plugins:
         if plugin.namespace == "sample-downloader":
-            assert plugin.installed_registry == reg_b_id, f"Expected provenance {reg_b_id}, got: {plugin.installed_registry}"
+            assert plugin.registry == reg_b_id, f"Expected provenance {reg_b_id}, got: {plugin.registry}"
             break
     else:
         pytest.fail("sample-downloader not found in download plugin list after force install")
@@ -1515,7 +1515,7 @@ async def test_managed_plugin_survives_restart(lrr_client: LRRClient, environmen
     scan_plugins repopulates it from plugin_info() discovery.
 
     1. Create registry, refresh, install sample-downloader -> 200.
-    2. Capture installed_version and expected host path under plugin_managed_dir.
+    2. Capture installed version and expected host path under plugin_managed_dir.
     3. Assert host path exists before restart.
     4. Delete the `type` field from Redis to simulate a pre-PR install.
     5. Restart LRR.
@@ -1546,7 +1546,7 @@ async def test_managed_plugin_survives_restart(lrr_client: LRRClient, environmen
     )
     assert not error, f"Failed to install sample-downloader (status {error.status}): {error.error}"
     installed_version = response.version
-    installed_sha256 = response.installed_sha256
+    installed_sha256 = response.sha256
     # <<<<< SETUP AND INSTALL <<<<<
 
     # >>>>> SIMULATE PRE-PR STATE: TYPE FIELD ABSENT >>>>>
@@ -1574,15 +1574,12 @@ async def test_managed_plugin_survives_restart(lrr_client: LRRClient, environmen
     assert not error, f"Failed to list download plugins after restart (status {error.status}): {error.error}"
     for plugin in response.plugins:
         if plugin.namespace == "sample-downloader":
-            assert plugin.installed_registry == reg_id, f"Expected provenance {reg_id} after restart, got: {plugin.installed_registry}"
+            assert plugin.registry == reg_id, f"Expected provenance {reg_id} after restart, got: {plugin.registry}"
             assert plugin.version == installed_version, (
                 f"Expected version {installed_version!r} after restart, got: {plugin.version!r}"
             )
-            assert plugin.installed_version == installed_version, (
-                f"Expected installed_version {installed_version!r} after restart, got: {plugin.installed_version!r}"
-            )
-            assert plugin.installed_sha256 == installed_sha256, (
-                f"Expected installed_sha256 {installed_sha256!r} after restart, got: {plugin.installed_sha256!r}"
+            assert plugin.sha256 == installed_sha256, (
+                f"Expected sha256 {installed_sha256!r} after restart, got: {plugin.sha256!r}"
             )
             break
     else:
