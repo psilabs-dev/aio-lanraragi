@@ -115,6 +115,7 @@ async def test_plugin_functionality(lrr_client: LRRClient, environment: Abstract
     expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
+@pytest.mark.xfail(reason="requires LRR-side fix: PR #1558 omit type on plugin-not-found", strict=False)
 async def test_plugin_not_available(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
     Test behavior of plugin when not available.
