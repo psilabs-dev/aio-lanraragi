@@ -48,7 +48,6 @@ async def test_plugin_uninstall_ui(lrr_client: LRRClient, environment: AbstractL
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",

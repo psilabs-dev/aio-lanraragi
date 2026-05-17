@@ -57,7 +57,6 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -161,7 +160,6 @@ async def test_plugin_install_provenance_roundtrip(lrr_client: LRRClient, enviro
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -267,7 +265,6 @@ async def test_plugin_install_error_paths(lrr_client: LRRClient, environment: Ab
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -475,7 +472,7 @@ async def test_plugin_install_failed_require_rolls_back(
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="local-broken",
-            type="local",
+            provider="local",
             path=environment.local_registry_path,
         )
     )
@@ -695,7 +692,7 @@ async def test_install_failure_preserves_other_plugins(
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="local-two-plugins",
-            type="local",
+            provider="local",
             path=environment.local_registry_path,
         )
     )
@@ -804,7 +801,6 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -975,7 +971,6 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
         response, error = await lrr_client.misc_api.create_registry(
             CreateRegistryRequest(
                 name="demo",
-                type="git",
                 provider="github",
                 url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
                 ref="main",
@@ -1048,7 +1043,6 @@ async def test_plugin_uninstall_not_listed(lrr_client: LRRClient, environment: A
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -1105,7 +1099,6 @@ async def test_plugin_cross_provenance_force(lrr_client: LRRClient, environment:
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo-A",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -1147,7 +1140,6 @@ async def test_plugin_cross_provenance_force(lrr_client: LRRClient, environment:
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo-B",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -1220,7 +1212,6 @@ async def test_managed_plugin_upgrade_reloads_class(
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -1318,7 +1309,6 @@ async def test_managed_plugin_upgrade_reloads_across_workers(
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -1425,7 +1415,6 @@ async def test_managed_plugin_upgrade_reloads_across_workers_via_list_plugins(
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -1528,7 +1517,6 @@ async def test_managed_plugin_survives_restart(lrr_client: LRRClient, environmen
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -1607,7 +1595,6 @@ async def test_plugin_file_deleted_under_lrr(lrr_client: LRRClient, environment:
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",

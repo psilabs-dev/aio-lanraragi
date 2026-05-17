@@ -49,7 +49,6 @@ async def test_registry_crud(lrr_client: LRRClient, environment: AbstractLRRDepl
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo plugins",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -66,7 +65,7 @@ async def test_registry_crud(lrr_client: LRRClient, environment: AbstractLRRDepl
     assert not error, f"Failed to get registry (status {error.status}): {error.error}"
     assert response.registry.id == reg_id, f"Expected registry.id {reg_id}, got: {response.registry.id}"
     assert response.registry.name == "demo plugins"
-    assert response.registry.type == "git"
+    assert response.registry.provider == "github"
     assert response.registry.url == "https://github.com/psilabs-dev/lrr-plugins-demo.git"
     assert response.registry.ref == "main"
 
@@ -103,14 +102,14 @@ async def test_registry_crud(lrr_client: LRRClient, environment: AbstractLRRDepl
 
     # >>>>> CREATE LOCAL REGISTRY >>>>>
     response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="local plugins", type="local", path="/home/koyomi/plugins")
+        CreateRegistryRequest(name="local plugins", provider="local", path="/home/koyomi/plugins")
     )
     assert not error, f"Failed to create local registry (status {error.status}): {error.error}"
     local_reg_id = response.id
 
     response, error = await lrr_client.misc_api.get_registry(local_reg_id)
     assert not error, f"Failed to get local registry (status {error.status}): {error.error}"
-    assert response.registry.type == "local"
+    assert response.registry.provider == "local"
     assert response.registry.path == "/home/koyomi/plugins"
 
     response, error = await lrr_client.misc_api.delete_registry(local_reg_id)
@@ -123,7 +122,7 @@ async def test_registry_crud(lrr_client: LRRClient, environment: AbstractLRRDepl
 
     # >>>>> CREATE CDN REGISTRY (https) >>>>>
     response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="cdn plugins", type="cdn", url="https://cdn.example.com/plugins")
+        CreateRegistryRequest(name="cdn plugins", provider="cdn", url="https://cdn.example.com/plugins")
     )
     assert not error, f"Failed to create CDN registry (status {error.status}): {error.error}"
     cdn_reg_id = response.id
@@ -131,9 +130,8 @@ async def test_registry_crud(lrr_client: LRRClient, environment: AbstractLRRDepl
 
     response, error = await lrr_client.misc_api.get_registry(cdn_reg_id)
     assert not error, f"Failed to get CDN registry (status {error.status}): {error.error}"
-    assert response.registry.type == "cdn"
+    assert response.registry.provider == "cdn"
     assert response.registry.url == "https://cdn.example.com/plugins"
-    assert response.registry.provider is None, "CDN registry should not carry a provider"
     assert response.registry.ref is None, "CDN registry should not carry a ref"
     assert response.registry.path is None, "CDN registry should not carry a path"
 
@@ -144,7 +142,7 @@ async def test_registry_crud(lrr_client: LRRClient, environment: AbstractLRRDepl
     # >>>>> CREATE CDN REGISTRY (http allowed) >>>>>
     # Spec: CDN transport accepts http:// in addition to https://. Git remains HTTPS-only.
     response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="cdn http", type="cdn", url="http://cdn.example.com/plugins")
+        CreateRegistryRequest(name="cdn http", provider="cdn", url="http://cdn.example.com/plugins")
     )
     assert not error, f"Failed to create http CDN registry (status {error.status}): {error.error}"
     cdn_http_reg_id = response.id
@@ -173,7 +171,7 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
 
     # >>>>> MISSING URL FOR GIT >>>>>
     response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="bad git", type="git")
+        CreateRegistryRequest(name="bad git", provider="github", ref="main")
     )
     assert error is not None, "Expected error for git registry without url"
     assert error.status == 400, f"Expected 400 for git registry without url, got {error.status}"
@@ -181,7 +179,7 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
 
     # >>>>> MISSING PATH FOR LOCAL >>>>>
     response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="bad local", type="local")
+        CreateRegistryRequest(name="bad local", provider="local")
     )
     assert error is not None, "Expected error for local registry without path"
     assert error.status == 400, f"Expected 400 for local registry without path, got {error.status}"
@@ -189,7 +187,7 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
 
     # >>>>> NON-HTTPS URL >>>>>
     response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="http git", type="git", provider="github", url="http://github.com/owner/repo.git")
+        CreateRegistryRequest(name="http git", provider="github", url="http://github.com/owner/repo.git", ref="main")
     )
     assert error is not None, "Expected error for non-HTTPS git URL"
     assert error.status == 400, f"Expected 400 for non-HTTPS git URL, got {error.status}"
@@ -197,7 +195,7 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
 
     # >>>>> MISSING URL FOR CDN >>>>>
     response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="bad cdn", type="cdn")
+        CreateRegistryRequest(name="bad cdn", provider="cdn")
     )
     assert error is not None, "Expected error for CDN registry without url"
     assert error.status == 400, f"Expected 400 for CDN registry without url, got {error.status}"
@@ -206,7 +204,7 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
     # >>>>> NON-HTTP(S) SCHEME FOR CDN >>>>>
     # CDN spec allows http:// or https:// only. ftp:// must be rejected.
     response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="ftp cdn", type="cdn", url="ftp://cdn.example.com/plugins")
+        CreateRegistryRequest(name="ftp cdn", provider="cdn", url="ftp://cdn.example.com/plugins")
     )
     assert error is not None, "Expected error for non-http(s) CDN URL"
     assert error.status == 400, f"Expected 400 for non-http(s) CDN URL, got {error.status}"
@@ -214,32 +212,32 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
 
     # >>>>> MISSING NAME >>>>>
     response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="", type="local", path="/tmp/plugins")
+        CreateRegistryRequest(name="", provider="local", path="/tmp/plugins")
     )
     assert error is not None, "Expected error for missing registry name"
     assert error.status == 400, f"Expected 400 for missing registry name, got {error.status}"
     # <<<<< MISSING NAME <<<<<
 
-    # >>>>> INVALID TYPE ENUM >>>>>
-    # Pydantic Literal["git", "local"] blocks case typos at the client; send raw
-    # to confirm OpenAPI rejects before the controller derefs $TYPE_FIELDS{$type}.
+    # >>>>> INVALID PROVIDER ENUM >>>>>
+    # Pydantic Literal["github", ...] blocks case typos at the client; send raw
+    # to confirm OpenAPI rejects before the controller derefs $PROVIDER_FIELDS{$provider}.
     status, content = await lrr_client.handle_request(
         http.HTTPMethod.POST,
         lrr_client.build_url("/api/registries"),
         lrr_client.headers,
         json_data={
-            "name": "bad type",
-            "type": "Git",
-            "provider": "github",
+            "name": "bad provider",
+            "provider": "Git",
             "url": "https://github.com/owner/repo.git",
+            "ref": "main",
         },
     )
     body = json.loads(content)
-    assert status == 400, f"Expected 400 for invalid type enum, got {status}: {body}"
-    type_error = next((e for e in body.get("errors", []) if e.get("path") == "/body/type"), None)
-    assert type_error is not None, f"Expected enum violation on /body/type, got: {body}"
-    assert "enum" in type_error.get("message", "").lower(), f"Expected enum-list message, got: {type_error}"
-    # <<<<< INVALID TYPE ENUM <<<<<
+    assert status == 400, f"Expected 400 for invalid provider enum, got {status}: {body}"
+    provider_error = next((e for e in body.get("errors", []) if e.get("path") == "/body/provider"), None)
+    assert provider_error is not None, f"Expected enum violation on /body/provider, got: {body}"
+    assert "enum" in provider_error.get("message", "").lower(), f"Expected enum-list message, got: {provider_error}"
+    # <<<<< INVALID PROVIDER ENUM <<<<<
 
     # >>>>> EMPTY REF >>>>>
     # Pydantic ref: str | None accepts ""; send raw to assert OpenAPI rejects
@@ -250,7 +248,6 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
         lrr_client.headers,
         json_data={
             "name": "empty ref",
-            "type": "git",
             "provider": "github",
             "url": "https://github.com/owner/repo.git",
             "ref": "",
@@ -276,7 +273,7 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
     3. Delete nonexistent registry, expect 404.
     4. Create registry, update with empty body, expect error.
     5. Update with non-HTTPS url, expect error.
-    6. Update with fields invalid for the registry's type, expect error.
+    6. Update type to git without url+ref on a local registry, expect error.
     7. Update with mixed valid + type-invalid fields, expect error.
     8. Update with empty name, expect error.
     9. Update ref field, verify index_cleared.
@@ -307,7 +304,7 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
 
     # >>>>> EMPTY UPDATE >>>>>
     response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="test", type="local", path="/tmp/plugins")
+        CreateRegistryRequest(name="test", provider="local", path="/tmp/plugins")
     )
     assert not error, f"Failed to create registry (status {error.status}): {error.error}"
     reg_id = response.id
@@ -322,37 +319,33 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
     # >>>>> NON-HTTPS URL ON UPDATE >>>>>
     # User expectation: updating a registry must reject plaintext HTTP just like
     # creation does, so plugin artifacts can't be fetched over an insecure channel.
-    # The provider field is supplied so the missing-provider guard does not mask
-    # the URL pattern enforcement we are exercising here.
     response, error = await lrr_client.misc_api.update_registry(
-        reg_id, UpdateRegistryRequest(type="git", url="http://example.com/repo.git", provider="github")
+        reg_id, UpdateRegistryRequest(provider="github", url="http://example.com/repo.git", ref="main")
     )
     assert error is not None, "Expected error for non-HTTPS URL on update"
     assert error.status == 400, f"Expected 400 for non-HTTPS URL on update, got {error.status}"
     # <<<<< NON-HTTPS URL ON UPDATE <<<<<
 
-    # >>>>> UPDATE WITH FIELDS INVALID FOR LOCAL TYPE >>>>>
-    # User expectation: an update that supplies fields meaningless for the
-    # registry's stored type fails loudly. A 200 OK must mean LRR changed
-    # something the caller asked for; silently dropping `provider` on a local
-    # registry would mislead the operator.
+    # >>>>> UPDATE WITH FIELDS INVALID FOR LOCAL KIND >>>>>
+    # User expectation: switching a local registry to a git provider without providing
+    # url and ref fails loudly. The merge check rejects: git registry needs url+ref.
     response, error = await lrr_client.misc_api.update_registry(
         reg_id, UpdateRegistryRequest(provider="github")
     )
-    assert error is not None, "Expected error for type-invalid field on update"
-    assert error.status == 400, f"Expected 400 for type-invalid field on update, got {error.status}"
-    # <<<<< UPDATE WITH FIELDS INVALID FOR LOCAL TYPE <<<<<
+    assert error is not None, "Expected error for provider-invalid field on update"
+    assert error.status == 400, f"Expected 400 for provider-invalid field on update, got {error.status}"
+    # <<<<< UPDATE WITH FIELDS INVALID FOR LOCAL KIND <<<<<
 
-    # >>>>> UPDATE WITH MIXED VALID AND TYPE-INVALID FIELDS >>>>>
+    # >>>>> UPDATE WITH MIXED VALID AND KIND-INVALID FIELDS >>>>>
     # Same loud-failure expectation when a valid field is bundled with an
     # irrelevant one. The relevant field must not mask the irrelevant one and
     # the cached index must not be invalidated by the meaningless field.
     response, error = await lrr_client.misc_api.update_registry(
         reg_id, UpdateRegistryRequest(name="renamed local", provider="github")
     )
-    assert error is not None, "Expected error for mixed valid + type-invalid update"
-    assert error.status == 400, f"Expected 400 for mixed valid + type-invalid update, got {error.status}"
-    # <<<<< UPDATE WITH MIXED VALID AND TYPE-INVALID FIELDS <<<<<
+    assert error is not None, "Expected error for mixed valid + provider-invalid update"
+    assert error.status == 400, f"Expected 400 for mixed valid + provider-invalid update, got {error.status}"
+    # <<<<< UPDATE WITH MIXED VALID AND KIND-INVALID FIELDS <<<<<
 
     # >>>>> UPDATE WITH EMPTY NAME >>>>>
     # Pydantic name: str | None accepts ""; send raw to assert OpenAPI rejects
@@ -376,7 +369,6 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -410,7 +402,7 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
     3. Update the URL, verify index_cleared is true.
     4. Verify installed plugin retains provenance despite index clear.
     5. Update name only, verify index_cleared is false.
-    6. Switch type from git to local, verify stale git fields are absent.
+    6. Switch type from github to local, verify stale git fields are absent.
     """
     environment.setup(with_api_key=True)
 
@@ -418,7 +410,6 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -468,21 +459,20 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
     assert response.index_cleared is False, "Name change should not clear index"
     # <<<<< UPDATE NAME ONLY <<<<<
 
-    # >>>>> TYPE SWITCH: GIT -> LOCAL >>>>>
+    # >>>>> KIND SWITCH: GITHUB -> LOCAL >>>>>
     response, error = await lrr_client.misc_api.update_registry(
-        reg_id, UpdateRegistryRequest(type="local", path="/tmp/plugins")
+        reg_id, UpdateRegistryRequest(provider="local", path="/tmp/plugins")
     )
-    assert not error, f"Failed to switch type (status {error.status}): {error.error}"
-    assert response.index_cleared is True, "Type change should clear index"
+    assert not error, f"Failed to switch provider (status {error.status}): {error.error}"
+    assert response.index_cleared is True, "Provider change should clear index"
 
     response, error = await lrr_client.misc_api.get_registry(reg_id)
     assert not error, f"Failed to get registry (status {error.status}): {error.error}"
-    assert response.registry.type == "local", "Type should be local"
+    assert response.registry.provider == "local", "Provider should be local"
     assert response.registry.path == "/tmp/plugins", "Path should be set"
     assert response.registry.url is None, "Stale git field 'url' should be absent"
-    assert response.registry.provider is None, "Stale git field 'provider' should be absent"
     assert response.registry.ref is None, "Stale git field 'ref' should be absent"
-    # <<<<< TYPE SWITCH: GIT -> LOCAL <<<<<
+    # <<<<< KIND SWITCH: GITHUB -> LOCAL <<<<<
 
     expect_no_error_logs(environment, LOGGER)
 
@@ -510,7 +500,6 @@ async def test_registry_refresh(lrr_client: LRRClient, environment: AbstractLRRD
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -536,3 +525,5 @@ async def test_registry_refresh(lrr_client: LRRClient, environment: AbstractLRRD
     assert error is not None, "Expected error refreshing after registry deleted"
     assert error.status == 404, f"Expected 404 for refresh after delete, got {error.status}"
     # <<<<< DELETE CLEARS INDEX <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
