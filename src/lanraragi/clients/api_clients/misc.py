@@ -182,9 +182,7 @@ class _MiscApiClient(_ApiClient):
         POST /api/registries
         """
         url = self.api_context.build_url("/api/registries")
-        body: dict[str, str] = {"name": request.name, "type": request.type}
-        if request.provider:
-            body["provider"] = request.provider
+        body: dict[str, str] = {"name": request.name, "provider": request.provider}
         if request.url:
             body["url"] = request.url
         if request.ref:
@@ -219,8 +217,6 @@ class _MiscApiClient(_ApiClient):
         body: dict[str, str] = {}
         if request.name is not None:
             body["name"] = request.name
-        if request.type is not None:
-            body["type"] = request.type
         if request.provider is not None:
             body["provider"] = request.provider
         if request.url is not None:

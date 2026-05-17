@@ -74,7 +74,7 @@ async def test_default_registry_lifecycle(
 
     # >>>>> SET VALID ID >>>>>
     response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="default-test", type="local", path=environment.local_registry_path)
+        CreateRegistryRequest(name="default-test", provider="local", path=environment.local_registry_path)
     )
     assert not error, f"Failed to create registry (status {error.status}): {error.error}"
     reg_id = response.id

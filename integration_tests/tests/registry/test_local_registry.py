@@ -58,7 +58,7 @@ async def test_local_registry_install_errors(
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="local-test",
-            type="local",
+            provider="local",
             path=environment.local_registry_path,
         )
     )
@@ -539,7 +539,7 @@ sub get_tags { return (); }
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="default-conflict",
-            type="local",
+            provider="local",
             path=environment.local_registry_path,
         )
     )
@@ -640,7 +640,7 @@ sub provide_url { return; }
     }))
 
     response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="filename-test", type="local", path=environment.local_registry_path)
+        CreateRegistryRequest(name="filename-test", provider="local", path=environment.local_registry_path)
     )
     assert not error, f"Failed to create registry (status {error.status}): {error.error}"
     reg_id = response.id
@@ -738,7 +738,7 @@ sub provide_url { return; }
     }))
 
     response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="package-mismatch", type="local", path=environment.local_registry_path)
+        CreateRegistryRequest(name="package-mismatch", provider="local", path=environment.local_registry_path)
     )
     assert not error, f"Failed to create registry (status {error.status}): {error.error}"
     reg_id = response.id
@@ -880,7 +880,7 @@ sub provide_url { return; }
         response, error = await lrr_client.misc_api.create_registry(
             CreateRegistryRequest(
                 name="sideloaded-conflict",
-                type="local",
+                provider="local",
                 path=environment.local_registry_path,
             )
         )
@@ -1050,7 +1050,7 @@ sub get_tags {{
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="registry-1",
-            type="local",
+            provider="local",
             path=f"{environment.local_registry_path}/registry-1",
         )
     )
@@ -1063,7 +1063,7 @@ sub get_tags {{
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="registry-2",
-            type="local",
+            provider="local",
             path=f"{environment.local_registry_path}/registry-2",
         )
     )
@@ -1076,7 +1076,7 @@ sub get_tags {{
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="registry-3",
-            type="local",
+            provider="local",
             path=f"{environment.local_registry_path}/registry-3",
         )
     )

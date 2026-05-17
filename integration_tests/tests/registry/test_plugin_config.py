@@ -46,7 +46,6 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -210,7 +209,6 @@ async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDe
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -303,7 +301,6 @@ async def test_plugin_config_rejects_non_metadata_fields(
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
@@ -392,7 +389,6 @@ async def test_plugin_priority_execution_order(lrr_client: LRRClient, environmen
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(
             name="demo",
-            type="git",
             provider="github",
             url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
             ref="main",
