@@ -112,7 +112,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--benchmark-label", action="store", default=None, help="Label for this benchmark run (e.g. c0-r0).")
     parser.addoption("--no-rate-limit", action="store_true", default=False, help="Skip tests that depend on rate-limited external resources (e.g. raw.githubusercontent.com).")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
-    parser.addoption("--cache-backend", action="store", default="redis", choices=["redis", "valkey", "valkey8"], help="Cache backend for Docker deployments. Default: redis.")
+    parser.addoption("--cache-backend", action="store", default="valkey", choices=["redis", "valkey", "valkey8"], help="Cache backend for Docker deployments. Default: valkey.")
     parser.addoption("--port-offset", type=int, action="store", default=0, help="Session-wide base port offset added to per-module offsets. Use to avoid conflicts between parallel sessions.")
     parser.addoption("--resource-prefix", action="store", default="", help="Session-wide prefix prepended to per-module resource prefixes. Use to isolate parallel sessions.")
 
