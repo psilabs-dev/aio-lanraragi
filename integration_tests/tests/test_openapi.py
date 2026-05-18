@@ -252,6 +252,49 @@ async def test_bypass_via_redis_config(request: pytest.FixtureRequest, resource_
 
 
 @pytest.mark.asyncio
+async def test_validation_bypass(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int):
+    """
+    A Content-Type with media-type parameters (e.g. `application/json; charset=utf-8`)
+    must not bypass OpenAPI request body validation. Regression guard for
+    https://github.com/jhthorsen/json-validator/pull/289 — the json-validator
+    _validate_body schema lookup uses the raw Content-Type header, so any parameter
+    suffix causes the lookup to miss and validation to silently no-op.
+
+    1. Start LRR with validation enabled.
+    2. PUT /api/tankoubons/SOMETANKID with a body that violates the schema
+       (archive id below the 40-char minLength) and Content-Type: application/json;
+       charset=utf-8.
+    3. Assert the OpenAPI validator rejects with 400 and the errors array, rather
+       than passing the body through to the controller (which would return 200).
+    """
+    env: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
+    try:
+        env.setup(with_api_key=True)
+        request.session.lrr_environments = {resource_prefix: env}
+
+        client = env.lrr_client()
+        try:
+            headers = {**client.headers, "Content-Type": "application/json; charset=utf-8"}
+            status, content = await client.handle_request(
+                http.HTTPMethod.PUT,
+                client.build_url("/api/tankoubons/SOMETANKID"),
+                headers,
+                data=json.dumps({"archives": ["short"]}),
+            )
+            body = json.loads(content)
+            assert status == 400, f"Expected 400 from OpenAPI validation, got {status}. Body: {body}"
+            assert "errors" in body, f"Expected OpenAPI 'errors' array, got keys: {list(body.keys())}"
+            error_messages = " ".join(e.get("message", "") for e in body["errors"])
+            assert "String is too short" in error_messages, (
+                f"Expected 'String is too short' in errors, got: {error_messages}"
+            )
+        finally:
+            await client.close()
+    finally:
+        env.teardown(remove_data=True)
+
+
+@pytest.mark.asyncio
 @pytest.mark.playwright
 async def test_validation_carousel_search(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int):
     """
