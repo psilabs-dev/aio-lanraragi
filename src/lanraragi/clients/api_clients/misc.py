@@ -232,7 +232,6 @@ class _MiscApiClient(_ApiClient):
             response_j = json.loads(content)
             return (UpdateRegistryResponse(
                 id=response_j["id"],
-                index_cleared=response_j.get("index_cleared", False),
             ), None)
         return (None, _build_err_response(content, status))
 
