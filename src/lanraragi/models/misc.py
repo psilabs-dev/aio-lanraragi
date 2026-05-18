@@ -43,6 +43,10 @@ class GetAvailablePluginsResponsePlugin(BaseModel):
     parameters: list[dict[str, str]] | None = Field(None)
     type: Literal["login", "metadata", "script", "download", "all"] = Field(...)
     version: str = Field(...)
+    hidden: bool = Field(False)
+    priority: int = Field(0)
+    registry: str | None = Field(None)
+    sha256: str | None = Field(None)
 
 class GetAvailablePluginsResponse(LanraragiResponse):
     plugins: list[GetAvailablePluginsResponsePlugin] = Field(...)
@@ -88,6 +92,72 @@ class RegenerateThumbnailRequest(LanraragiRequest):
 class RegenerateThumbnailResponse(LanraragiResponse):
     job: int = Field(...)
 
+class RegistryConfig(BaseModel):
+    id: str = Field(...)
+    name: str = Field(...)
+    provider: Literal["github", "gitlab", "gitea", "cdn", "local"] = Field(...)
+    url: str | None = Field(None)
+    ref: str | None = Field(None)
+    path: str | None = Field(None)
+    created: int = Field(...)
+    updated: int = Field(...)
+
+class CreateRegistryRequest(LanraragiRequest):
+    name: str = Field(...)
+    provider: Literal["github", "gitlab", "gitea", "cdn", "local"] = Field(...)
+    url: str | None = Field(None)
+    ref: str | None = Field(None)
+    path: str | None = Field(None)
+
+class CreateRegistryResponse(LanraragiResponse):
+    id: str = Field(...)
+
+class UpdateRegistryRequest(LanraragiRequest):
+    name: str | None = Field(None)
+    provider: Literal["github", "gitlab", "gitea", "cdn", "local"] | None = Field(None)
+    url: str | None = Field(None)
+    ref: str | None = Field(None)
+    path: str | None = Field(None)
+
+class UpdateRegistryResponse(LanraragiResponse):
+    id: str = Field(...)
+
+class GetRegistryResponse(LanraragiResponse):
+    registry: RegistryConfig = Field(...)
+
+class ListRegistriesResponse(LanraragiResponse):
+    registries: list[RegistryConfig] = Field(...)
+
+class RefreshRegistryResponse(LanraragiResponse):
+    index: dict[str, Any] | None = Field(None)
+
+class GetDefaultRegistryResponse(LanraragiResponse):
+    id: str = Field(...)
+
+class UpdateDefaultRegistryResponse(LanraragiResponse):
+    id: str = Field(...)
+
+class RemoveDefaultRegistryResponse(LanraragiResponse):
+    id: str = Field(...)
+
+class UpdateMetadataPluginConfigRequest(LanraragiRequest):
+    enabled: bool | None = Field(None)
+    hidden: bool | None = Field(None)
+    priority: int | None = Field(None)
+
+class InstallPluginRequest(LanraragiRequest):
+    namespace: str = Field(...)
+    registry: str = Field(...)
+    version: str | None = Field(None)
+    force: bool | None = Field(None)
+
+class InstallPluginResponse(LanraragiResponse):
+    name: str = Field(...)
+    namespace: str = Field(...)
+    version: str = Field(...)
+    registry: str = Field(...)
+    sha256: str = Field(...)
+
 __all__ = [
     "GetServerInfoResponse",
     "GetOpdsCatalogRequest",
@@ -105,4 +175,18 @@ __all__ = [
     "QueueUrlDownloadResponse",
     "RegenerateThumbnailRequest",
     "RegenerateThumbnailResponse",
+    "RegistryConfig",
+    "CreateRegistryRequest",
+    "CreateRegistryResponse",
+    "UpdateRegistryRequest",
+    "UpdateRegistryResponse",
+    "GetRegistryResponse",
+    "ListRegistriesResponse",
+    "RefreshRegistryResponse",
+    "GetDefaultRegistryResponse",
+    "UpdateDefaultRegistryResponse",
+    "RemoveDefaultRegistryResponse",
+    "UpdateMetadataPluginConfigRequest",
+    "InstallPluginRequest",
+    "InstallPluginResponse",
 ]
