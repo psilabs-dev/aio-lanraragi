@@ -84,7 +84,6 @@ async def test_registry_crud(lrr_client: LRRClient, environment: AbstractLRRDepl
         reg_id, UpdateRegistryRequest(name="renamed plugins")
     )
     assert not error, f"Failed to update registry (status {error.status}): {error.error}"
-    assert response.index_cleared is False, "Name-only update should not clear index"
 
     response, error = await lrr_client.misc_api.get_registry(reg_id)
     assert not error, f"Failed to get registry (status {error.status}): {error.error}"
@@ -276,7 +275,6 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
     6. Update type to git without url+ref on a local registry, expect error.
     7. Update with mixed valid + type-invalid fields, expect error.
     8. Update with empty name, expect error.
-    9. Update ref field, verify index_cleared.
     """
     environment.setup(with_api_key=True)
 
@@ -338,8 +336,7 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
 
     # >>>>> UPDATE WITH MIXED VALID AND KIND-INVALID FIELDS >>>>>
     # Same loud-failure expectation when a valid field is bundled with an
-    # irrelevant one. The relevant field must not mask the irrelevant one and
-    # the cached index must not be invalidated by the meaningless field.
+    # irrelevant one. The relevant field must not mask the irrelevant one.
     response, error = await lrr_client.misc_api.update_registry(
         reg_id, UpdateRegistryRequest(name="renamed local", provider="github")
     )
@@ -362,31 +359,6 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
     assert name_error is not None, f"Expected length violation on /body/name, got: {body}"
     # <<<<< UPDATE WITH EMPTY NAME <<<<<
 
-    # >>>>> UPDATE REF CLEARS INDEX >>>>>
-    response, error = await lrr_client.misc_api.delete_registry(reg_id)
-    assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
-
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(
-            name="demo",
-            provider="github",
-            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
-            ref="main",
-        )
-    )
-    assert not error, f"Failed to create git registry (status {error.status}): {error.error}"
-    reg_id = response.id
-
-    response, error = await lrr_client.misc_api.update_registry(
-        reg_id, UpdateRegistryRequest(ref="dev")
-    )
-    assert not error, f"Failed to update ref (status {error.status}): {error.error}"
-    assert response.index_cleared is True, "Ref change should clear index"
-
-    response, error = await lrr_client.misc_api.delete_registry(reg_id)
-    assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
-    # <<<<< UPDATE REF CLEARS INDEX <<<<<
-
     expect_no_error_logs(environment, LOGGER)
 
 
@@ -395,14 +367,13 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
 @pytest.mark.ratelimit
 async def test_registry_update_relink(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
-    Test that updating source fields clears the cached index.
+    Test that registry updates preserve plugin provenance and clean stale provider fields.
 
     1. Create a git registry and refresh.
     2. Install a plugin from the registry.
-    3. Update the URL, verify index_cleared is true.
-    4. Verify installed plugin retains provenance despite index clear.
-    5. Update name only, verify index_cleared is false.
-    6. Switch type from github to local, verify stale git fields are absent.
+    3. Update the URL, verify installed plugin retains provenance.
+    4. Update name only.
+    5. Switch type from github to local, verify stale git fields are absent.
     """
     environment.setup(with_api_key=True)
 
@@ -437,7 +408,6 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
         reg_id, UpdateRegistryRequest(url="https://github.com/example/other-repo.git")
     )
     assert not error, f"Failed to update registry (status {error.status}): {error.error}"
-    assert response.index_cleared is True, "URL change should clear index"
 
     response, error = await lrr_client.misc_api.get_available_plugins(
         GetAvailablePluginsRequest(type="download")
@@ -456,7 +426,6 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
         reg_id, UpdateRegistryRequest(name="renamed")
     )
     assert not error, f"Failed to update registry name (status {error.status}): {error.error}"
-    assert response.index_cleared is False, "Name change should not clear index"
     # <<<<< UPDATE NAME ONLY <<<<<
 
     # >>>>> KIND SWITCH: GITHUB -> LOCAL >>>>>
@@ -464,7 +433,6 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
         reg_id, UpdateRegistryRequest(provider="local", path="/tmp/plugins")
     )
     assert not error, f"Failed to switch provider (status {error.status}): {error.error}"
-    assert response.index_cleared is True, "Provider change should clear index"
 
     response, error = await lrr_client.misc_api.get_registry(reg_id)
     assert not error, f"Failed to get registry (status {error.status}): {error.error}"
