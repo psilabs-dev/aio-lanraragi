@@ -938,7 +938,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         # force-remove intermediate artifacts with rm/forcerm.
         if self.docker_api:
             logs = []
-            for evt in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag=image_id, decode=True, rm=True, forcerm=True):
+            for evt in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag=image_id, decode=True, rm=True, forcerm=True, timeout=900):
                 logs.append(evt)
                 if (msg := evt.get("stream")):
                     self.logger.info(msg.strip())
@@ -946,7 +946,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                     error_msg = evt.get("error") or evt.get("errorDetail", {}).get("message")
                     raise DeploymentException(f"Docker image build failed! Error: {error_msg}")
         else:
-            self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag=image_id, rm=True, forcerm=True)
+            self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag=image_id, rm=True, forcerm=True, timeout=900)
 
         build_time = time.time() - build_start
         self.logger.info(f"LRR image {image_id} build complete: time {build_time}s")
