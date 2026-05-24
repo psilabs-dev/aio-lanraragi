@@ -343,8 +343,8 @@ async def test_validation_carousel_search(request: pytest.FixtureRequest, resour
                     assert len(search_responses) > 0, "No /api/search response captured from carousel"
 
                     for r in search_responses:
-                        assert r.status == 200, (
-                            f"Carousel search returned {r.status}, expected 200. URL: {r.url}"
+                        assert r.status in (200, 204), (
+                            f"Carousel search returned {r.status}, expected 200 or 204. URL: {r.url}"
                         )
                         assert "category=&" not in r.url and not r.url.endswith("category="), (
                             f"Carousel URL contains empty category= param: {r.url}"

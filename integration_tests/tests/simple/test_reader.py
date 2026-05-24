@@ -96,7 +96,7 @@ async def test_slideshow(
             assert header.strip() == "Reader Options", f"Expected 'Reader Options' header, got {header!r}"
             await page.locator("#auto-next-page-input").fill("1")
             await page.locator("#auto-next-page-apply").click()
-            await page.keyboard.press("Tab") # blur input so keyboard shortcuts work
+            await page.locator("#settingsOverlay h2.ih").first.click() # click non-focusable header to defocus input so 'o' shortcut fires
             await page.keyboard.press("o") # close options
             await page.locator("#settingsOverlay").wait_for(state="hidden")
 
@@ -551,7 +551,7 @@ async def test_slideshow_continue_navigation(
             await page.locator("#settingsOverlay").wait_for(state="visible")
             await page.locator("#auto-next-page-input").fill("1")
             await page.locator("#auto-next-page-apply").click()
-            await page.keyboard.press("Tab")
+            await page.locator("#settingsOverlay h2.ih").first.click() # click non-focusable header to defocus input so 'o' shortcut fires
             await page.keyboard.press("o")
             await page.locator("#settingsOverlay").wait_for(state="hidden")
 
