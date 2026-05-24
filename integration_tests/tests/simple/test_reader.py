@@ -752,7 +752,9 @@ async def test_toc_reader(
             await add_toc_icon.click(force=True)
 
             # fill SweetAlert2 dialog
-            await page.get_by_role("textbox").fill("Chapter 1.5")
+            dialog_textbox = page.get_by_role("textbox")
+            await dialog_textbox.wait_for(state="visible", timeout=5000)
+            await dialog_textbox.fill("Chapter 1.5")
             await page.get_by_role("button", name="OK").click()
 
             # overlay reopens only after PUT + metadata reload completes
@@ -774,7 +776,9 @@ async def test_toc_reader(
             edit_icon = page.locator(".edit-toc").first
             await edit_icon.click()
 
-            await page.get_by_role("textbox").fill("Chapter 1 Renamed")
+            dialog_textbox = page.get_by_role("textbox")
+            await dialog_textbox.wait_for(state="visible", timeout=5000)
+            await dialog_textbox.fill("Chapter 1 Renamed")
             await page.get_by_role("button", name="OK").click()
 
             # overlay reopens only after PUT + metadata reload completes
@@ -807,7 +811,9 @@ async def test_toc_reader(
             await delete_icon.click()
 
             # confirm SweetAlert2 deletion dialog
-            await page.get_by_role("button", name="Yes, delete it!").click()
+            delete_confirm = page.get_by_role("button", name="Yes, delete it!")
+            await delete_confirm.wait_for(state="visible", timeout=5000)
+            await delete_confirm.click()
 
             # overlay reopens only after DELETE + metadata reload completes
             await page.locator("#archivePagesOverlay").wait_for(state="hidden")

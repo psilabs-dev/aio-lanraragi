@@ -382,12 +382,17 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
 
             LOGGER.info("Clicking settings button.")
             await page.get_by_role("link", name="Settings").click()
+            await page.wait_for_load_state("networkidle")
             LOGGER.info("Clicking security settings.")
             await page.get_by_text("Security").click()
+            await page.wait_for_timeout(300)
             LOGGER.info("Enabling No-Fun Mode.")
-            await page.get_by_role("checkbox", name="Enabling No-Fun Mode will").check()
+            nofun_checkbox = page.get_by_role("checkbox", name="Enabling No-Fun Mode will")
+            await nofun_checkbox.wait_for(state="visible", timeout=5000)
+            await nofun_checkbox.check()
             LOGGER.info("Clicking save settings.")
             await page.get_by_role("button", name="Save Settings").click()
+            await page.wait_for_load_state("networkidle")
 
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
