@@ -275,6 +275,10 @@ def _save_server_logs(
         if mojo_logs:
             (out_dir / "mojo.log").write_text(mojo_logs, encoding='utf-8')
 
+        minion_logs = environment.read_minion_logs()
+        if minion_logs:
+            (out_dir / "minion.log").write_text(minion_logs, encoding='utf-8')
+
         # Redis logs: file-based, fallback to process logs.
         redis_logs = environment.read_redis_logs()
         if not redis_logs:

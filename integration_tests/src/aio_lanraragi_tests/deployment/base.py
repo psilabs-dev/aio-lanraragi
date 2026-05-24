@@ -556,6 +556,17 @@ class AbstractLRRDeploymentContext(abc.ABC):
         """
         return self._read_log_with_rotated_gzip("mojo.log")
 
+    def read_minion_logs(self) -> str:
+        """
+        Read all minion.log logs, including rotated ones, as a single string, in the order:
+
+        - minion.log
+        - minion.log.1.gz
+        - minion.log.2.gz
+        - ...
+        """
+        return self._read_log_with_rotated_gzip("minion.log")
+
     def read_log(self, log_file: str) -> str:
         """
         Read a log file from logs directory.
