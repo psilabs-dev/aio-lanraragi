@@ -53,13 +53,16 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerato
 
 
 @pytest.mark.asyncio
-async def test_metrics_endpoint(lrr_client: LRRClient):
+async def test_metrics_endpoint(environment: AbstractLRRDeploymentContext, lrr_client: LRRClient):
     """
-    Test metrics endpoint returns valid Prometheus exposition data after API activity.
+    Test metrics endpoint returns valid Prometheus exposition data, and remains
+    reachable with API key auth after nofun mode is enabled.
 
     1. Verify connection and make API calls to generate metrics.
     2. Wait for flush interval, then make a throwaway call to trigger flush.
     3. Fetch metrics and verify expected metric families are present.
+    4. Enable nofun mode and restart; verify metrics remain reachable and the
+       nofun_mode metric is exposed.
     """
     # >>>>> TEST CONNECTION STAGE >>>>>
     response, error = await lrr_client.misc_api.get_server_info()
@@ -93,21 +96,12 @@ async def test_metrics_endpoint(lrr_client: LRRClient):
     assert "lanraragi_api_requests_total" in content, "Missing lanraragi_api_requests_total metric"
     # <<<<< FETCH AND VERIFY METRICS <<<<<
 
-
-@pytest.mark.asyncio
-async def test_metrics_endpoint_nofun(environment: AbstractLRRDeploymentContext, lrr_client: LRRClient):
-    """
-    Test metrics endpoint is reachable with API key auth when nofun mode is enabled.
-
-    1. Enable nofun mode and restart.
-    2. Fetch metrics with API key, verify 200 response with expected content.
-    """
     environment.enable_nofun_mode()
     environment.restart()
 
     response, error = await lrr_client.metrics_api.get_metrics()
-    assert not error, f"Failed to get metrics (status {error.status}): {error.error}"
+    assert not error, f"Failed to get metrics with nofun mode enabled (status {error.status}): {error.error}"
 
     content = response.content
-    assert "# EOF" in content, "Metrics response missing EOF marker"
+    assert "# EOF" in content, "Metrics response missing EOF marker after nofun restart"
     assert "lanraragi_nofun_mode 1" in content, "Missing or incorrect lanraragi_nofun_mode metric"
