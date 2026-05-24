@@ -420,7 +420,6 @@ async def test_reader_to_index_cross_dt(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.xfail(reason="requires LRR-side fix: PR #1518 history push deduplication", strict=False)
 async def test_forward_history_after_redraw(
         lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 ):
@@ -519,7 +518,6 @@ async def test_forward_history_after_redraw(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.xfail(reason="requires LRR-side fix: PR #1518 history push deduplication", strict=False)
 async def test_back_stack_no_growth_on_reload(
         lrr_client: LRRClient,
 ):
