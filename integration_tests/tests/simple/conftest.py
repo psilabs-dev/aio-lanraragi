@@ -15,13 +15,13 @@ LOGGER = logging.getLogger(__name__)
 
 
 @pytest.fixture
-def resource_prefix() -> Generator[str, None, None]:
-    yield "test_"
+def resource_prefix(request: pytest.FixtureRequest) -> Generator[str, None, None]:
+    yield request.config.getoption("--resource-prefix") + "test_"
 
 
 @pytest.fixture
-def port_offset() -> Generator[int, None, None]:
-    yield 10
+def port_offset(request: pytest.FixtureRequest) -> Generator[int, None, None]:
+    yield request.config.getoption("--port-offset") + 10
 
 @pytest.fixture
 def environment(request: pytest.FixtureRequest, port_offset: int, resource_prefix: str):

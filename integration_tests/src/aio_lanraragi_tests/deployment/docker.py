@@ -7,10 +7,12 @@ import io
 import logging
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 from enum import Enum
 from pathlib import Path
@@ -30,6 +32,7 @@ from aio_lanraragi_tests.deployment.base import (
     PluginPathsT,
 )
 from aio_lanraragi_tests.exceptions import DeploymentException
+from aio_lanraragi_tests.utils.docker import set_pdeathsig
 
 DEFAULT_LANRARAGI_DOCKER_TAG = "difegue/lanraragi"
 
@@ -61,7 +64,6 @@ def get_container_memory_mb(container: docker.models.containers.Container | None
     stats = container.stats(stream=False)
     mem_usage = stats["memory_stats"].get("usage", 0)
     return mem_usage / (1024 * 1024)
-
 
 class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
@@ -686,6 +688,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.enable_cors()
         else:
             self.disable_cors()
+        self.disable_openapi_bypass()
         self.logger.debug("Redis post-connect configuration complete.")
 
         # start lrr
@@ -898,17 +901,21 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.network.remove()
             self.logger.debug(f"Removed network: {self.network_name}")
 
-    def _build_docker_image(self, build_path: str, force: bool=False):
+    def _build_docker_image(
+            self, build_path: str, force: bool=False, buildx_shell: bool=True
+    ):
         """
         Build a docker image.
 
         Args:
             build_path: The path to the build directory.
             force: Whether to force the build (e.g. even if the image already exists).
+            buildx_shell: Whether to use docker buildx via subprocess procedure.
 
         Raises:
             FileNotFoundError: docker image or build path not found
             DeploymentException: if docker image build fails with log stream output
+                or if buildx is not available when buildx_shell is True
             docker.errors.BuildError: if docker image build fails with log stream disabled
         """
         image_id = self.lrr_image_name
@@ -920,7 +927,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 return
             except docker.errors.ImageNotFound:
                 self.logger.debug(f"Image {image_id} not found, building.")
-                self._build_docker_image(build_path, force=True)
+                self._build_docker_image(build_path, force=True, buildx_shell=buildx_shell)
                 return
 
         if not Path(build_path).exists():
@@ -935,9 +942,64 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         # https://docker-py.readthedocs.io/en/stable/api.html
         # force-remove intermediate artifacts with rm/forcerm.
-        if self.docker_api:
+        if buildx_shell:
+            if shutil.which("docker") is None:
+                raise DeploymentException("docker CLI not found on PATH; cannot use buildx_shell.")
+            try:
+                probe = subprocess.run(
+                    ["docker", "buildx", "version"], capture_output=True, text=True, timeout=10
+                )
+            except subprocess.TimeoutExpired:
+                raise DeploymentException("docker buildx version probe timed out after 10s.")
+            if probe.returncode != 0:
+                msg = probe.stderr.strip() or probe.stdout.strip()
+                raise DeploymentException(f"docker buildx not available: {msg}")
+            cmd = [
+                "docker", "buildx", "build",
+                "--progress=plain",
+                "--load",
+                "-t", image_id,
+                "-f", str(dockerfile_path),
+                str(build_path),
+            ]
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                bufsize=1, start_new_session=True, encoding="utf-8", errors="replace",
+                preexec_fn=set_pdeathsig,
+            )
+            stalled = False
+            def _kill_group():
+                nonlocal stalled
+                stalled = True
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            watchdog = threading.Timer(900, _kill_group)
+            watchdog.daemon = True
+            watchdog.start()
+            try:
+                for line in proc.stdout:
+                    watchdog.cancel()
+                    self.logger.info(line.rstrip())
+                    watchdog = threading.Timer(900, _kill_group)
+                    watchdog.daemon = True
+                    watchdog.start()
+                rc = proc.wait(timeout=10)
+                if stalled:
+                    raise DeploymentException(f"Docker image build stalled: no output for 900s for {image_id}; cmd={cmd}")
+                if rc != 0:
+                    raise DeploymentException(f"Docker image build failed for {image_id} (exit code {rc}); cmd={cmd}")
+            finally:
+                watchdog.cancel()
+                if proc.poll() is None:
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    try:
+                        proc.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        self.logger.warning(f"buildx subprocess did not exit after SIGKILL within 10s; pid={proc.pid}")
+        elif self.docker_api:
             logs = []
-            for evt in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag=image_id, decode=True, rm=True, forcerm=True):
+            for evt in self.docker_api.build(path=build_path, dockerfile=dockerfile_path, tag=image_id, decode=True, rm=True, forcerm=True, timeout=900):
                 logs.append(evt)
                 if (msg := evt.get("stream")):
                     self.logger.info(msg.strip())
@@ -945,7 +1007,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                     error_msg = evt.get("error") or evt.get("errorDetail", {}).get("message")
                     raise DeploymentException(f"Docker image build failed! Error: {error_msg}")
         else:
-            self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag=image_id, rm=True, forcerm=True)
+            self.docker_client.images.build(path=build_path, dockerfile=dockerfile_path, tag=image_id, rm=True, forcerm=True, timeout=900)
 
         build_time = time.time() - build_start
         self.logger.info(f"LRR image {image_id} build complete: time {build_time}s")

@@ -468,12 +468,19 @@ async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semap
             await page.get_by_role("combobox", name="Search Title, Artist, Series").click()
             await page.get_by_role("combobox", name="Search Title, Artist, Series").fill("tag-1")
             await page.get_by_role("button", name="Apply Filter").click()
+            await page.wait_for_load_state("networkidle")
 
             LOGGER.info("Opening reader for \"Test Archive\"...")
-            await page.get_by_role("link", name="Test Archive").nth(1).click()
+            test_archive_link = page.get_by_role("link", name="Test Archive").nth(1)
+            await test_archive_link.wait_for(state="visible", timeout=5000)
+            await test_archive_link.click()
+            await page.wait_for_load_state("networkidle")
 
             LOGGER.info("Going back to index page and checking search bar...")
-            await page.get_by_role("link", name="").click()
+            back_link = page.get_by_role("link", name="")
+            await back_link.wait_for(state="visible", timeout=5000)
+            await back_link.click()
+            await page.wait_for_load_state("networkidle")
             await playwright.async_api.expect(
                 page.get_by_role("combobox", name="Search Title, Artist, Series")
             ).to_have_value("tag-1")

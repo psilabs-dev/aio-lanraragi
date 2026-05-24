@@ -16,6 +16,8 @@ import tempfile
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
+import playwright.async_api
+import playwright.async_api._generated
 import pytest
 import pytest_asyncio
 from lanraragi.clients.client import LRRClient
@@ -28,18 +30,22 @@ from aio_lanraragi_tests.deployment.base import (
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.log_parse import parse_lrr_logs
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
+from aio_lanraragi_tests.utils.playwright import (
+    assert_browser_responses_ok,
+    assert_console_logs_ok,
+)
 
 LOGGER = logging.getLogger(__name__)
 
 
 @pytest.fixture
-def resource_prefix() -> Generator[str, None, None]:
-    yield "test_"
+def resource_prefix(request: pytest.FixtureRequest) -> Generator[str, None, None]:
+    yield request.config.getoption("--resource-prefix") + "test_"
 
 
 @pytest.fixture
-def port_offset() -> Generator[int, None, None]:
-    yield 10
+def port_offset(request: pytest.FixtureRequest) -> Generator[int, None, None]:
+    yield request.config.getoption("--port-offset") + 10
 
 
 @pytest.fixture
@@ -211,6 +217,25 @@ async def test_bypass_via_redis_config(request: pytest.FixtureRequest, resource_
             assert "errors" in body, f"Expected OpenAPI 'errors' array in response, got keys: {list(body.keys())}"
             error_messages = " ".join(e.get("message", "") for e in body["errors"])
             assert "String is too short" in error_messages, f"Expected 'String is too short' in errors, got: {error_messages}"
+
+            # Content-Type with media-type parameters (e.g. "application/json; charset=utf-8")
+            # must not bypass body validation: the schema lookup is keyed on the raw
+            # header, so a parameter suffix would silently skip validation.
+            ct_headers = {**client.headers, "Content-Type": "application/json; charset=utf-8"}
+            status, content = await client.handle_request(
+                http.HTTPMethod.PUT,
+                client.build_url("/api/tankoubons/SOMETANKID"),
+                ct_headers,
+                data=json.dumps({"archives": ["short"]}),
+            )
+            body = json.loads(content)
+            assert status == 400, f"Expected 400 from OpenAPI validation with Content-Type params, got {status}. Body: {body}"
+            assert "errors" in body, f"Expected OpenAPI 'errors' array, got keys: {list(body.keys())}"
+            error_messages = " ".join(e.get("message", "") for e in body["errors"])
+            assert "String is too short" in error_messages, (
+                f"Expected 'String is too short' in errors with Content-Type params, got: {error_messages}"
+            )
+
             expected_warning_message = 'OpenAPI >>> GET /api/archives/123 [{"message":"String is too short: 3\\/40.","path":"\\/id"}]'
             found_validation_warning = False
             mojo_logs = env.read_mojo_logs()
@@ -241,5 +266,78 @@ async def test_bypass_via_redis_config(request: pytest.FixtureRequest, resource_
             await client.close()
 
         expect_no_error_logs(env, LOGGER)
+    finally:
+        env.teardown(remove_data=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.regression
+async def test_validation_carousel_search(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int):
+    """
+    Verify the inbox carousel does not send empty `filter=`/`category=` params
+    that would violate openapi.yaml's minLength:14 constraint on `category`.
+    Regression guard against https://github.com/Difegue/LANraragi/pull/1490.
+
+    1. Start LRR with validation enabled (no bypass).
+    2. Open index page with carousel type set to "inbox".
+    3. Assert the /api/search carousel response returns 200 and the URL omits
+       the empty params.
+    """
+    env: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
+    try:
+        env.setup(with_api_key=True)
+        request.session.lrr_environments = {resource_prefix: env}
+
+        client = env.lrr_client()
+        try:
+            _, error = await client.misc_api.get_server_info()
+            assert not error, f"Failed to connect (status {error.status}): {error.error}"
+
+            async with playwright.async_api.async_playwright() as p:
+                browser = await p.chromium.launch()
+                bc = await browser.new_context()
+                await bc.add_init_script(
+                    "localStorage.setItem('carouselType', 'inbox');"
+                    "localStorage.setItem('carouselOpen', '1');"
+                )
+
+                try:
+                    page = await bc.new_page()
+                    responses: list[playwright.async_api._generated.Response] = []
+                    console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+
+                    page.on("response", lambda r: responses.append(r))
+                    page.on("console", lambda m: console_evts.append(m))
+
+                    await page.goto(f"{client.lrr_base_url}/")
+                    await page.wait_for_load_state("networkidle")
+
+                    search_responses: list[playwright.async_api._generated.Response] = []
+                    for r in responses:
+                        if "/api/search" in r.url and "random" not in r.url and "cache" not in r.url:
+                            search_responses.append(r)
+                    assert len(search_responses) > 0, "No /api/search response captured from carousel"
+
+                    for r in search_responses:
+                        assert r.status in (200, 204), (
+                            f"Carousel search returned {r.status}, expected 200 or 204. URL: {r.url}"
+                        )
+                        assert "category=&" not in r.url and not r.url.endswith("category="), (
+                            f"Carousel URL contains empty category= param: {r.url}"
+                        )
+                        assert "filter=&" not in r.url and not r.url.endswith("filter="), (
+                            f"Carousel URL contains empty filter= param: {r.url}"
+                        )
+
+                    await assert_browser_responses_ok(responses, client, logger=LOGGER)
+                    await assert_console_logs_ok(console_evts, client.lrr_base_url)
+                finally:
+                    await bc.close()
+                    await browser.close()
+
+            expect_no_error_logs(env, LOGGER)
+        finally:
+            await client.close()
     finally:
         env.teardown(remove_data=True)

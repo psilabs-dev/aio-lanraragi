@@ -5,6 +5,7 @@ These tests cover search result handling including:
 - Pagination (start=0, start=N, start=-1, edge cases)
 - Random archive search
 - Custom namespace sorting (sortby=artist, sortby=parody)
+- hidecompleted filter
 """
 
 import asyncio
@@ -15,6 +16,7 @@ from pathlib import Path
 
 import pytest
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.archive import UpdateReadingProgressionRequest
 from lanraragi.models.search import GetRandomArchivesRequest, SearchArchiveIndexRequest
 
 from aio_lanraragi_tests.common import compute_archive_id
@@ -349,12 +351,38 @@ async def test_random_archive_search(
     LOGGER.debug("Random search with no-match filter test passed.")
     # <<<<< RANDOM TESTS: FILTER WITH NO MATCHES <<<<<
 
+    # Set group:a archives (Title 01, 03, 05) past the 85% completion threshold.
+    completed_titles_to_pages = {"Title 01": 10, "Title 03": 20, "Title 05": 30}
+    for title, pages in completed_titles_to_pages.items():
+        response, error = await lrr_client.archive_api.update_reading_progression(
+            UpdateReadingProgressionRequest(arcid=title_to_arcid[title], page=pages - 1)
+        )
+        assert not error, f"Failed to set progress for {title} (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.search_api.discard_search_cache()
+    assert not error, f"Failed to discard search cache (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.search_api.search_archive_index(
+        SearchArchiveIndexRequest(hidecompleted=True, groupby_tanks=False)
+    )
+    assert not error, f"hidecompleted search failed (status {error.status}): {error.error}"
+    assert response.records_filtered == 7, f"Expected 7 filtered records with hidecompleted, got {response.records_filtered}"
+    filtered_titles = {r.title for r in response.data}
+    for title in completed_titles_to_pages:
+        assert title not in filtered_titles, f"hidecompleted should exclude {title}: {filtered_titles}"
+
+    response, error = await lrr_client.search_api.search_archive_index(
+        SearchArchiveIndexRequest(groupby_tanks=False)
+    )
+    assert not error, f"Baseline search failed (status {error.status}): {error.error}"
+    assert response.records_filtered == 10, f"Expected 10 filtered records without hidecompleted, got {response.records_filtered}"
+    LOGGER.debug("hidecompleted filter test passed.")
+
     # no error logs
     expect_no_error_logs(environment, LOGGER)
 
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
-@pytest.mark.xfail(reason="PR: https://github.com/Difegue/LANraragi/pull/1473", strict=False)
 @pytest.mark.asyncio
 async def test_custom_namespaces(
     lrr_client: LRRClient,

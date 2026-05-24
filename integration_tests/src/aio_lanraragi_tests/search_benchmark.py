@@ -1,4 +1,7 @@
 """
+TODO: deprecated/for demonstration purposes only.
+Use ./integration_tests/tests/benchmark instead.
+
 Search benchmarking utilities and command line.
 
 The benchmark will run in the following stages, where each stage requires the previous stage.

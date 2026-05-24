@@ -49,12 +49,12 @@ class ApiAuthMatrixParams(BaseModel):
     is_auth_progress: bool
 
 @pytest.fixture
-def resource_prefix() -> Generator[str, None, None]:
-    yield "test_"
+def resource_prefix(request: pytest.FixtureRequest) -> Generator[str, None, None]:
+    yield request.config.getoption("--resource-prefix") + "test_"
 
 @pytest.fixture
-def port_offset() -> Generator[int, None, None]:
-    yield 10
+def port_offset(request: pytest.FixtureRequest) -> Generator[int, None, None]:
+    yield request.config.getoption("--port-offset") + 10
 
 @pytest.fixture
 def is_lrr_debug_mode(request: pytest.FixtureRequest) -> Generator[bool, None, None]:
@@ -69,8 +69,10 @@ def environment(request: pytest.FixtureRequest, resource_prefix: str, port_offse
     environments: dict[str, AbstractLRRDeploymentContext] = {resource_prefix: environment}
     request.session.lrr_environments = environments
 
-    yield environment
-    environment.teardown(remove_data=True)
+    try:
+        yield environment
+    finally:
+        environment.teardown(remove_data=True)
 
 @pytest.fixture
 def npgenerator(request: pytest.FixtureRequest) -> Generator[np.random.Generator, None, None]:
@@ -380,12 +382,17 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
 
             LOGGER.info("Clicking settings button.")
             await page.get_by_role("link", name="Settings").click()
+            await page.wait_for_load_state("networkidle")
             LOGGER.info("Clicking security settings.")
             await page.get_by_text("Security").click()
+            await page.wait_for_timeout(300)
             LOGGER.info("Enabling No-Fun Mode.")
-            await page.get_by_role("checkbox", name="Enabling No-Fun Mode will").check()
+            nofun_checkbox = page.get_by_role("checkbox", name="Enabling No-Fun Mode will")
+            await nofun_checkbox.wait_for(state="visible", timeout=5000)
+            await nofun_checkbox.check()
             LOGGER.info("Clicking save settings.")
             await page.get_by_role("button", name="Save Settings").click()
+            await page.wait_for_load_state("networkidle")
 
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)

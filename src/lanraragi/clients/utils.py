@@ -1,9 +1,33 @@
 import base64
+import functools
 import html
 import json
 import re
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
 
 from lanraragi.models.base import LanraragiErrorResponse
+
+T = TypeVar("T")
+
+
+def experimental(reason: str) -> Callable[[Callable[..., Awaitable[T]]], Callable[..., Awaitable[T]]]:
+    """
+    Mark an async API client method as experimental. The wrapped method must be
+    bound to an `_ApiClient` instance (so `self.api_context.logger` is available).
+    Logs a one-time warning per method per process on first call.
+    """
+    def decorator(fn: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
+        warned = False
+        @functools.wraps(fn)
+        async def wrapper(self, *args, **kwargs):
+            nonlocal warned
+            if not warned:
+                self.api_context.logger.warning(f"{fn.__qualname__} is experimental: {reason}")
+                warned = True
+            return await fn(self, *args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def _parse_500_error_message(content: str) -> str | None:
@@ -47,5 +71,6 @@ def _build_auth_header(lrr_api_key: str) -> str:
 
 __all__ = [
     "_build_auth_header",
-    "_build_err_response"
+    "_build_err_response",
+    "experimental",
 ]

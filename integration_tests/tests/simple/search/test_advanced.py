@@ -30,6 +30,7 @@ from aio_lanraragi_tests.deployment.base import (
 )
 from aio_lanraragi_tests.utils.api_wrappers import (
     create_archive_file,
+    trigger_stat_rebuild,
     upload_archive,
 )
 from aio_lanraragi_tests.utils.concurrency import retry_on_lock
@@ -121,6 +122,9 @@ async def test_multi_token_edge_cases(
 
     LOGGER.debug(f"Uploaded {len(title_to_arcid)} archives.")
     # <<<<< CREATE & UPLOAD ARCHIVES <<<<<
+
+    # Stat hashes are empty after a clean-DB startup; rebuild before tank-grouped searches.
+    await trigger_stat_rebuild(lrr_client)
 
 
     # >>>>> MULTI-TOKEN TESTS: AND LOGIC WITH MISSING TAGS >>>>>
@@ -281,6 +285,9 @@ async def test_unicode_search(
 
     LOGGER.debug(f"Uploaded {len(title_to_arcid)} archives.")
     # <<<<< CREATE & UPLOAD ARCHIVES <<<<<
+
+    # Stat hashes are empty after a clean-DB startup; rebuild before tank-grouped searches.
+    await trigger_stat_rebuild(lrr_client)
 
 
     # >>>>> UNICODE TESTS: JAPANESE TITLE SEARCH >>>>>
@@ -444,6 +451,9 @@ async def test_combined_filters(
 
     LOGGER.debug(f"Uploaded {len(title_to_arcid)} archives.")
     # <<<<< CREATE & UPLOAD ARCHIVES <<<<<
+
+    # Stat hashes are empty after a clean-DB startup; rebuild before tank-grouped searches.
+    await trigger_stat_rebuild(lrr_client)
 
     # >>>>> SETUP: CLEAR NEW FLAGS FOR "OLD" ARCHIVES >>>>>
     for spec in archive_specs:
@@ -625,6 +635,9 @@ async def test_exclusion_only_search(
     LOGGER.debug(f"Uploaded {len(title_to_arcid)} archives.")
     all_titles = set(title_to_arcid.keys())
     # <<<<< CREATE & UPLOAD ARCHIVES <<<<<
+
+    # Stat hashes are empty after a clean-DB startup; rebuild before tank-grouped searches.
+    await trigger_stat_rebuild(lrr_client)
 
     # >>>>> EXCLUSION TESTS: SINGLE EXCLUSION >>>>>
     response, error = await lrr_client.search_api.search_archive_index(

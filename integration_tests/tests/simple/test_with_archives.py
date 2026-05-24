@@ -679,7 +679,6 @@ async def test_minion_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, n
     expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.asyncio
-@pytest.mark.dev("excluded-namespaces")
 async def test_excluded_namespaces_stats(lrr_client: LRRClient, semaphore: asyncio.Semaphore, environment: AbstractLRRDeploymentContext):
     """
     Test hide_excluded_namespaces parameter on /api/database/stats.

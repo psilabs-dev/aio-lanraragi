@@ -31,9 +31,14 @@ export DOCKER_BUILDKIT=1
 
 > All of the following are run within `aio-lanraragi/integration_tests/`.
 
-Run integration tests on the official Docker image ("difegue/lanraragi"):
+Run integration tests on the official Docker image ("difegue/lanraragi"). Docker tests default to Valkey as the cache backend:
 ```sh
 pytest tests
+```
+
+Use Redis explicitly if you need the old cache backend:
+```sh
+pytest tests --cache-backend redis
 ```
 
 Run integration tests with a custom Docker image:
