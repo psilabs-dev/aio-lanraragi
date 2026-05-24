@@ -23,11 +23,11 @@ on:
       lrr_ref:
         description: 'LANraragi ref (branch, tag, or commit SHA)'
         required: true
-        default: 'dev-registry/main'
+        default: 'dev-registry/backend'
 
 env:
   LRR_REPOSITORY: ${{ github.event.inputs.lrr_repository || 'psilabs-dev/LANraragi' }}
-  LRR_REF: ${{ github.event.inputs.lrr_ref || 'dev-registry/main' }}
+  LRR_REF: ${{ github.event.inputs.lrr_ref || 'dev-registry/backend' }}
 
 jobs:
 
