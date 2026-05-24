@@ -5,7 +5,7 @@ from lanraragi.clients.res_processors.search import (
     _process_get_random_archives_response,
     _process_search_archive_index_response,
 )
-from lanraragi.clients.utils import _build_err_response
+from lanraragi.clients.utils import _build_err_response, experimental
 from lanraragi.models.base import (
     LanraragiResponse,
 )
@@ -79,6 +79,7 @@ class _SearchApiClient(_ApiClient):
             return (_process_get_random_archives_response(content), None)
         return (None, _build_err_response(content, status))
 
+    @experimental("requires LRR /api/search/composite endpoint")
     async def composite_search(
             self, request: CompositeSearchRequest
     ) -> _LRRClientResponse[SearchArchiveIndexResponse]:
