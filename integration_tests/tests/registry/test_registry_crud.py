@@ -184,6 +184,14 @@ async def test_registry_create_validation(lrr_client: LRRClient, environment: Ab
     assert error.status == 400, f"Expected 400 for local registry without path, got {error.status}"
     # <<<<< MISSING PATH FOR LOCAL <<<<<
 
+    # >>>>> RELATIVE PATH FOR LOCAL >>>>>
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(name="relative local", provider="local", path="./plugins")
+    )
+    assert error is not None, "Expected error for local registry with relative path"
+    assert error.status == 400, f"Expected 400 for local registry with relative path, got {error.status}"
+    # <<<<< RELATIVE PATH FOR LOCAL <<<<<
+
     # >>>>> NON-HTTPS URL >>>>>
     response, error = await lrr_client.misc_api.create_registry(
         CreateRegistryRequest(name="http git", provider="github", url="http://github.com/owner/repo.git", ref="main")
@@ -323,6 +331,14 @@ async def test_registry_error_paths(lrr_client: LRRClient, environment: Abstract
     assert error is not None, "Expected error for non-HTTPS URL on update"
     assert error.status == 400, f"Expected 400 for non-HTTPS URL on update, got {error.status}"
     # <<<<< NON-HTTPS URL ON UPDATE <<<<<
+
+    # >>>>> RELATIVE PATH ON UPDATE >>>>>
+    response, error = await lrr_client.misc_api.update_registry(
+        reg_id, UpdateRegistryRequest(path="./plugins")
+    )
+    assert error is not None, "Expected error for relative path on update"
+    assert error.status == 400, f"Expected 400 for relative path on update, got {error.status}"
+    # <<<<< RELATIVE PATH ON UPDATE <<<<<
 
     # >>>>> UPDATE WITH FIELDS INVALID FOR LOCAL KIND >>>>>
     # User expectation: switching a local registry to a git provider without providing
