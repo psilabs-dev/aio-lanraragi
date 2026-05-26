@@ -9,6 +9,9 @@ import psutil
 import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.docker_postgres import (
+    DockerPostgresLRRDeploymentContext,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -115,6 +118,19 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--cache-backend", action="store", default="valkey", choices=["redis", "valkey", "valkey8"], help="Cache backend for Docker deployments. Default: valkey.")
     parser.addoption("--port-offset", type=int, action="store", default=0, help="Session-wide base port offset added to per-module offsets. Use to avoid conflicts between parallel sessions.")
     parser.addoption("--resource-prefix", action="store", default="", help="Session-wide prefix prepended to per-module resource prefixes. Use to isolate parallel sessions.")
+    parser.addoption("--lrrrs", action="store_true", default=False, help="Deploy LRRRS (Rust rewrite) against a Postgres backend instead of Perl LRR (Docker only).")
+    parser.addoption(
+        "--no-postgres-jit", action="store_false", default=True, dest="postgres_jit",
+        help="Disable PostgreSQL JIT compilation (enabled by default).",
+    )
+    parser.addoption(
+        "--postgres-shared-buffers", type=int, action="store", default=128,
+        help="Postgres shared buffer in MB (default 128)",
+    )
+    parser.addoption(
+        "--postgres-work-mem", type=int, action="store", default=4,
+        help="Postgres work_mem in MB (default 4)"
+    )
 
 def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
@@ -143,7 +159,14 @@ def pytest_configure(config: pytest.Config):
     )
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]):
-    if not config.getoption("--playwright"):
+    if config.getoption("--lrrrs"):
+        skip_rust = pytest.mark.skip(reason="rust")
+        for item in items:
+            # LRRRS: Playwright UI tests deferred to frontend work; plugin
+            # endpoints permanently out of scope per design D8.
+            if 'playwright' in item.keywords or 'test_plugins.py' in item.nodeid:
+                item.add_marker(skip_rust)
+    elif not config.getoption("--playwright"):
         skip_playwright = pytest.mark.skip(reason="need --playwright option enabled")
         for item in items:
             if 'playwright' in item.keywords:
@@ -285,6 +308,12 @@ def _save_server_logs(
             redis_logs = environment.get_redis_logs(tail=10000).decode('utf-8', errors='replace')
         if redis_logs:
             (out_dir / "redis.log").write_text(redis_logs, encoding='utf-8')
+
+        # Postgres logs (only available for postgres deployments).
+        if isinstance(environment, DockerPostgresLRRDeploymentContext):
+            postgres_logs = environment.get_postgres_logs(tail=10000).decode('utf-8', errors='replace')
+            if postgres_logs:
+                (out_dir / "postgres.log").write_text(postgres_logs, encoding='utf-8')
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)

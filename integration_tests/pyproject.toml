@@ -24,6 +24,15 @@ dependencies = [
     "redis"
 ]
 
+[project.optional-dependencies]
+# LRRRS deployment harness: direct-to-Postgres writes for api key + lrr_config,
+# Argon2id hashing for keys the LRRRS middleware will verify. Required when
+# running pytest with --lrrrs (see run-acceptance-tests.sh).
+lrrrs = [
+    "argon2-cffi",
+    "asyncpg",
+]
+
 [project.scripts]
 lrr-staging = "aio_lanraragi_tests.console:console"
 
