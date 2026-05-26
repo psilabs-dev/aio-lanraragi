@@ -3,6 +3,7 @@ Plugin configuration (visibility, priority, execution order) integration tests.
 """
 
 import asyncio
+import http
 import logging
 import tempfile
 from pathlib import Path
@@ -24,6 +25,74 @@ from aio_lanraragi_tests.deployment.base import (
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
 
 LOGGER = logging.getLogger(__name__)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+@pytest.mark.ratelimit
+async def test_save_config_preserves_managed_plugin_provenance(
+    lrr_client: LRRClient, environment: AbstractLRRDeploymentContext
+):
+    """
+    Saving plugin configuration must not erase managed-plugin provenance fields.
+
+    1. Disable password protection so POST /config/plugins is reachable without a session.
+    2. Create a registry, install sample-metadata (a HASH-param managed plugin).
+    3. Capture provenance fields written to LRR_PLUGIN_SAMPLE-METADATA on install.
+    4. POST /config/plugins (form-encoded, minimal body) to exercise save_config.
+    5. Re-read the same Redis hash and assert installed_path, installed_registry,
+       installed_version, installed_sha256, and type survive the save.
+    """
+    environment.setup(with_api_key=True)
+    environment.redis_client.select(2)
+    environment.redis_client.hset("LRR_CONFIG", "enablepass", "0")
+
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(
+            name="demo",
+            provider="github",
+            url="https://github.com/psilabs-dev/lrr-plugins-demo.git",
+            ref="main",
+        )
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    refresh_response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+    version_key = max(refresh_response.index["plugins"]["sample-metadata"]["versions"].keys())
+
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=version_key)
+    )
+    assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
+
+    redis_key = "LRR_PLUGIN_SAMPLE-METADATA"
+    expected = {
+        "installed_path": environment.redis_client.hget(redis_key, "installed_path"),
+        "installed_registry": environment.redis_client.hget(redis_key, "installed_registry"),
+        "installed_version": environment.redis_client.hget(redis_key, "installed_version"),
+        "installed_sha256": environment.redis_client.hget(redis_key, "installed_sha256"),
+        "type": environment.redis_client.hget(redis_key, "type"),
+    }
+    for field, value in expected.items():
+        assert value, f"Install did not write {field} to {redis_key}; got {value!r}"
+
+    status, body = await lrr_client.handle_request(
+        http.HTTPMethod.POST,
+        lrr_client.build_url("/config/plugins"),
+        headers={},
+        data={"replacetitles": "0"},
+    )
+    assert status == 200, f"POST /config/plugins returned {status}: {body!r}"
+
+    for field, value in expected.items():
+        got = environment.redis_client.hget(redis_key, field)
+        assert got == value, (
+            f"save_config wiped managed plugin {field}: expected {value!r}, got {got!r}"
+        )
+
+    expect_no_error_logs(environment, LOGGER)
 
 
 @pytest.mark.asyncio
