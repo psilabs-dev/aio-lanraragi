@@ -7,8 +7,7 @@ extends the Postgres-alongside-Redis deployment by:
 - defaulting the Dockerfile to ``tools/build/docker/lrrrs.Dockerfile``
 - injecting the ``LRR_POSTGRES_USER``/``LRR_POSTGRES_PASSWORD``/``LRR_POSTGRES_DB``
   environment variables the LRRRS binary expects
-- using credentials matching ``tools/build/docker/lrrrs.docker-compose.yml``
-  (``lanraragi`` / ``lanraragi`` / ``lanraragi``)
+- using test-harness credentials (``postgres`` / ``postgres`` / ``lanraragi``); the standalone compose file uses ``lanraragi/lanraragi/lanraragi`` instead.
 - overriding all Redis-backed config writes (api key, nofunmode, CORS, etc.)
   to write directly to the Postgres ``lrr_config`` and ``lrr_api_key`` tables
   that LRRRS reads at boot time.
@@ -21,8 +20,6 @@ import types
 from pathlib import Path
 from typing import override
 
-import argon2
-import asyncpg
 import docker
 
 from aio_lanraragi_tests.common import DEFAULT_API_KEY
@@ -82,6 +79,12 @@ class DockerLrrrsLRRDeploymentContext(DockerPostgresLRRDeploymentContext):
             postgres_work_mem_mb=postgres_work_mem_mb,
         )
 
+    @property
+    @override
+    def has_mojo_logs(self) -> bool:
+        # LRRRS uses no Mojolicious logging.
+        return False
+
     # --- Public methods ------------------------------------------------------
 
     @override
@@ -90,6 +93,7 @@ class DockerLrrrsLRRDeploymentContext(DockerPostgresLRRDeploymentContext):
         # there is nothing to chmod. The parent setup pipeline inspects
         # `resp.exit_code` after this call, so return a stub that reports
         # success rather than None.
+        # TODO: verify that the koyomi user has write access to the bind-mounted content path; the stub currently returns success unconditionally.
         return types.SimpleNamespace(exit_code=0, output=b"")
 
     @override
@@ -101,6 +105,7 @@ class DockerLrrrsLRRDeploymentContext(DockerPostgresLRRDeploymentContext):
         ``api_key`` is not None.  Maintains ``self.lrr_api_key`` bookkeeping
         so callers can read the plaintext key back as usual.
         """
+        import argon2
         self.lrr_api_key = api_key
         self._pg_execute("DELETE FROM lrr_api_key")
         if api_key is not None:
@@ -156,21 +161,28 @@ class DockerLrrrsLRRDeploymentContext(DockerPostgresLRRDeploymentContext):
         self._pg_execute("UPDATE lrr_config SET pagesize = $1 WHERE id = 1", pagesize)
 
     @override
+    def set_excluded_namespaces(self, namespaces: str):
+        """LRRRS reads excluded_namespaces from lrr_config on each getStatistics and getServerInfo request (no Redis, no restart required)."""
+        self._pg_execute(
+            "UPDATE lrr_config SET excluded_namespaces = $1 WHERE id = 1",
+            namespaces,
+        )
+
+    @override
     def enable_metrics(self):
-        # No ``metricsenabled`` column in ``lrr_config`` yet (design rule 16).
-        # Metrics are out of scope for v0 acceptance; this is a no-op until a
-        # follow-up migration adds the column.
+        # No ``metricsenabled`` column in ``lrr_config`` yet; this is a no-op
+        # until a follow-up migration adds the column.
         LOGGER.warning(
-            "enable_metrics: no-op under LRRRS — lrr_config has no metricsenabled "
-            "column yet; a follow-up migration is required (design rule 16)."
+            "enable_metrics: no-op under LRRRS; lrr_config has no metricsenabled "
+            "column yet; a follow-up migration is required."
         )
 
     @override
     def disable_metrics(self):
         # Same gap as enable_metrics; no-op with explanation.
         LOGGER.warning(
-            "disable_metrics: no-op under LRRRS — lrr_config has no metricsenabled "
-            "column yet; a follow-up migration is required (design rule 16)."
+            "disable_metrics: no-op under LRRRS; lrr_config has no metricsenabled "
+            "column yet; a follow-up migration is required."
         )
 
     # --- Lifecycle methods --------------------------------------------------
@@ -182,11 +194,16 @@ class DockerLrrrsLRRDeploymentContext(DockerPostgresLRRDeploymentContext):
         environment: dict[str, str] = {}, plugin_paths: PluginPathsT = {},
         test_connection_max_retries: int = 4,
     ):
-        # LRRRS-flavored Postgres credentials and DB envs.
+        # inject LRRRS-specific env vars.
+        # LRR_CONTENT_DIR aligns LRRRS's content path with the bind mount the
+        # parent harness uses (/home/koyomi/lanraragi/content).  Without this,
+        # LRRRS defaults to ./content relative to its WORKDIR
+        # (/home/koyomi/lrrrs), writing files outside the mounted volume.
         lrrrs_pg_env = {
             "LRR_POSTGRES_USER": LRRRS_POSTGRES_USER,
             "LRR_POSTGRES_PASSWORD": LRRRS_POSTGRES_PASSWORD,
             "LRR_POSTGRES_DB": LRRRS_POSTGRES_DB,
+            "LRR_CONTENT_DIR": "/home/koyomi/lanraragi/content",
         }
         merged_env = {**lrrrs_pg_env, **environment}
         # The parent's Perl-flavored setup writes config to Redis BEFORE
@@ -195,7 +212,7 @@ class DockerLrrrsLRRDeploymentContext(DockerPostgresLRRDeploymentContext):
         # the config writes until after super().setup() has brought LRRRS up.
         # Pass False for all config flags here, then re-apply via our Postgres
         # overrides below. CORS reconfig requires a restart since LRRRS reads
-        # lrr_config once at boot (design.md "Auth (resolved)" rule 8).
+        # lrr_config once at boot into AppState.
         super().setup(
             with_api_key=False, with_nofunmode=False,
             enable_cors=False, lrr_debug_mode=lrr_debug_mode,
@@ -203,7 +220,7 @@ class DockerLrrrsLRRDeploymentContext(DockerPostgresLRRDeploymentContext):
             test_connection_max_retries=test_connection_max_retries,
         )
         # All three config writes require a restart: LRRRS reads lrr_api_key
-        # and lrr_config once at boot into AppState (design rule 8). Any value
+        # and lrr_config once at boot into AppState. Any value
         # we change here is invisible until the next restart.
         need_restart = False
         if with_api_key:
@@ -220,7 +237,7 @@ class DockerLrrrsLRRDeploymentContext(DockerPostgresLRRDeploymentContext):
 
     @override
     def teardown(self, remove_data: bool = False):
-        # No pool to close — see _pg_execute for the per-call connection
+        # No pool to close; see _pg_execute for the per-call connection
         # rationale. teardown remains overridable for future cleanup hooks.
         super().teardown(remove_data=remove_data)
 
@@ -231,7 +248,7 @@ class DockerLrrrsLRRDeploymentContext(DockerPostgresLRRDeploymentContext):
         Run a single parameterised Postgres statement against the LRRRS DB.
 
         Sync API for the base class. asyncpg is async-only, so we drive the
-        coroutine via asyncio.run on a *worker thread* — calling asyncio.run
+        coroutine via asyncio.run on a *worker thread*; calling asyncio.run
         on the test thread fails when pytest-asyncio's event loop is already
         running (which it is, since base-class setup runs from inside an
         @pytest.mark.asyncio test). The worker thread has its own thread-local
@@ -243,6 +260,8 @@ class DockerLrrrsLRRDeploymentContext(DockerPostgresLRRDeploymentContext):
         calls. Per-call connection cost (~10ms) is acceptable for test config
         writes that happen a handful of times per test.
         """
+        import asyncpg
+
         async def _run():
             conn = await asyncpg.connect(
                 host="127.0.0.1",

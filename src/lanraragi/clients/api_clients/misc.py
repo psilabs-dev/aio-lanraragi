@@ -141,9 +141,10 @@ class _MiscApiClient(_ApiClient):
         POST /api/regen_thumbs
         """
         url = self.api_context.build_url("/api/regen_thumbs")
-        form_data = aiohttp.FormData(quote_fields=False)
-        form_data.add_field('force', request.force)
-        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, data=form_data)
+        params = {}
+        if request.force is not None:
+            params["force"] = str(request.force).lower()
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, params=params)
         if status == 200:
             response_j = json.loads(content)
             job = response_j.get("job")

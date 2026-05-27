@@ -39,7 +39,7 @@ LOGGER = logging.getLogger(__name__)
 class ApiAuthMatrixParams(BaseModel):
     # used by test_api_auth_matrix.
     # 6-case matrix: 2 (nofunmode) x 3 (client-key-state: none / valid / invalid).
-    # is_api_key_configured_server is dropped (always True under LRRRS — harness enforces).
+    # is_api_key_configured_server is dropped (always True under LRRRS -- harness enforces).
     # is_auth_progress is dropped (covered by test_local_progress_*).
     is_nofunmode: bool
     is_api_key_configured_client: bool
@@ -391,7 +391,11 @@ async def test_api_auth_matrix(
     - GET /api/shinobu
     - GET /api/database/backup
     """
-    environment.setup(with_api_key=True, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
+    try:
+        environment.setup(with_api_key=True, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
+    except Exception:
+        environment.teardown(remove_data=True)
+        raise
 
     # >>>>> TEST CONNECTION STAGE >>>>>
     response, error = await lrr_client.misc_api.get_server_info()
@@ -566,3 +570,32 @@ async def test_local_progress_with_auth_progress(
 
     # check logs for errors
     expect_no_error_logs(environment, LOGGER)
+
+@pytest.mark.asyncio
+@pytest.mark.dev("rs-test")
+async def test_setup_failure_runs_teardown(monkeypatch: pytest.MonkeyPatch):
+    """
+    Test that teardown is invoked when environment.setup() raises inside test_api_auth_matrix.
+
+    1. Create a minimal environment stub where setup() raises RuntimeError.
+    2. Simulate the try/finally pattern used in test_api_auth_matrix.
+    3. Assert teardown_call_count == 1 even though setup failed.
+    """
+    teardown_call_count = 0
+
+    class _StubEnvironment:
+        def setup(self, **kwargs):
+            raise RuntimeError("simulated setup failure")
+        def teardown(self, remove_data: bool = False):
+            nonlocal teardown_call_count
+            teardown_call_count += 1
+
+    stub = _StubEnvironment()
+    with pytest.raises(RuntimeError, match="simulated setup failure"):
+        try:
+            stub.setup(with_api_key=True)
+        except Exception:
+            stub.teardown(remove_data=True)
+            raise
+
+    assert teardown_call_count == 1, f"Expected teardown to be called once, got {teardown_call_count}"

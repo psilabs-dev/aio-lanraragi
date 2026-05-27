@@ -9,9 +9,6 @@ from aio_lanraragi_tests.deployment.docker import (
     DockerLRRCacheBackend,
     DockerLRRDeploymentContext,
 )
-from aio_lanraragi_tests.deployment.docker_lrrrs import (
-    DockerLrrrsLRRDeploymentContext,
-)
 from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
 
@@ -58,6 +55,10 @@ def generate_deployment(
             docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
             use_lrrrs: bool = request.config.getoption("--lrrrs")
             if use_lrrrs:
+                from aio_lanraragi_tests.deployment.docker_lrrrs import (
+                    DockerLrrrsLRRDeploymentContext,
+                )
+                # dest used because the flag is --no-postgres-jit (store_false, no affirmative form)
                 postgres_jit: bool = request.config.getoption("postgres_jit")
                 postgres_shared_buffers_mb: int = request.config.getoption("--postgres-shared-buffers")
                 postgres_work_mem_mb: int = request.config.getoption("--postgres-work-mem")

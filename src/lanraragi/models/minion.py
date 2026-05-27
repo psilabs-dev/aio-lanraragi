@@ -12,7 +12,7 @@ class GetMinionJobStatusResponse(LanraragiResponse):
     state: str = Field(...)
     task: str = Field(...)
     error: str | None = Field(None)
-    notes: dict[str, str] | None = Field(None)
+    notes: dict[str, Any] | None = Field(None)
 
 class GetMinionJobDetailRequest(LanraragiRequest):
     job_id: int = Field(..., description="ID of the job.")

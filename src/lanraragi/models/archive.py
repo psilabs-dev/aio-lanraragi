@@ -1,6 +1,12 @@
-from pydantic import BaseModel, Field
+from typing import Annotated
+
+from pydantic import BaseModel, BeforeValidator, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
+
+# LRR and LRRRS serialize isnew as the strings "true"/"false" rather than JSON
+# booleans.  This validator coerces those strings so pydantic can accept both
+# the legacy string form and a native JSON boolean.
 
 
 class TocEntry(BaseModel):
@@ -9,7 +15,7 @@ class TocEntry(BaseModel):
 
 class GetAllArchivesResponseRecord(BaseModel):
     arcid: str = Field(..., min_length=40, max_length=40)
-    isnew: bool = Field(...)
+    isnew: Annotated[bool, BeforeValidator(lambda v: v.lower() == "true" if isinstance(v, str) else bool(v))] = Field(...)
     extension: str = Field(...)
     tags: str | None = Field(None)
     lastreadtime: int | None = Field(None)
@@ -28,7 +34,7 @@ class GetArchiveMetadataRequest(LanraragiRequest):
 
 class GetArchiveMetadataResponse(LanraragiResponse):
     arcid: str = Field(..., min_length=40, max_length=40)
-    isnew: bool = Field(...)
+    isnew: Annotated[bool, BeforeValidator(lambda v: v.lower() == "true" if isinstance(v, str) else bool(v))] = Field(...)
     pagecount: int = Field(...)
     progress: int = Field(...)
     tags: str = Field(...)

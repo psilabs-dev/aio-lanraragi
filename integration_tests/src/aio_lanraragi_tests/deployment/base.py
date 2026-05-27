@@ -187,6 +187,14 @@ class AbstractLRRDeploymentContext(abc.ABC):
         return self._redis_client
 
     @property
+    def has_mojo_logs(self) -> bool:
+        """
+        Whether this deployment emits Mojolicious logs (mojo.log).
+        Defaults to True; override to False for non-Perl deployments.
+        """
+        return True
+
+    @property
     def plugin_paths(self) -> PluginPathsT:
         """
         Test-time third party plugins
@@ -463,6 +471,15 @@ class AbstractLRRDeploymentContext(abc.ABC):
         """
         self.redis_client.select(2)
         self.redis_client.hset("LRR_CONFIG", "pagesize", str(pagesize))
+
+    def set_excluded_namespaces(self, namespaces: str):
+        """
+        Set the excluded_namespaces config value.
+
+        ``namespaces`` is a comma-separated string, e.g. ``"date_added,source"``.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "excludednamespaces", namespaces)
 
     def test_lrr_connection(self, port: int, test_connection_max_retries: int=4):
         """

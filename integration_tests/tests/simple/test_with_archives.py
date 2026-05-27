@@ -721,8 +721,7 @@ async def test_excluded_namespaces_stats(lrr_client: LRRClient, semaphore: async
     # <<<<< STATS WITHOUT EXCLUSION <<<<<
 
     # >>>>> CONFIGURE EXCLUDED NAMESPACES >>>>>
-    environment.redis_client.select(2)
-    environment.redis_client.hset("LRR_CONFIG", "excludednamespaces", "date_added,source")
+    environment.set_excluded_namespaces("date_added,source")
     # <<<<< CONFIGURE EXCLUDED NAMESPACES <<<<<
 
     # >>>>> STATS WITH EXCLUSION >>>>>
@@ -752,6 +751,40 @@ async def test_excluded_namespaces_stats(lrr_client: LRRClient, semaphore: async
     assert "date_added" in response.excluded_namespaces, "date_added should be in /api/info excluded_namespaces"
     assert "source" in response.excluded_namespaces, "source should be in /api/info excluded_namespaces"
     # <<<<< API INFO EXCLUDED NAMESPACES <<<<<
+
+    # no error logs
+    expect_no_error_logs(environment, LOGGER)
+
+@pytest.mark.asyncio
+@pytest.mark.dev("rs-test")
+async def test_regenerate_thumbnails_force(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test that force=True on regenerate_thumbnails is observable on the server side.
+
+    1. Call regenerate_thumbnails(force=True).
+    2. Poll job status until finished.
+    3. Fetch job detail and assert args[1] == True (force was received by the handler).
+    """
+    response, error = await lrr_client.misc_api.regenerate_thumbnails(RegenerateThumbnailRequest(force=True))
+    assert not error, f"Failed to enqueue regen_thumbnails (status {error.status}): {error.error}"
+    job_id = response.job
+    del response, error
+
+    # poll until job finishes (task is fast — it is a stub).
+    for _ in range(10):
+        response, error = await lrr_client.minion_api.get_minion_job_status(GetMinionJobStatusRequest(job_id=job_id))
+        assert not error, f"Failed to get job status (status {error.status}): {error.error}"
+        if response.state == "finished":
+            break
+        await asyncio.sleep(0.5)
+    assert response.state == "finished", f"Job did not finish: state={response.state}"
+    del response, error
+
+    # fetch detail: args are [thumb_dir, force]. args[1] must be True.
+    response, error = await lrr_client.minion_api.get_minion_job_details(GetMinionJobDetailRequest(job_id=job_id))
+    assert not error, f"Failed to get job detail (status {error.status}): {error.error}"
+    assert len(response.args) >= 2, f"Expected at least 2 args, got {response.args}"
+    assert response.args[1] is True, f"Expected force=True in args[1], got {response.args[1]}"
 
     # no error logs
     expect_no_error_logs(environment, LOGGER)
