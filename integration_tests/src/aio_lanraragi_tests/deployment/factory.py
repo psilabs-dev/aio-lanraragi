@@ -11,6 +11,7 @@ from aio_lanraragi_tests.deployment.container import (
     ContainerLRRDeploymentContext,
     ContainerRuntime,
 )
+from aio_lanraragi_tests.deployment.homebrew import HomebrewLRRDeploymentContext
 from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
 
@@ -50,38 +51,46 @@ def generate_deployment(
             )
 
         case 'darwin' | 'linux':
-            # TODO: we're assuming macos is used as a development environment with docker installed,
-            # not a testing environment; for macos github runners, we would be using them
-            # to run homebrew integration tests.
-
+            # On macOS/Linux, --homebrew selects the Homebrew deployment; otherwise Docker.
+            staging_dir: str = request.config.getoption("--staging")
+            cache_backend: str = request.config.getoption("--cache-backend")
             build_path: str = request.config.getoption("--build")
             build_ref: str = request.config.getoption("--build-ref")
             image: str = request.config.getoption("--image")
             git_url: str = request.config.getoption("--git-url")
-            git_ref: str = request.config.getoption("--git-ref")
             dockerfile: str = request.config.getoption("--dockerfile")
-            use_docker_api: bool = request.config.getoption("--docker-api")
-            staging_dir: str = request.config.getoption("--staging")
-            cache_backend: str = request.config.getoption("--cache-backend")
-            container_runtime = ContainerRuntime(request.config.getoption("--container-runtime"))
-            container_host: str = request.config.getoption("--container-host")
-            if dockerfile and git_url:
-                raise DeploymentException("--dockerfile cannot be combined with --git-url.")
-            if dockerfile and image:
-                raise DeploymentException("--dockerfile cannot be combined with --image.")
+            if request.config.getoption("--homebrew"):
+                windist: str = request.config.getoption("--windist")
+                if not build_path:
+                    raise DeploymentException("--homebrew requires --build <path to local LANraragi source>.")
+                if image or git_url or dockerfile or windist:
+                    raise DeploymentException("--homebrew cannot be combined with --image, --git-url, --dockerfile, or --windist.")
+                environment = HomebrewLRRDeploymentContext(
+                    build_path, build_ref, staging_dir, resource_prefix, port_offset, cache_backend,
+                    logger=logger,
+                )
+            else:
+                git_ref: str = request.config.getoption("--git-ref")
+                use_docker_api: bool = request.config.getoption("--docker-api")
+                container_runtime = ContainerRuntime(request.config.getoption("--container-runtime"))
+                container_host: str = request.config.getoption("--container-host")
+                if dockerfile and git_url:
+                    raise DeploymentException("--dockerfile cannot be combined with --git-url.")
+                if dockerfile and image:
+                    raise DeploymentException("--dockerfile cannot be combined with --image.")
 
-            # Resolve a single socket for the runtime, then derive both the high-level client and the
-            # low-level API client from it so they always target the same endpoint.
-            socket_url = _resolve_socket(container_runtime, container_host)
-            docker_client = docker.DockerClient(base_url=socket_url) if socket_url else docker.from_env()
-            docker_api = docker_client.api if use_docker_api else None
-            environment = ContainerLRRDeploymentContext(
-                build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
-                build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
-                global_run_id=global_run_id, is_allow_uploads=True,
-                logger=logger,
-                cache_backend=ContainerLRRCacheBackend(cache_backend),
-                container_runtime=container_runtime,
-            )
+                # Resolve a single socket for the runtime, then derive both the high-level client and the
+                # low-level API client from it so they always target the same endpoint.
+                socket_url = _resolve_socket(container_runtime, container_host)
+                docker_client = docker.DockerClient(base_url=socket_url) if socket_url else docker.from_env()
+                docker_api = docker_client.api if use_docker_api else None
+                environment = ContainerLRRDeploymentContext(
+                    build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
+                    build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
+                    global_run_id=global_run_id, is_allow_uploads=True,
+                    logger=logger,
+                    cache_backend=ContainerLRRCacheBackend(cache_backend),
+                    container_runtime=container_runtime,
+                )
 
     return environment
