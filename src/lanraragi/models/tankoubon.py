@@ -9,6 +9,7 @@ class TankoubonRecord(BaseModel):
     name: str = Field(...)
     summary: str = Field(...)
     tags: str = Field(...)
+    progress: int = Field(...)
 
 class TankoubonArchiveRecord(BaseModel):
     arcid: str = Field(..., min_length=40, max_length=40)
@@ -21,7 +22,7 @@ class TankoubonArchiveRecord(BaseModel):
     title: str = Field(...)
 
 class TankoubonFullDataRecord(TankoubonRecord):
-    full_data: list[TankoubonArchiveRecord] = Field(...)
+    full_data: list[TankoubonArchiveRecord] | None = Field(None)
 
 class GetAllTankoubonsRequest(LanraragiRequest):
     page: int = Field(..., description="The page of the list of Tankoubons.")
@@ -33,11 +34,22 @@ class GetAllTankoubonsResponse(LanraragiResponse):
 
 class GetTankoubonRequest(LanraragiRequest):
     tank_id: str = Field(..., description="The ID of the Tankoubon.")
+
+class GetTankoubonResponse(LanraragiResponse):
+    archives: list[str] = Field(...)
+    tank_id: str = Field(..., validation_alias="id")
+    name: str = Field(...)
+    summary: str = Field(...)
+    tags: str = Field(...)
+    progress: int = Field(...)
+
+class GetTankoubonFullRequest(LanraragiRequest):
+    tank_id: str = Field(..., description="The ID of the Tankoubon.")
     include_full_data: str | None = Field(None, description="If set in 1, it appends a full_data array with Archive objects.")
     page: str | None = Field(None, description="The page of the list of Archives.")
 
-class GetTankoubonResponse(LanraragiResponse):
-    result: TankoubonRecord = Field(...) # can be TankoubonRecord or TankoubonFullDataRecord.
+class GetTankoubonFullResponse(LanraragiResponse):
+    result: TankoubonFullDataRecord = Field(...)
     filtered: int = Field(...)
     total: int = Field(...)
 
@@ -89,6 +101,8 @@ __all__ = [
     "GetAllTankoubonsResponse",
     "GetTankoubonRequest",
     "GetTankoubonResponse",
+    "GetTankoubonFullRequest",
+    "GetTankoubonFullResponse",
     "CreateTankoubonRequest",
     "CreateTankoubonResponse",
     "UpdateTankoubonRequest",

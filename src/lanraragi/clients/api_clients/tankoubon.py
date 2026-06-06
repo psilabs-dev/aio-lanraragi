@@ -6,6 +6,7 @@ import aiohttp
 from lanraragi.clients.api_clients.base import _ApiClient
 from lanraragi.clients.res_processors.tankoubon import (
     _handle_get_all_tankoubons_response,
+    _handle_get_tankoubon_full_response,
     _handle_get_tankoubon_response,
 )
 from lanraragi.clients.utils import _build_err_response
@@ -19,6 +20,8 @@ from lanraragi.models.tankoubon import (
     DeleteTankoubonResponse,
     GetAllTankoubonsRequest,
     GetAllTankoubonsResponse,
+    GetTankoubonFullRequest,
+    GetTankoubonFullResponse,
     GetTankoubonRequest,
     GetTankoubonResponse,
     RemoveArchiveFromTankoubonRequest,
@@ -48,6 +51,16 @@ class _TankoubonApiClient(_ApiClient):
         GET /api/tankoubons/:id
         """
         url = self.api_context.build_url(f"/api/tankoubons/{request.tank_id}")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
+        if status == 200:
+            return (_handle_get_tankoubon_response(content), None)
+        return (None, _build_err_response(content, status))
+
+    async def get_tankoubon_full(self, request: GetTankoubonFullRequest) -> _LRRClientResponse[GetTankoubonFullResponse]:
+        """
+        GET /api/tankoubons/:id/full
+        """
+        url = self.api_context.build_url(f"/api/tankoubons/{request.tank_id}/full")
         params = {}
         if request.include_full_data:
             params["include_full_data"] = request.include_full_data
@@ -55,7 +68,7 @@ class _TankoubonApiClient(_ApiClient):
             params["page"] = request.page
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers, params=params)
         if status == 200:
-            return (_handle_get_tankoubon_response(content, request.include_full_data), None)
+            return (_handle_get_tankoubon_full_response(content), None)
         return (None, _build_err_response(content, status))
 
     async def create_tankoubon(self, request: CreateTankoubonRequest) -> _LRRClientResponse[CreateTankoubonResponse]:
