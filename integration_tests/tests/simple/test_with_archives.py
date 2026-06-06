@@ -504,7 +504,7 @@ async def test_tankoubon_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore
     # >>>>> GET TANKOUBON STAGE >>>>>
     response, error = await lrr_client.tankoubon_api.get_tankoubon(GetTankoubonRequest(tank_id=tankoubon_id))
     assert not error, f"Failed to get tankoubon (status {error.status}): {error.error}"
-    assert set(response.result.archives) == set(archive_ids[:20])
+    assert set(response.archives) == set(archive_ids[:20])
     del response, error
     # <<<<< GET TANKOUBON STAGE <<<<<
 
@@ -518,7 +518,7 @@ async def test_tankoubon_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore
     # >>>>> GET TANKOUBON STAGE >>>>>
     response, error = await lrr_client.tankoubon_api.get_tankoubon(GetTankoubonRequest(tank_id=tankoubon_id))
     assert not error, f"Failed to get tankoubon (status {error.status}): {error.error}"
-    assert response.result.archives == []
+    assert response.archives == []
     del response, error
     # <<<<< GET TANKOUBON STAGE <<<<<
 
@@ -534,8 +534,8 @@ async def test_tankoubon_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore
     # >>>>> GET TANKOUBON STAGE >>>>>
     response, error = await lrr_client.tankoubon_api.get_tankoubon(GetTankoubonRequest(tank_id=tankoubon_id))
     assert not error, f"Failed to get tankoubon (status {error.status}): {error.error}"
-    assert response.result.name == "Updated Tankoubon"
-    assert set(response.result.archives) == set(archive_ids[20:40])
+    assert response.name == "Updated Tankoubon"
+    assert set(response.archives) == set(archive_ids[20:40])
     del response, error
     # <<<<< GET TANKOUBON STAGE <<<<<
 
@@ -562,7 +562,7 @@ async def test_tankoubon_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore
 
     response, error = await lrr_client.tankoubon_api.get_tankoubon(GetTankoubonRequest(tank_id=url_encoded_tankoubon_id))
     assert not error, f"Failed to get urlencoded tank (status {error.status}): {error.error}"
-    assert response.result.name == "Test Tankoubon", "URL-encoded Tank name mismatch"
+    assert response.name == "Test Tankoubon", "URL-encoded Tank name mismatch"
 
     # no error logs
     expect_no_error_logs(environment, LOGGER)
