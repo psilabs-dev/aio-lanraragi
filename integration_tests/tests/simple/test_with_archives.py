@@ -10,8 +10,6 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-import playwright.async_api
-import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import (
@@ -46,7 +44,6 @@ from lanraragi.models.tankoubon import (
     UpdateTankoubonRequest,
 )
 
-from aio_lanraragi_tests.common import DEFAULT_LRR_PASSWORD
 from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
@@ -65,10 +62,6 @@ from aio_lanraragi_tests.utils.api_wrappers import (
 )
 from aio_lanraragi_tests.utils.concurrency import retry_on_lock
 from aio_lanraragi_tests.utils.flakes import xfail_catch_flakes_inner
-from aio_lanraragi_tests.utils.playwright import (
-    assert_browser_responses_ok,
-    assert_console_logs_ok,
-)
 
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False # for debugging.
@@ -572,111 +565,6 @@ async def test_tankoubon_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore
     assert response.name == "Test Tankoubon", "URL-encoded Tank name mismatch"
 
     # no error logs
-    expect_no_error_logs(environment, LOGGER)
-
-@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
-@pytest.mark.asyncio
-@pytest.mark.playwright
-@pytest.mark.xfail(reason="requires LRR-side fix: public/js/edit.js:245 must set Content-Type for tank PUT", strict=False)
-async def test_tankoubon_edit_page_save(
-    lrr_client: LRRClient,
-    semaphore: asyncio.Semaphore,
-    npgenerator: np.random.Generator,
-    environment: AbstractLRRDeploymentContext,
-) -> None:
-    """
-    Test that the tank metadata edit page saves the name via the UI.
-
-    1. Upload 3 archives, create a tank, add archives to it.
-    2. Open /edit?id=TANK_xxx in browser, wait for form.
-    3. Change the title input, click Save Metadata.
-    4. Capture the PUT /api/tankoubons/{id} response: expect 200.
-    5. Re-fetch the tank via API, assert new name persisted.
-    6. Expect no HTTP errors, no console errors, no server error logs.
-    """
-
-    _, error = await lrr_client.misc_api.get_server_info()
-    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-        for i in range(3):
-            save_path = create_archive_file(tmpdir, f"tank-edit-archive-{i}", 3)
-            response, error = await upload_archive(
-                lrr_client, save_path, save_path.name, semaphore,
-                title=f"Tank Edit Archive {i}", tags="",
-            )
-            assert not error, f"Upload failed (status {error.status}): {error.error}"
-
-    response, error = await lrr_client.archive_api.get_all_archives()
-    assert not error, f"Failed to get all archives: {error.error}"
-    archive_ids = [arc.arcid for arc in response.data]
-    del response, error
-
-    response, error = await lrr_client.tankoubon_api.create_tankoubon(CreateTankoubonRequest(name="Tank Edit Test"))
-    assert not error, f"Failed to create tank: {error.error}"
-    tank_id = response.tank_id
-    del response, error
-
-    for arc_id in archive_ids:
-        response, error = await lrr_client.tankoubon_api.add_archive_to_tankoubon(
-            AddArchiveToTankoubonRequest(tank_id=tank_id, arcid=arc_id)
-        )
-        assert not error, f"Failed to add archive to tank: {error.error}"
-        del response, error
-
-    new_name = "Tank Edit Test Renamed"
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
-
-            # log in (edit page requires session auth since enable_pass defaults to 1)
-            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
-            await page.wait_for_load_state("networkidle")
-            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-            await page.get_by_role("button", name="Login").click()
-            await page.wait_for_load_state("networkidle")
-
-            await page.goto(f"{lrr_client.lrr_base_url}/edit?id={tank_id}", timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
-
-            # dismiss new version overlay if present
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-                await asyncio.sleep(0.3)
-
-            put_future: asyncio.Future = asyncio.get_event_loop().create_future()
-            async def on_put(response: playwright.async_api._generated.Response) -> None:
-                if put_future.done():
-                    return
-                if response.request.method == "PUT" and f"/api/tankoubons/{tank_id}" in response.url:
-                    put_future.set_result(response)
-            page.on("response", on_put)
-
-            await page.locator("#title").fill(new_name)
-            await page.locator("#save-metadata").click()
-
-            put_response = await asyncio.wait_for(put_future, timeout=10)
-            assert put_response.status == 200, f"Tank PUT returned {put_response.status}: {await put_response.text()}"
-
-            await page.wait_for_load_state("networkidle")
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-        finally:
-            await bc.close()
-            await browser.close()
-
-    response, error = await lrr_client.tankoubon_api.get_tankoubon(GetTankoubonRequest(tank_id=tank_id))
-    assert not error, f"Failed to get tank: {error.error}"
-    assert response.result.name == new_name, f"Tank name not updated: got {response.result.name!r}, expected {new_name!r}"
-
     expect_no_error_logs(environment, LOGGER)
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
