@@ -174,6 +174,10 @@ class HomebrewLRRDeploymentContext(AbstractLRRDeploymentContext):
         self._redis_stdout_fh = None
         self._redis_stderr_fh = None
         self._keg_dir: Path | None = None
+        # Instrumentation-only state (observability for the Shinobu/Redis stop-ordering analysis):
+        # why _terminate_process_group last returned, and the LRR launcher pgid it acted on.
+        self._instr_tpg_reason: str | None = None
+        self._instr_last_lrr_pgid: int | None = None
 
     @override
     def apply_plugins(self):
@@ -443,15 +447,20 @@ class HomebrewLRRDeploymentContext(AbstractLRRDeploymentContext):
         port = self.lrr_port
         if _is_port_free(port):
             self.logger.debug(f"Confirmed port availability on port: {port}")
+            self._snapshot_processes("stop_lrr-port-already-free", launcher_pgid=self._instr_last_lrr_pgid)
             self._lrr_process = None
             self._close_fh("_lrr_stdout_fh")
             return
 
+        self._instr_tpg_reason = None
         proc = self._lrr_process
         if proc is not None and proc.poll() is None:
             self._terminate_process_group(proc.pid, timeout)
         elif pid := self.lrr_pid:
             self._terminate_process_group(pid, timeout)
+
+        self.logger.info(f"[instr:stop_lrr] terminate_reason={self._instr_tpg_reason}")
+        self._snapshot_processes("stop_lrr-after-terminate", launcher_pgid=self._instr_last_lrr_pgid)
 
         self._lrr_process = None
         self._close_fh("_lrr_stdout_fh")
@@ -469,6 +478,9 @@ class HomebrewLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Stop the DB server by signalling its process group, falling back to the port owner.
         """
+        # Instrumentation: capture whether a Shinobu is still alive at the moment before Redis dies
+        # (the necessary condition for the "Shinobu emitted error logs" / Connection-reset failure).
+        self._snapshot_processes("stop_redis-entry", launcher_pgid=self._instr_last_lrr_pgid)
         port = self.redis_port
         proc = self._redis_process
         if proc is not None and proc.poll() is None:
@@ -691,22 +703,73 @@ class HomebrewLRRDeploymentContext(AbstractLRRDeploymentContext):
         # leader (exited, not yet reaped) where Linux raises ProcessLookupError.
         try:
             pgid = os.getpgid(pid)
-        except (ProcessLookupError, PermissionError):
+        except (ProcessLookupError, PermissionError) as err:
+            self._instr_tpg_reason = f"getpgid:{type(err).__name__}"
             return
+        self._instr_last_lrr_pgid = pgid
         try:
             os.killpg(pgid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
+        except (ProcessLookupError, PermissionError) as err:
+            self._instr_tpg_reason = f"sigterm:{type(err).__name__}"
             return
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
                 os.killpg(pgid, 0)
-            except (ProcessLookupError, PermissionError):
+            except ProcessLookupError:
+                self._instr_tpg_reason = "probe:ProcessLookupError"
+                return
+            except PermissionError:
+                # Instrumentation: on macOS a zombie group leader returns EPERM here even while
+                # non-leader members (e.g. Shinobu) are still alive. Snapshot the survivors before
+                # returning, since this early return is the suspected cause of the Redis race.
+                self._instr_tpg_reason = "probe:PermissionError"
+                self._snapshot_processes("tpg-eperm-return", launcher_pgid=pgid)
                 return
             time.sleep(0.2)
+        self._instr_tpg_reason = "timeout-sigkill"
         self.logger.warning(f"Process group {pgid} did not exit after SIGTERM; sending SIGKILL.")
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, signal.SIGKILL)
+
+    def _snapshot_processes(self, context: str, launcher_pgid: int | None=None):
+        """
+        Instrumentation (observability only): snapshot live Shinobu processes and LRR-process-group
+        members with pid/ppid/pgid/state. Used to confirm whether stop_lrr returns while a Shinobu
+        is still alive — and whether that Shinobu shares the LRR launcher's pgid — i.e. whether the
+        subsequent stop_redis races a live Shinobu and triggers its "Connection reset" error log.
+        """
+        try:
+            output = subprocess.run(
+                ["ps", "-axo", "pid,ppid,pgid,stat,command"],
+                capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            )
+        except OSError as err:
+            self.logger.warning(f"[instr:{context}] ps unavailable: {err}")
+            return
+
+        shinobu = []
+        group = []
+        for line in output.stdout.splitlines():
+            fields = line.split(None, 4)
+            if len(fields) < 5 or not fields[0].isdigit():
+                continue
+            pid_s, ppid_s, pgid_s, stat_s, command = fields
+            entry = f"pid={pid_s} ppid={ppid_s} pgid={pgid_s} stat={stat_s} cmd={command[:120]}"
+            if "Shinobu.pm" in command:
+                in_group = launcher_pgid is not None and pgid_s.isdigit() and int(pgid_s) == launcher_pgid
+                shinobu.append(f"{entry} pgid_matches_launcher={in_group}")
+            elif launcher_pgid is not None and pgid_s.isdigit() and int(pgid_s) == launcher_pgid:
+                group.append(entry)
+
+        self.logger.info(
+            f"[instr:{context}] launcher_pgid={launcher_pgid} lrr_port={self.lrr_port} "
+            f"redis_port={self.redis_port} shinobu_alive={len(shinobu)} group_members={len(group)}"
+        )
+        for line in shinobu:
+            self.logger.info(f"[instr:{context}] shinobu {line}")
+        for line in group:
+            self.logger.info(f"[instr:{context}] group {line}")
 
     def _close_fh(self, attr: str):
         fh = getattr(self, attr, None)
