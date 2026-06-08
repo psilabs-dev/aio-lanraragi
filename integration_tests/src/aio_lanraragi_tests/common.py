@@ -1,6 +1,7 @@
 import hashlib
 import io
 import socket
+import sys
 from pathlib import Path
 from typing import overload
 
@@ -154,9 +155,14 @@ def is_valid_signature_hex(signature: str, allowed_signatures: list[str]=ALLOWED
 
 def is_port_available(port: int):
     """
-    Checks to see if the port on localhost is available.
+    Whether 127.0.0.1:port has no live listener. On POSIX, SO_REUSEADDR lets a TIME_WAIT port (left
+    by a graceful shutdown) pass while still refusing a live listener, matching how redis/LRR bind.
+    Not set on Windows, where SO_REUSEADDR would instead let the bind steal a live listener (plain
+    bind already tolerates TIME_WAIT there).
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if sys.platform != "win32":
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("127.0.0.1", port))
             return True

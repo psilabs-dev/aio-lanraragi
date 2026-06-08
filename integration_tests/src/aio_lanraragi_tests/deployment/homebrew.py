@@ -445,6 +445,7 @@ class HomebrewLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.debug(f"Confirmed port availability on port: {port}")
             self._lrr_process = None
             self._close_fh("_lrr_stdout_fh")
+            self._reap_shinobu(timeout)
             return
 
         proc = self._lrr_process
@@ -455,6 +456,9 @@ class HomebrewLRRDeploymentContext(AbstractLRRDeploymentContext):
 
         self._lrr_process = None
         self._close_fh("_lrr_stdout_fh")
+
+        # Reap Shinobu now the launcher is down (so LRR cannot respawn it), before stop_redis.
+        self._reap_shinobu(timeout)
 
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -708,6 +712,24 @@ class HomebrewLRRDeploymentContext(AbstractLRRDeploymentContext):
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, signal.SIGKILL)
 
+    def _reap_shinobu(self, timeout: int):
+        """
+        Reap this environment's Shinobu file watcher. LRR spawns Shinobu as its own session leader
+        (separate process group), so stop_lrr's launcher-process-group signal cannot reach it; an
+        orphan left alive across a restart races the Redis lifecycle and emits error logs. The bare
+        PID is published by LRR at <temp>/shinobu.pid-s6 (LRR_TEMP_DIRECTORY is this env's temp dir).
+        """
+        pid_path = self.temp_dir / "shinobu.pid-s6"
+        try:
+            pid = int(pid_path.read_text().strip())
+        except (OSError, ValueError):
+            return
+        # Guard against a stale/recycled PID: only signal a process that is actually a Shinobu.
+        if not _is_shinobu_pid(pid):
+            return
+        self.logger.debug(f"Reaping Shinobu watcher (pid={pid}).")
+        self._terminate_process_group(pid, timeout)
+
     def _close_fh(self, attr: str):
         fh = getattr(self, attr, None)
         if fh is not None:
@@ -727,6 +749,17 @@ def _is_port_free(port: int) -> bool:
             return True
         except OSError:
             return False
+
+def _is_shinobu_pid(pid: int) -> bool:
+    """Whether the given PID is a live Shinobu watcher (guards a stale/recycled pidfile entry)."""
+    try:
+        output = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True, text=True, stdin=subprocess.DEVNULL,
+        )
+    except OSError:
+        return False
+    return "Shinobu.pm" in output.stdout
 
 def _get_port_owner_pid(port: int) -> int | None:
     try:
