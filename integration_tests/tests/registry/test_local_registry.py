@@ -1178,6 +1178,11 @@ sub get_tags {{
         f"Expected registry {reg2_id}, got {response.registry}"
     )
 
+    # Restart so the swapped plugin code loads, then drop the now-dead keep-alive
+    # connection to the old container so the next request reconnects.
+    environment.restart()
+    await lrr_client.close()
+
     response, error = await lrr_client.misc_api.use_plugin(
         UsePluginRequest(plugin="shared-metadata-1", arcid=arcid)
     )
@@ -1231,6 +1236,11 @@ sub get_tags {{
         f"Expected registry {reg3_id}, got {response.registry}"
     )
 
+    # Restart so the swapped plugin code loads, then drop the now-dead keep-alive
+    # connection to the old container so the next request reconnects.
+    environment.restart()
+    await lrr_client.close()
+
     response, error = await lrr_client.misc_api.use_plugin(
         UsePluginRequest(plugin="shared-metadata-1", arcid=arcid)
     )
@@ -1259,6 +1269,11 @@ sub get_tags {{
     assert response.registry == reg3_id, (
         f"Expected registry {reg3_id}, got {response.registry}"
     )
+
+    # Restart so the swapped plugin code loads, then drop the now-dead keep-alive
+    # connection to the old container so the next request reconnects.
+    environment.restart()
+    await lrr_client.close()
 
     response, error = await lrr_client.misc_api.use_plugin(
         UsePluginRequest(plugin="shared-metadata-1", arcid=arcid)
