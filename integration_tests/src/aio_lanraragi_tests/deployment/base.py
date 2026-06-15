@@ -457,6 +457,20 @@ class AbstractLRRDeploymentContext(abc.ABC):
         self.redis_client.select(2)
         self.redis_client.hset("LRR_CONFIG", "localprogress", "0")
 
+    def enable_replace_dupe(self):
+        """
+        Enable replacement of existing archives when an upload duplicates them.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "replacedupe", "1")
+
+    def disable_replace_dupe(self):
+        """
+        Disable replacement of existing archives on duplicate upload.
+        """
+        self.redis_client.select(2)
+        self.redis_client.hset("LRR_CONFIG", "replacedupe", "0")
+
     def set_pagesize(self, pagesize: int):
         """
         Set the number of archives displayed per datatables page.
