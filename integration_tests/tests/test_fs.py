@@ -15,14 +15,20 @@ import numpy as np
 import pytest
 import pytest_asyncio
 from lanraragi.clients.client import LRRClient
-from lanraragi.models.archive import DeleteArchiveRequest, DeleteArchiveResponse
+from lanraragi.models.archive import (
+    DeleteArchiveRequest,
+    DeleteArchiveResponse,
+    GetArchiveMetadataRequest,
+)
 from lanraragi.models.base import LanraragiErrorResponse
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.utils.api_wrappers import (
+    create_archive_file,
     delete_archive,
     save_archives,
+    upload_archive,
     upload_archives,
 )
 from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
@@ -205,3 +211,99 @@ async def test_archive_upload_to_symlinked_dir(
     # # no error logs
     # TODO: reinstate this assertion once we've decided what to do with shinobu's file handling problem.
     # expect_no_error_logs(environment, LOGGER)
+
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
+@pytest.mark.asyncio
+@pytest.mark.xfail(reason="requires LRR-side fix (PR #1600): replacing a same-named archive with different content erases the new metadata", strict=False)
+async def test_archive_replace(
+    semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, is_lrr_debug_mode: bool,
+    environment: AbstractLRRDeploymentContext
+):
+    """
+    Replacing an existing archive with different content under the same filename keeps the new metadata.
+
+    1. Start the server with replace-duplicate mode enabled.
+    2. Upload content A as "collision.zip" tagged "replacetest:first".
+    3. Restart Shinobu so its boot scan records collision.zip in the filemap.
+    4. Upload different content as "collision.zip" tagged "replacetest:second".
+    5. Wait for Shinobu to reconcile, then assert one archive remains holding the second tag, not the first.
+    """
+    filename = "collision.zip"
+
+    # start up server with replace-duplicate enabled.
+    environment.setup(with_api_key=True, with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
+    environment.enable_replace_dupe()
+    lrr_client = environment.lrr_client()
+
+    try:
+        # >>>>> TEST CONNECTION STAGE >>>>>
+        response, error = await lrr_client.misc_api.get_server_info()
+        assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+        response, error = await lrr_client.archive_api.get_all_archives()
+        assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+        assert len(response.data) == 0, "Server contains archives!"
+        del response, error
+        # <<<<< TEST CONNECTION STAGE <<<<<
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            first_path = create_archive_file(tmpdir, "content-first", 12)
+            second_path = create_archive_file(tmpdir, "content-second", 13)
+
+            # >>>>> FIRST UPLOAD STAGE >>>>>
+            response, error = await upload_archive(lrr_client, first_path, filename, semaphore, tags="replacetest:first")
+            assert not error, f"Failed to upload first archive (status {error.status}): {error.error}"
+            del response, error
+            # <<<<< FIRST UPLOAD STAGE <<<<<
+
+            # >>>>> FILEMAP PRIMING STAGE >>>>>
+            # Restart Shinobu so its boot scan records collision.zip in the filemap before the replacement upload;
+            # the fix relies on that filemap entry to identify the archive being replaced.
+            response, error = await lrr_client.shinobu_api.restart_shinobu()
+            assert not error, f"Failed to restart shinobu (status {error.status}): {error.error}"
+            retry_count = 0
+            while retry_count < 10:
+                response, error = await lrr_client.shinobu_api.get_shinobu_status()
+                assert not error, f"Failed to get shinobu status (status {error.status}): {error.error}"
+                if response.is_alive:
+                    break
+                retry_count += 1
+                await asyncio.sleep(1)
+            assert response.is_alive, "Shinobu did not come back alive after restart!"
+            del response, error
+            # Shinobu waits up to 5s for a sub-512KB archive to be "fully written" before recording it,
+            # so give the boot scan margin beyond that floor to populate the filemap before replacing.
+            await asyncio.sleep(12)
+            # <<<<< FILEMAP PRIMING STAGE <<<<<
+
+            # >>>>> REPLACEMENT UPLOAD STAGE >>>>>
+            response, error = await upload_archive(lrr_client, second_path, filename, semaphore, tags="replacetest:second")
+            assert not error, f"Failed to upload replacement archive (status {error.status}): {error.error}"
+            second_arcid = response.arcid
+            del response, error
+            # <<<<< REPLACEMENT UPLOAD STAGE <<<<<
+
+        # >>>>> RECONCILE STAGE >>>>>
+        # Shinobu reacts to the replacement asynchronously; wait for it to converge to a single archive.
+        retry_count = 0
+        while retry_count < 30:
+            response, error = await lrr_client.archive_api.get_all_archives()
+            assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+            if len(response.data) == 1:
+                break
+            retry_count += 1
+            await asyncio.sleep(1)
+        assert len(response.data) == 1, f"Expected exactly one archive after replacement, found {len(response.data)}!"
+        del response, error
+        # <<<<< RECONCILE STAGE <<<<<
+
+        # >>>>> VERIFY METADATA STAGE >>>>>
+        response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=second_arcid))
+        assert not error, f"Failed to get archive metadata (status {error.status}): {error.error}"
+        tags = {tag.strip() for tag in response.tags.split(",")}
+        assert "replacetest:second" in tags, f"New metadata was lost after replacement; tags are '{response.tags}'"
+        assert "replacetest:first" not in tags, f"Old metadata resurfaced after replacement; tags are '{response.tags}'"
+        del response, error
+        # <<<<< VERIFY METADATA STAGE <<<<<
+    finally:
+        await lrr_client.close()
