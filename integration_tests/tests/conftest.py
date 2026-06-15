@@ -71,6 +71,9 @@ def pytest_addoption(parser: pytest.Parser):
     regression : `bool = False`
         Run regression tests (behavioral expectation and e2e tests).
 
+    security : `bool = False`
+        Run security tests (XSS and other vulnerability regression suites).
+
     benchmark : `bool = False`
         Run benchmark tests.
 
@@ -107,6 +110,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--playwright", action="store_true", default=False, help="Run Playwright UI tests. Requires `playwright install`")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
     parser.addoption("--regression", action="store_true", default=False, help="Run regression tests (behavioral expectation and e2e tests).")
+    parser.addoption("--security", action="store_true", default=False, help="Run security tests (XSS and other vulnerability regression suites).")
     parser.addoption("--benchmark", action="store_true", default=False, help="Run benchmark tests.")
     parser.addoption("--benchmark-output", action="store", default=None, help="Path to write benchmark results JSON.")
     parser.addoption("--benchmark-label", action="store", default=None, help="Label for this benchmark run (e.g. c0-r0).")
@@ -132,6 +136,10 @@ def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
         "markers",
         "regression: Regression tests will be skipped by default."
+    )
+    config.addinivalue_line(
+        "markers",
+        "security: Security tests will be skipped by default."
     )
     config.addinivalue_line(
         "markers",
@@ -195,6 +203,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         for item in items:
             if 'regression' in item.keywords:
                 item.add_marker(skip_regression)
+
+    if not config.getoption("--security"):
+        skip_security = pytest.mark.skip(reason="need --security option enabled")
+        for item in items:
+            if 'security' in item.keywords:
+                item.add_marker(skip_security)
 
     if not config.getoption("--benchmark"):
         skip_benchmark = pytest.mark.skip(reason="need --benchmark option enabled")
