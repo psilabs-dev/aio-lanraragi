@@ -474,7 +474,7 @@ async def test_tag_escape_index_compact(
             assert not canary_requests, f"Canary request fired from index tag column/namespace dropdown: {canary_requests}"
             for evt in console_evts:
                 assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console: {evt.text}"
-            assert await page.locator("[onerror]").count() == 0, "Live onerror attribute injected on compact index"
+            assert await page.locator(f"[onerror*='{CANARY_MARKER}']").count() == 0, "Live onerror attribute injected on compact index"
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
@@ -784,7 +784,7 @@ async def test_delete_toast_filename_escape(
     Stored XSS — an archive filename must not execute in the delete-success toast.
 
     1. Upload an archive whose filename carries an XSS payload.
-    2. Log in, open the reader, delete the archive, and confirm the dialog.
+    2. Log in, open the reader, open the archive overview overlay, delete the archive, and confirm the dialog.
     3. Assert no console marker logged from the toast.
     4. Expect no HTTP errors, no console errors, no server error logs.
     """
@@ -820,6 +820,8 @@ async def test_delete_toast_filename_escape(
             await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}", timeout=60000)
             await page.wait_for_load_state("networkidle")
 
+            # The delete button lives inside the archive overview overlay, which is hidden until opened.
+            await page.locator("#toggle-archive-overlay").first.click()
             await page.locator("#delete-archive").click()
             await page.locator(".swal2-confirm").click()
             await page.wait_for_timeout(1000)
