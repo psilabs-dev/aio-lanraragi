@@ -23,6 +23,10 @@ from lanraragi.models.search import (
     CompositeSearchClause,
     CompositeSearchRequest,
 )
+from lanraragi.models.tankoubon import (
+    AddArchiveToTankoubonRequest,
+    CreateTankoubonRequest,
+)
 
 from aio_lanraragi_tests.common import compute_archive_id
 from aio_lanraragi_tests.deployment.base import (
@@ -56,6 +60,7 @@ async def test_composite_search(
     5. Test duplicate clause deduplication.
     6. Test subset clause absorption.
     7. Test clause order idempotence.
+    8. Test newonly tank membership under tank grouping (tank is new iff a member is new).
     """
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -370,6 +375,52 @@ async def test_composite_search(
     assert response.records_filtered == 3, f"Expected 3 filtered records without hidecompleted, got {response.records_filtered}"
 
     LOGGER.debug("hidecompleted test passed.")
+
+    # >>>>> TEST: NEWONLY + TANK MEMBERSHIP (GROUPTANKS) >>>>>
+    # "New Tank" contains the only new archive (New Release); "Old Tank" has only non-new members.
+    response, error = await retry_on_lock(lambda: lrr_client.tankoubon_api.create_tankoubon(
+        CreateTankoubonRequest(name="New Tank")
+    ))
+    assert not error, f"Failed to create New Tank (status {error.status}): {error.error}"
+    new_tank_id = response.tank_id
+
+    response, error = await retry_on_lock(lambda: lrr_client.tankoubon_api.create_tankoubon(
+        CreateTankoubonRequest(name="Old Tank")
+    ))
+    assert not error, f"Failed to create Old Tank (status {error.status}): {error.error}"
+    old_tank_id = response.tank_id
+
+    for title, tank_id in (
+        ("New Release", new_tank_id),
+        ("Ghost in the Shell", new_tank_id),
+        ("Saturn Japanese Manual", old_tank_id),
+        ("Saturn American Manual", old_tank_id),
+    ):
+        response, error = await retry_on_lock(lambda t=title, k=tank_id: lrr_client.tankoubon_api.add_archive_to_tankoubon(
+            AddArchiveToTankoubonRequest(tank_id=k, arcid=title_to_arcid[t])
+        ))
+        assert not error, f"Failed to add {title} to tank (status {error.status}): {error.error}"
+
+    # newonly=1: the tank with a new member surfaces; the all-old tank does not.
+    response, error = await lrr_client.search_api.composite_search(
+        CompositeSearchRequest(clauses=[CompositeSearchClause(newonly=1)], groupby_tanks=True)
+    )
+    assert not error, f"newonly=1 tank search failed (status {error.status}): {error.error}"
+    arcids = {r.arcid for r in response.data}
+    assert arcids == {new_tank_id}, f"newonly=1 should return only the new-containing tank, got {arcids}"
+
+    # newonly=-1: the new-containing tank is excluded; the all-old tank is kept.
+    response, error = await lrr_client.search_api.composite_search(
+        CompositeSearchRequest(clauses=[CompositeSearchClause(newonly=-1)], groupby_tanks=True)
+    )
+    assert not error, f"newonly=-1 tank search failed (status {error.status}): {error.error}"
+    arcids = {r.arcid for r in response.data}
+    assert new_tank_id not in arcids, f"newonly=-1 should exclude the new-containing tank: {arcids}"
+    assert old_tank_id in arcids, f"newonly=-1 should keep the all-old tank: {arcids}"
+    assert len(arcids) == 7, f"newonly=-1 grouptanks should return 7 entries (old tank + 6 non-new standalone), got {len(arcids)}"
+
+    LOGGER.debug("newonly + tank membership test passed.")
+    # <<<<< TEST: NEWONLY + TANK MEMBERSHIP (GROUPTANKS) <<<<<
 
     # no error logs
     expect_no_error_logs(environment, LOGGER)
