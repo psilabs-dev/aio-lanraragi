@@ -4,6 +4,7 @@ such as page navigation and viewing, manga mode, slideshow, ToC, etc.
 """
 
 import asyncio
+import http
 import json
 import logging
 import tempfile
@@ -19,6 +20,10 @@ from lanraragi.models.archive import (
     ExtractArchiveRequest,
     GetArchiveMetadataRequest,
     GetArchivePageRequest,
+)
+from lanraragi.models.tankoubon import (
+    AddArchiveToTankoubonRequest,
+    CreateTankoubonRequest,
 )
 
 from aio_lanraragi_tests.common import DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE
@@ -254,12 +259,16 @@ async def test_archive_navigation(
     1. Upload 3 archives, 3 pages each.
     2. Go to index page and click on first archive; collect the search draw metadata from
         network (to know what the 2nd and 3rd archives are supposed to be).
+        - Confirm the prev/next-archive buttons are visible after datatables entry.
     3. Navigate (via "right" key press) from first archive to 3rd archive.
         - Confirm that the 3rd and 6th key presses correspond to changes in archive title
           and that the page bytes are the first pages of the 2nd and 3rd archives resp.
         - Confirm when at last page of 3rd archive, right keypress does nothing.
-    4. Navigate to 2nd from 3rd archive via "[".
+    4. Navigate to 2nd from 3rd archive via ",".
     5. Navigate from 2nd to 1st archive via "left" keypress.
+    6. Navigate from 1st to 2nd archive via the forward-step button (icon-driven nav).
+    7. Open an archive directly (no datatables referrer); confirm the prev/next-archive
+        buttons stay hidden.
     """
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -340,6 +349,10 @@ async def test_archive_navigation(
             await page.wait_for_timeout(500)
             assert f"id={dt_arcids[0]}" in page.url, f"Expected first archive in URL, got {page.url}"
 
+            # Datatables entry exposes the prev/next-archive buttons.
+            visible_count = await page.locator(".archive-nav-link:visible").count()
+            assert visible_count > 0, "Expected archive-jump buttons visible after datatables entry"
+
             # Navigate forward via ArrowRight through all 3 archives.
             # 3 pages per archive, so presses at index 2 and 5 are archive transitions.
             for keypress_count in range(6):
@@ -411,14 +424,14 @@ async def test_archive_navigation(
             page_text_after = await page.locator("span.current-page").first.text_content()
             assert page_text_after.strip() == "3", "Page changed at last page of last archive"
 
-            # Navigate from 3rd to 2nd archive via "[".
+            # Navigate from 3rd to 2nd archive via ",".
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
             responses.clear()
             console_evts.clear()
 
-            LOGGER.info("Navigating from 3rd to 2nd archive via '[' key.")
-            await page.keyboard.press("[")
+            LOGGER.info("Navigating from 3rd to 2nd archive via ',' key.")
+            await page.keyboard.press(",")
             await page.wait_for_url(lambda url: dt_arcids[1] in url)
             await page.wait_for_load_state("networkidle")
             await assert_no_spinner(page)
@@ -444,9 +457,46 @@ async def test_archive_navigation(
             title_text = await page.locator("#archive-title").text_content()
             assert dt_titles[0] in title_text, f"Expected title containing {dt_titles[0]!r} after ArrowLeft, got {title_text!r}"
 
+            # Navigate from 1st to 2nd archive via the forward-step button (icon-driven path).
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            responses.clear()
+            console_evts.clear()
+
+            LOGGER.info("Navigating from 1st to 2nd archive via fa-forward-step icon.")
+            await page.locator(".fa-forward-step:visible").first.click()
+            await page.wait_for_url(lambda url: dt_arcids[1] in url)
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+            await page.wait_for_timeout(500)
+            title_text = await page.locator("#archive-title").text_content()
+            assert dt_titles[1] in title_text, f"Expected title containing {dt_titles[1]!r} after forward-step click, got {title_text!r}"
+
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+
+            # Direct-URL entry has no datatables referrer, so the archive-jump buttons stay hidden.
+            bc2 = await browser.new_context()
+            try:
+                page2 = await bc2.new_page()
+                responses2: list[playwright.async_api._generated.Response] = []
+                console_evts2: list[playwright.async_api._generated.ConsoleMessage] = []
+                page2.on("response", lambda response: responses2.append(response))
+                page2.on("console", lambda console: console_evts2.append(console))
+
+                await page2.goto(f"{lrr_client.lrr_base_url}/reader?id={dt_arcids[0]}")
+                await page2.wait_for_load_state("networkidle")
+                await assert_no_spinner(page2)
+                await page2.wait_for_timeout(500)
+
+                visible_count = await page2.locator(".archive-nav-link:visible").count()
+                assert visible_count == 0, f"Expected archive-jump buttons hidden on direct entry, found {visible_count} visible"
+
+                await assert_browser_responses_ok(responses2, lrr_client, logger=LOGGER)
+                await assert_console_logs_ok(console_evts2, lrr_client.lrr_base_url)
+            finally:
+                await bc2.close()
         finally:
             await bc.close()
             await browser.close()
@@ -839,3 +889,105 @@ async def test_toc_reader(
             await bc.close()
             await browser.close()
     # <<<<< UI STAGE <<<<<
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.regression
+@pytest.mark.xfail(
+    strict=False,
+    reason="regression from PR #1584 (Fix tank progress updates): the reader was migrated from "
+           "/api/tankoubons/{id}?include_full_data=true to /api/tankoubons/{id}/full, dropping the "
+           "include_full_data argument. get_tankoubon_full still gates full_data on that argument, so "
+           "the reader receives no full_data, builds no chapters, and never renders. See ticket "
+           "bugfix-tank-reader-full. XPASS once /full returns full_data.",
+)
+async def test_tank_reader_renders(
+    lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+):
+    """
+    Test that opening a tankoubon in the reader renders its first page.
+
+    1. Upload 2 archives (3 pages each) and group them into a tank.
+    2. Open the tank in the reader directly (/reader?id=TANK_...).
+    3. Verify the loading spinner clears and the first page image loads (an archive page,
+       not a request against the tank id).
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    arcids = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i in range(2):
+            archive_path = create_archive_file(Path(tmpdir), f"archive-{i + 1}", num_pages=3)
+            response, error = await upload_archive(
+                lrr_client, archive_path, archive_path.name, semaphore,
+                title=f"Tank Member {i + 1}", tags="",
+            )
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+            arcids.append(response.arcid)
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> TANKOUBON STAGE >>>>>
+    response, error = await lrr_client.tankoubon_api.create_tankoubon(CreateTankoubonRequest(name="Reader Tank"))
+    assert not error, f"Failed to create tankoubon (status {error.status}): {error.error}"
+    tank_id = response.tank_id
+    for arcid in arcids:
+        response, error = await lrr_client.tankoubon_api.add_archive_to_tankoubon(
+            AddArchiveToTankoubonRequest(tank_id=tank_id, arcid=arcid)
+        )
+        assert not error, f"Failed to add archive to tankoubon (status {error.status}): {error.error}"
+    # <<<<< TANKOUBON STAGE <<<<<
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+        try:
+            page = await bc.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            LOGGER.debug(f"Opening tank {tank_id} in the reader.")
+            await page.goto(f"{lrr_client.lrr_base_url}/reader?id={tank_id}")
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+
+            img_src = await page.locator("#img").first.get_attribute("src")
+            assert img_src, "Reader did not load a page image for the tank"
+            assert "TANK_" not in img_src, f"Page image was requested against the tank id (empty chapters): {img_src}"
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("navigation")
+async def test_navigation_toasts_localized(lrr_client: LRRClient):
+    """
+    Archive-boundary toast strings must be localized via I18N, not hardcoded in reader.js.
+
+    1. Fetch the served reader.js asset.
+    2. Assert the boundary phrases are not present as hardcoded literals; they must be
+       referenced through I18N (defined via c.lh in templates/i18n.html.tt2).
+    """
+    status, content = await lrr_client.handle_request(
+        http.HTTPMethod.GET, lrr_client.build_url("/js/reader.js"), lrr_client.headers,
+    )
+    assert status == 200, f"Failed to fetch reader.js (status {status})"
+    assert "This is the first archive" not in content, (
+        "First-archive toast is hardcoded in reader.js; it must be localized via I18N."
+    )
+    assert "This is the last archive" not in content, (
+        "Last-archive toast is hardcoded in reader.js; it must be localized via I18N."
+    )

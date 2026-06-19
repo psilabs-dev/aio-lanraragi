@@ -16,6 +16,11 @@ import playwright.async_api._generated
 import pytest
 import pytest_asyncio
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.search import SearchArchiveIndexRequest
+from lanraragi.models.tankoubon import (
+    AddArchiveToTankoubonRequest,
+    CreateTankoubonRequest,
+)
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
@@ -114,6 +119,20 @@ async def test_reader_to_index_cross_dt(
     del response, error
     # <<<<< UPLOAD STAGE <<<<<
 
+    # >>>>> EXPECTED ORDER STAGE >>>>>
+    # The cross-DT hop is driven by /api/search/ids, which delivers DT page 2's lineup.
+    # Capture the full search order so we can assert the exact landing archive: DT page 2's
+    # first archive is the 4th in the order (pagesize=3).
+    response, error = await lrr_client.search_api.search_archive_index(SearchArchiveIndexRequest(start="-1"))
+    assert not error, f"Failed to fetch full search order (status {error.status}): {error.error}"
+    full_order = []
+    for record in response.data:
+        full_order.append(record.arcid)
+    assert len(full_order) == 5, f"Expected 5 archives in search order, got {len(full_order)}"
+    expected_next_arcid = full_order[3]
+    del response, error
+    # <<<<< EXPECTED ORDER STAGE <<<<<
+
     # >>>>> UI STAGE >>>>>
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch()
@@ -145,6 +164,7 @@ async def test_reader_to_index_cross_dt(
             dt_arcids = [entry["arcid"] for entry in search_response_body["data"]]
             dt_titles = [entry["title"] for entry in search_response_body["data"]]
             LOGGER.info(f"DT page 1 order: {list(zip(dt_titles, dt_arcids))}")
+            assert dt_arcids[2] == full_order[2], "Index DT order disagrees with search API order at the page boundary"
             responses.clear()
             console_evts.clear()
 
@@ -170,6 +190,9 @@ async def test_reader_to_index_cross_dt(
             cross_dt_url = page.url
             LOGGER.info(f"After cross-DT navigation: {cross_dt_url}")
             assert f"id={dt_arcids[2]}" not in cross_dt_url, "Expected to have crossed DT boundary"
+            assert f"id={expected_next_arcid}" in cross_dt_url, (
+                f"Expected to land on DT page 2's first archive {expected_next_arcid}, got {cross_dt_url}"
+            )
 
             # Return-to-index icon should navigate to index.
             LOGGER.info("Clicking return-to-index icon.")
@@ -355,3 +378,144 @@ async def test_back_stack_no_growth_on_reload(
             await bc.close()
             await browser.close()
     # <<<<< UI STAGE <<<<<
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.dev("navigation")
+async def test_navigation_grouptanks(
+        lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+        environment: AbstractLRRDeploymentContext,
+):
+    """
+    Test that cross-DT navigation preserves the ungrouped (grouptanks=false) lineup.
+
+    1. Set pagesize=3, upload 6 archives (3 pages each), group archives 1 and 2 into a tank
+       so the grouped and ungrouped orderings diverge.
+    2. Ungrouped mode (grouptanks=false): open the last archive on DT page 1, navigate forward
+       across the DT boundary, and verify the landing is the ungrouped page-2 neighbor rather
+       than a grouped neighbor or a tank.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> CONFIG STAGE >>>>>
+    environment.set_pagesize(3)
+    # <<<<< CONFIG STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    title_to_arcid: dict[str, str] = {}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i in range(6):
+            title = f"Archive {i + 1}"
+            archive_path = create_archive_file(Path(tmpdir), f"archive-{i + 1}", num_pages=3)
+            response, error = await upload_archive(
+                lrr_client, archive_path, archive_path.name, semaphore,
+                title=title, tags="",
+            )
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+            title_to_arcid[title] = response.arcid
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> TANKOUBON STAGE >>>>>
+    # Group archives 1 and 2 into a tank so the grouped and ungrouped orderings diverge.
+    response, error = await lrr_client.tankoubon_api.create_tankoubon(CreateTankoubonRequest(name="Archive 0 Collection"))
+    assert not error, f"Failed to create tankoubon (status {error.status}): {error.error}"
+    tank_id = response.tank_id
+    for title in ["Archive 1", "Archive 2"]:
+        response, error = await lrr_client.tankoubon_api.add_archive_to_tankoubon(
+            AddArchiveToTankoubonRequest(tank_id=tank_id, arcid=title_to_arcid[title])
+        )
+        assert not error, f"Failed to add {title} to tankoubon (status {error.status}): {error.error}"
+    # <<<<< TANKOUBON STAGE <<<<<
+
+    # >>>>> GROUND TRUTH STAGE >>>>>
+    # Derive expected orderings for grouped and ungrouped modes from the search API.
+    grouped_page1: list[str] = []
+    response, error = await lrr_client.search_api.search_archive_index(SearchArchiveIndexRequest(start="0", sortby="title", order="asc", groupby_tanks=True))
+    assert not error, f"Grouped search failed (status {error.status}): {error.error}"
+    for record in response.data:
+        grouped_page1.append(record.arcid)
+
+    grouped_page2: list[str] = []
+    response, error = await lrr_client.search_api.search_archive_index(SearchArchiveIndexRequest(start="3", sortby="title", order="asc", groupby_tanks=True))
+    assert not error, f"Grouped search failed (status {error.status}): {error.error}"
+    for record in response.data:
+        grouped_page2.append(record.arcid)
+
+    ungrouped_page1: list[str] = []
+    response, error = await lrr_client.search_api.search_archive_index(SearchArchiveIndexRequest(start="0", sortby="title", order="asc", groupby_tanks=False))
+    assert not error, f"Ungrouped search failed (status {error.status}): {error.error}"
+    for record in response.data:
+        ungrouped_page1.append(record.arcid)
+
+    ungrouped_page2: list[str] = []
+    response, error = await lrr_client.search_api.search_archive_index(SearchArchiveIndexRequest(start="3", sortby="title", order="asc", groupby_tanks=False))
+    assert not error, f"Ungrouped search failed (status {error.status}): {error.error}"
+    for record in response.data:
+        ungrouped_page2.append(record.arcid)
+
+    LOGGER.debug(f"Grouped page1: {grouped_page1}, page2: {grouped_page2}")
+    LOGGER.debug(f"Ungrouped page1: {ungrouped_page1}, page2: {ungrouped_page2}")
+
+    # Preconditions that make this test meaningful.
+    grouped_all = grouped_page1 + grouped_page2
+    assert tank_id in grouped_all, "Tank should appear as a row in grouped results"
+    assert tank_id not in ungrouped_page1 + ungrouped_page2, "Tank should not appear in ungrouped results"
+    assert ungrouped_page2[0] != grouped_page2[0], "Grouped and ungrouped page-2 neighbors must differ to detect the bug"
+    # <<<<< GROUND TRUTH STAGE <<<<<
+
+    # >>>>> UI STAGE: UNGROUPED MODE >>>>>
+    last_arc_page1 = ungrouped_page1[-1]
+    expected_neighbor = ungrouped_page2[0]
+    last_title = None
+    for title, arcid in title_to_arcid.items():
+        if arcid == last_arc_page1:
+            last_title = title
+            break
+    assert last_title is not None, "Could not resolve title for last archive on ungrouped page 1"
+
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+        await bc.add_init_script("localStorage.setItem('grouptanks', 'false');")
+        try:
+            page = await bc.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            await page.goto(lrr_client.lrr_base_url)
+            await page.wait_for_load_state("networkidle")
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+
+            LOGGER.debug(f"Opening last archive on ungrouped DT page 1: {last_title}")
+            await page.locator("#thumbs_container a", has_text=last_title).first.click()
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+            assert f"id={last_arc_page1}" in page.url, f"Expected last page-1 archive in URL, got {page.url}"
+
+            # Navigate forward across the DT page boundary (3 pages per archive).
+            responses.clear()
+            console_evts.clear()
+            LOGGER.debug("Navigating forward across the ungrouped DT boundary.")
+            for _ in range(3):
+                await page.keyboard.press("ArrowRight")
+                await page.wait_for_load_state("networkidle")
+                await assert_no_spinner(page)
+                await page.wait_for_timeout(500)
+
+            assert f"id={expected_neighbor}" in page.url, f"Expected ungrouped neighbor {expected_neighbor} after crossing DT boundary, got {page.url}"
+            assert "TANK_" not in page.url, f"Ungrouped navigation should not land on a tank, got {page.url}"
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE: UNGROUPED MODE <<<<<
