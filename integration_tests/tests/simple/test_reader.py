@@ -991,3 +991,98 @@ async def test_navigation_toasts_localized(lrr_client: LRRClient):
     assert "This is the last archive" not in content, (
         "Last-archive toast is hardcoded in reader.js; it must be localized via I18N."
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.xfail(
+    reason="requires LRR-side fix: Server.callAPI must gate on response.ok so OpenAPI "
+    "4xx errors (which carry no `success` field) are not treated as success",
+    strict=False,
+)
+async def test_stamp_unauthorized_surfaces_error(
+    lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+):
+    """
+    A stamp write that fails with 401 must surface an error in the UI, not a false success.
+
+    Regression: Server.callAPI dropped its `response.ok` guard, so OpenAPI error
+    responses (which carry no `success` field) fell through to the success branch,
+    showing "Stamp added!" and pushing a marker on a 401.
+
+    1. Upload 1 archive with the authenticated client.
+    2. Open the reader in an anonymous browser (no API key, no session).
+    3. Press 's' to enter stamp mode, click the page, and confirm a stamp label.
+    4. The stamp PUT returns 401 (anonymous write to a protected endpoint).
+    5. Assert the failure is surfaced: no success toast, no marker is added, and the error
+       toast shows the server's real message ("Unauthorized") rather than a generic placeholder.
+    """
+
+    # >>>>> UPLOAD STAGE >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_path = create_archive_file(Path(tmpdir), "test-stamp-archive", num_pages=3)
+        response, error = await upload_archive(
+            lrr_client, archive_path, archive_path.name, semaphore,
+            title="test stamp archive", tags="",
+        )
+        assert not error, f"Upload failed (status {error.status}): {error.error}"
+        arcid = response.arcid
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await bc.new_page()
+
+            await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}")
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+
+            # Enter stamp mode and place a marker on the page.
+            await page.locator("#img").wait_for(state="visible")
+            await page.keyboard.press("s")
+            await page.locator("#img").click(position={"x": 40, "y": 40})
+
+            # A SweetAlert popup asks for the stamp label; confirm a value.
+            await page.locator(".swal2-input").wait_for(state="visible")
+            await page.locator(".swal2-input").fill("regression-stamp")
+
+            # The confirm click triggers the PUT; capture the response to assert the 401.
+            async with page.expect_response(
+                lambda r: "/stamps/" in r.url and r.request.method == "PUT"
+            ) as resp_info:
+                await page.locator(".swal2-confirm").click()
+            stamp_response = await resp_info.value
+            assert stamp_response.status == 401, (
+                f"Expected stamp PUT to return 401, got {stamp_response.status}."
+            )
+
+            # Allow the client a moment to process the response and render toasts.
+            await page.wait_for_timeout(1000)
+
+            # The fail-open signature: a 401 must NOT be rendered as a success.
+            assert await page.locator(".Toastify__toast--success").count() == 0, (
+                "callAPI rendered a false success toast on a 401 stamp write."
+            )
+            assert await page.locator(".marker").count() == 0, (
+                "A marker was added even though the stamp write failed with 401."
+            )
+
+            # Difegue's concern (LRR commit b1edcd95, "fix error display on API calls"): a failed
+            # call must surface the server's *real* error, not a generic placeholder. The OpenAPI
+            # 401 body carries {"errors":[{"message":"Unauthorized",...}]}, so that text must reach
+            # the user. A naive revert to the old `response.ok` guard would substitute a generic
+            # message and fail this assertion while still passing the no-false-success checks above.
+            error_toasts = page.locator(".Toastify__toast--error")
+            await error_toasts.first.wait_for(state="visible")
+            toast_texts = await error_toasts.all_inner_texts()
+            assert any("Unauthorized" in text for text in toast_texts), (
+                f"A failed call must surface the server's real error message; got toasts: {toast_texts!r}"
+            )
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
