@@ -674,3 +674,87 @@ async def test_local_progress_with_auth_progress(
 
     # check logs for errors
     expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.xfail(
+    reason="requires LRR-side fix: Server.callAPI must gate on response.ok so OpenAPI "
+    "4xx errors (which carry no `success` field) are not treated as success",
+    strict=False,
+)
+async def test_settings_clear_cache_unauthorized_surfaces_error(
+    environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient,
+):
+    """
+    A Settings 'Clear Cache' write that fails with 401 must surface an error, not a false success.
+
+    Companion to the reader stamp regression: it exercises a *different* callAPI caller
+    (DELETE /api/tempfolder) so a narrow per-callsite stamp fix cannot green the suite while
+    the shared callAPI fail-open persists for other authenticated writes.
+
+    1. Configure a password-protected environment and log in through the UI.
+    2. Open Settings and expand 'Archive Files' so the Clear Cache button is visible.
+    3. Log out in a second tab to drop the session (simulating expiry) without reloading Settings.
+    4. Click Clear Cache; DELETE /api/tempfolder returns 401.
+    5. Assert no success toast, and that the error toast shows the server's real message.
+    """
+    environment.setup(with_api_key=True, with_nofunmode=True, lrr_debug_mode=is_lrr_debug_mode)
+
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await bc.new_page()
+
+            # Log in through the UI (nofunmode redirects the base URL to the login page).
+            await page.goto(lrr_client.lrr_base_url)
+            await page.wait_for_load_state("networkidle")
+            assert await page.title() == LRR_LOGIN_TITLE
+            await page.fill("#pw_field", DEFAULT_LRR_PASSWORD)
+            await page.click("input[type='submit'][value='Login']")
+            await page.wait_for_load_state("networkidle")
+            assert await page.title() == LRR_INDEX_TITLE
+
+            # Open Settings and expand the collapsible holding the Clear Cache button.
+            await page.goto(f"{lrr_client.lrr_base_url}/config")
+            await page.wait_for_load_state("networkidle")
+            await page.locator(".collapsible-title", has_text="Archive Files").click()
+            await page.locator("#clean-temp").wait_for(state="visible")
+
+            # Drop the session in a second tab (simulates expiry) without reloading Settings.
+            logout_page = await bc.new_page()
+            await logout_page.goto(f"{lrr_client.lrr_base_url}/logout")
+            await logout_page.wait_for_load_state("networkidle")
+            await logout_page.close()
+
+            # The write now fails with 401; capture the response to assert the status.
+            async with page.expect_response(
+                lambda r: r.url.endswith("/api/tempfolder") and r.request.method == "DELETE"
+            ) as resp_info:
+                await page.locator("#clean-temp").click()
+            response = await resp_info.value
+            assert response.status == 401, f"Expected clear-cache DELETE to return 401, got {response.status}."
+
+            # Allow the client a moment to process the response and render toasts.
+            await page.wait_for_timeout(1000)
+
+            # The fail-open signature: a 401 must NOT be rendered as a success.
+            assert await page.locator(".Toastify__toast--success").count() == 0, (
+                "callAPI rendered a false success toast on a 401 clear-cache write."
+            )
+            # Difegue's concern: the error toast must surface the server's real message, not the
+            # generic placeholder. This endpoint's 401 uses LRR's legacy `{"error": ...}` envelope
+            # (vs the OpenAPI `{"errors": [...]}` shape the stamp test covers), so assert the real
+            # message reached the user rather than I18N.GenericReponseError.
+            error_toasts = page.locator(".Toastify__toast--error")
+            await error_toasts.first.wait_for(state="visible")
+            toast_texts = await error_toasts.all_inner_texts()
+            assert all("Error while processing request" not in text for text in toast_texts), (
+                f"A failed call must surface the server's real error, not the generic placeholder; "
+                f"got toasts: {toast_texts!r}"
+            )
+        finally:
+            await bc.close()
+            await browser.close()
