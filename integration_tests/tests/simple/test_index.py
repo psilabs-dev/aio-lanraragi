@@ -14,7 +14,11 @@ import playwright.async_api
 import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
-from lanraragi.models.category import CreateCategoryRequest
+from lanraragi.models.category import (
+    AddArchiveToCategoryRequest,
+    CreateCategoryRequest,
+)
+from lanraragi.models.database import GetDatabaseStatsRequest
 
 from aio_lanraragi_tests.common import DEFAULT_LRR_PASSWORD
 from aio_lanraragi_tests.deployment.base import (
@@ -29,6 +33,7 @@ from aio_lanraragi_tests.utils.api_wrappers import (
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
+    assert_no_spinner,
     switch_display_mode,
 )
 
@@ -101,6 +106,10 @@ async def test_header_click_sort(
                 await page.keyboard.press("Escape")
                 await asyncio.sleep(0.3)
 
+            # The index performs its initial DataTables draw on load; ensure the processing spinner
+            # clears (guards against a wedged index spinner, e.g. a throwing drawCallback).
+            await assert_no_spinner(page)
+
             # switch to compact/table mode
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
@@ -138,6 +147,9 @@ async def test_header_click_sort(
             search_response_body = await asyncio.wait_for(search_future, timeout=10)
             page.remove_listener("response", on_desc_response)
             await page.wait_for_load_state("networkidle")
+            # The header sort class is set during the (async) DataTables redraw, which can land after
+            # networkidle; wait for the index spinner to clear before reading post-draw DOM state.
+            await assert_no_spinner(page)
 
             # verify header has sorting_desc class
             header_class = await title_header.get_attribute("class") or ""
@@ -172,6 +184,7 @@ async def test_header_click_sort(
             search_response_body = await asyncio.wait_for(search_future, timeout=10)
             page.remove_listener("response", on_asc_response)
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
 
             # verify header has sorting_asc class
             header_class = await title_header.get_attribute("class") or ""
@@ -698,6 +711,134 @@ async def test_custom_column_sort_display(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
+async def test_sort_dropdown_lists_unique_valued_namespace(
+    lrr_client: LRRClient,
+    semaphore: asyncio.Semaphore,
+    environment: AbstractLRRDeploymentContext,
+) -> None:
+    """
+    Regression test: the sort-namespace dropdown must list a namespace even when all of
+    its tag values are unique (each value occurs in exactly one archive).
+
+    The #namespace-sortby dropdown is populated inside loadTagSuggestions from the
+    tag-cloud popularity call /api/database/stats?minweight=2. Because LRR_STATS is keyed
+    per tag *value*, a namespace whose values are all unique (weight 1) -- e.g.
+    chapter:001..00N -- never reaches the dropdown, leaving no in-UI way to sort by it.
+    The data exists server-side (minweight=1 returns it); only the dropdown drops it.
+
+    1. Upload archives carrying a control namespace 'artist' with a repeated value
+       (weight >= 2) and a 'chapter' namespace whose values are all unique (weight 1).
+    2. Rebuild the stat hash.
+    3. Confirm via the API that the backend has the data: chapter is present at
+       minweight=1 but absent at minweight=2 (localizes the defect to the dropdown).
+    4. Open the index page and read #namespace-sortby. The control 'artist' must be
+       present (proving the dropdown populated), and 'chapter' must also be present.
+
+    On current dev this fails at step 4: 'chapter' is missing from the dropdown.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    # Every archive shares artist:Common (weight 4 -> survives minweight=2, the control),
+    # and each carries a distinct chapter value (weight 1 each -> dropped by minweight=2).
+    num_archives = 4
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        for i in range(1, num_archives + 1):
+            save_path = create_archive_file(tmpdir, f"test-archive-{i}", 5)
+            response, error = await upload_archive(
+                lrr_client, save_path, save_path.name, semaphore,
+                title=f"test archive {i}",
+                tags=f"artist:Common, chapter:{str(i).zfill(3)}",
+            )
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+        del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> STAT REBUILD STAGE >>>>>
+    await trigger_stat_rebuild(lrr_client)
+    LOGGER.debug("Stat hash rebuild completed.")
+    # <<<<< STAT REBUILD STAGE <<<<<
+
+    # >>>>> BACKEND DATA STAGE >>>>>
+    # The unique-valued namespace IS available from the backend -- it is only the
+    # dropdown's minweight=2 query that hides it. Prove that here so a step-4 failure is
+    # unambiguously a frontend dropdown defect, not missing/incorrect server data.
+    response, error = await lrr_client.database_api.get_database_stats(GetDatabaseStatsRequest(minweight=1))
+    assert not error, f"stats(minweight=1) failed (status {error.status}): {error.error}"
+    ns_at_1 = {tag.namespace for tag in response.data}
+    assert "chapter" in ns_at_1, "Expected unique-valued 'chapter' namespace at minweight=1 (backend must have the data)"
+    assert "artist" in ns_at_1, "Expected control 'artist' namespace at minweight=1"
+
+    response, error = await lrr_client.database_api.get_database_stats(GetDatabaseStatsRequest(minweight=2))
+    assert not error, f"stats(minweight=2) failed (status {error.status}): {error.error}"
+    ns_at_2 = {tag.namespace for tag in response.data}
+    assert "artist" in ns_at_2, "Control 'artist' (repeated value) must survive minweight=2"
+    assert "chapter" not in ns_at_2, (
+        "Sanity: chapter (all unique values) is expected to be filtered by the minweight=2 "
+        "popularity query -- this is the mechanism the dropdown wrongly inherits"
+    )
+    del response, error
+    # <<<<< BACKEND DATA STAGE <<<<<
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await bc.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            await page.goto(lrr_client.lrr_base_url, timeout=60000)
+            await page.wait_for_load_state("domcontentloaded")
+            await page.wait_for_load_state("networkidle")
+
+            # dismiss new version overlay if present
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
+
+            # wait for stat-driven namespace options to populate (control must appear)
+            sort_dropdown = page.locator("#namespace-sortby")
+            await sort_dropdown.locator("option[value='artist']").wait_for(state="attached", timeout=10000)
+
+            options = await sort_dropdown.locator("option").all()
+            option_values = []
+            for opt in options:
+                option_values.append(await opt.get_attribute("value"))
+
+            # Control: the dropdown did populate from stats.
+            assert "artist" in option_values, (
+                f"Control namespace 'artist' missing from sort dropdown; it did not populate. Got: {option_values}"
+            )
+            # The bug: a namespace whose values are all unique must still be sortable from the UI.
+            assert "chapter" in option_values, (
+                "Unique-valued namespace 'chapter' is absent from the sort dropdown. The dropdown is "
+                "populated from /api/database/stats?minweight=2 (a tag-cloud popularity filter), so "
+                "namespaces with only weight-1 values are silently dropped and cannot be sorted from "
+                f"the UI. Dropdown options: {option_values}"
+            )
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
 @pytest.mark.xfail(reason="date_added is hardcoded in index.html.tt2 sort dropdown, not filtered by excluded namespaces", strict=False)
 async def test_search_autocomplete_namespace_exclusion(
     lrr_client: LRRClient,
@@ -1055,6 +1196,148 @@ async def test_category_context_menu(
             menu_count = await visible_menu.count()
             assert menu_count == 0, "Context menu should not appear when right-clicking dropdown placeholder"
             # <<<<< DROPDOWN PLACEHOLDER <<<<<
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.dev("search")
+async def test_multi_category_and_search(
+    lrr_client: LRRClient,
+    semaphore: asyncio.Semaphore,
+    environment: AbstractLRRDeploymentContext,
+) -> None:
+    """
+    Toggling multiple category buttons AND-composes them via the composite search API.
+
+    1. Upload 3 archives; create two static categories whose membership overlaps at one archive.
+    2. Open the index page, click category button Alpha, then category button Beta.
+    3. Capture the POST /api/search/composite request carrying both categories.
+       - Expect the request's single clause to include both category IDs with mode "include".
+       - Expect the response to render only the shared archive (set intersection, not union).
+    4. Expect no HTTP errors, no console errors, no server error logs.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    title_to_arcid: dict[str, str] = {}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        for i in range(3):
+            save_path = create_archive_file(tmpdir, f"test-archive-{i}", 3)
+            title = f"archive {chr(ord('A') + i)}"
+            response, error = await upload_archive(
+                lrr_client, save_path, save_path.name, semaphore, title=title, tags="",
+            )
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+            title_to_arcid[title] = response.arcid
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> CATEGORY SETUP STAGE >>>>>
+    # Alpha = {archive A, archive B}; Beta = {archive B, archive C}. The intersection is
+    # exactly archive B, which an AND-composed search must return (a union would yield all three).
+    response, error = await lrr_client.category_api.create_category(CreateCategoryRequest(name="Alpha"))
+    assert not error, f"Failed to create Alpha category (status {error.status}): {error.error}"
+    alpha_id = response.category_id
+    response, error = await lrr_client.category_api.create_category(CreateCategoryRequest(name="Beta"))
+    assert not error, f"Failed to create Beta category (status {error.status}): {error.error}"
+    beta_id = response.category_id
+
+    for cat_id, titles in ((alpha_id, ["archive A", "archive B"]), (beta_id, ["archive B", "archive C"])):
+        for title in titles:
+            response, error = await lrr_client.category_api.add_archive_to_category(
+                AddArchiveToCategoryRequest(category_id=cat_id, arcid=title_to_arcid[title])
+            )
+            assert not error, f"Failed to add {title} to category (status {error.status}): {error.error}"
+    # <<<<< CATEGORY SETUP STAGE <<<<<
+
+    # >>>>> STAT REBUILD STAGE >>>>>
+    await trigger_stat_rebuild(lrr_client)
+    # <<<<< STAT REBUILD STAGE <<<<<
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await bc.new_page()
+
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            await page.goto(lrr_client.lrr_base_url, timeout=60000)
+            await page.wait_for_load_state("domcontentloaded")
+            await page.wait_for_load_state("networkidle")
+
+            # dismiss new version overlay if present
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            responses.clear()
+            console_evts.clear()
+
+            # Resolve once a composite request carries BOTH categories (the second toggle).
+            composite_future: asyncio.Future = asyncio.get_event_loop().create_future()
+            async def on_composite(response: playwright.async_api._generated.Response) -> None:
+                if composite_future.done():
+                    return
+                if "/api/search/composite" not in response.url or response.request.method != "POST":
+                    return
+                if response.status != 200:
+                    return
+                request_body = json.loads(response.request.post_data or "{}")
+                clauses = request_body.get("clauses", [])
+                if not clauses:
+                    return
+                category_ids = []
+                for entry in clauses[0].get("categories", []):
+                    category_ids.append(entry.get("id"))
+                if alpha_id in category_ids and beta_id in category_ids:
+                    composite_future.set_result((request_body, json.loads(await response.text())))
+            page.on("response", on_composite)
+
+            # Toggle Alpha, let its search settle, then toggle Beta to AND them.
+            await page.locator(f".favtag-btn#{alpha_id}").click()
+            await page.wait_for_load_state("networkidle")
+            await page.locator(f".favtag-btn#{beta_id}").click()
+
+            request_body, response_body = await asyncio.wait_for(composite_future, timeout=10)
+            page.remove_listener("response", on_composite)
+            await page.wait_for_load_state("networkidle")
+
+            # request: a single clause AND-ing both categories as include
+            category_entries = set()
+            for entry in request_body["clauses"][0]["categories"]:
+                category_entries.add((entry["id"], entry["mode"]))
+            assert category_entries == {(alpha_id, "include"), (beta_id, "include")}, (
+                f"Composite request should AND both categories as include, got: {category_entries}"
+            )
+
+            # response: intersection renders exactly the shared archive
+            result_titles = set()
+            for entry in response_body["data"]:
+                result_titles.add(entry["title"])
+            assert result_titles == {"archive B"}, (
+                f"Multi-category AND should render only the shared archive, got: {result_titles}"
+            )
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)

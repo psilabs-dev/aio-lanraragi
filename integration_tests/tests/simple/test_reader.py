@@ -8,6 +8,7 @@ import http
 import json
 import logging
 import tempfile
+import zipfile
 from pathlib import Path
 
 import playwright
@@ -27,12 +28,17 @@ from lanraragi.models.tankoubon import (
 )
 
 from aio_lanraragi_tests.common import DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE
-from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
+from aio_lanraragi_tests.utils.api_wrappers import (
+    create_archive_file,
+    trigger_stat_rebuild,
+    upload_archive,
+)
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
     assert_no_spinner,
     get_image_bytes_from_responses,
+    switch_display_mode,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -245,6 +251,125 @@ async def test_double_page_navigation(
             await browser.close()
     # <<<<< UI STAGE <<<<<
 
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.regression
+async def test_double_page_undecodable_page(
+    lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+):
+    """
+    Double-page navigation must still complete when a page serves 200 but cannot
+    be decoded as an image. The wide-image check reads page dimensions by decoding
+    each page; if that decode is allowed to reject and abort goToPage, the reader
+    never advances onto the spread and reading progress is not updated.
+
+    Regression check:
+    - PR: https://github.com/Difegue/LANraragi/pull/1608
+
+    1. Upload a 6-page archive, then replace the 3rd page with non-image bytes so
+       it still fetches with 200 but fails to decode in the browser.
+    2. Open the reader and enable double-page mode.
+    3. ArrowRight from the cover onto the 1+2 spread, whose second page is the
+       undecodable 3rd page.
+    4. Verify the reader advanced onto the spread (#img / #img_doublepage carry the
+       spread filenames, #display is in double-mode) rather than staying on the cover.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_title = "test archive title"
+        archive_name = "test-archive-name"
+        archive_path = create_archive_file(Path(tmpdir), archive_name, num_pages=6)
+
+        # Rewrite the archive, swapping the 3rd page for non-image bytes. The entry
+        # keeps its name/extension so LRR still lists and serves it (200), but the
+        # browser cannot decode it - exercising the wide-check decode path. Garbage
+        # bytes (rather than a truncated image) guarantee the decode fails outright
+        # instead of partially rendering.
+        undecodable_page = f"{archive_name}-pg-3.png"
+        broken_path = Path(tmpdir) / f"{archive_name}-broken.zip"
+        with zipfile.ZipFile(archive_path) as zin, zipfile.ZipFile(broken_path, "w", zipfile.ZIP_DEFLATED) as zout:
+            for info in zin.infolist():
+                data = b"not a decodable image" if info.filename == undecodable_page else zin.read(info.filename)
+                zout.writestr(info, data)
+
+        response, error = await upload_archive(
+            lrr_client,
+            broken_path,
+            broken_path.name,
+            semaphore,
+            title=archive_title,
+            tags="",
+        )
+        assert not error, f"Upload failed (status {error.status}): {error.error}"
+        arcid = response.arcid
+    del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    def expected_filename(page_index: int) -> str:
+        return f"{archive_name}-pg-{page_index + 1}.png"
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await browser.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}")
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+
+            LOGGER.info("Enabling double-page mode.")
+            await page.keyboard.press("p")
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+            await page.wait_for_timeout(500)
+
+            # Cover (page 0) -> pages 1+2 spread; the spread's second page (pg-3) is undecodable.
+            LOGGER.info("Navigating onto the spread containing the undecodable page.")
+            await page.keyboard.press("ArrowRight")
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(500)
+
+            # The reader must have advanced onto the spread despite the failed decode.
+            # On a build where the decode rejection aborts goToPage, #display stays on
+            # the cover (no double-mode, #img still the cover, #img_doublepage cleared).
+            # Console-error hygiene is asserted via this DOM state rather than a global
+            # console sweep: this PR's base independently emits an unrelated wake-lock
+            # console.error under headless Chromium that would confound the sweep.
+            display_class = await page.locator("#display").get_attribute("class") or ""
+            assert "double-mode" in display_class, (
+                f"Reader did not enter double-mode after navigating onto the spread; "
+                f"goToPage likely aborted on the undecodable page. class={display_class!r}"
+            )
+            img_fn = await page.locator("#img").get_attribute("data-filename")
+            assert img_fn == expected_filename(1), (
+                f"#img expected {expected_filename(1)}, got data-filename={img_fn!r} "
+                f"(reader stuck on the previous page)"
+            )
+            img_dp_fn = await page.locator("#img_doublepage").get_attribute("data-filename")
+            assert img_dp_fn == expected_filename(2), (
+                f"#img_doublepage expected {expected_filename(2)}, got data-filename={img_dp_fn!r}"
+            )
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
 
 
 @pytest.mark.asyncio
@@ -1082,6 +1207,138 @@ async def test_stamp_unauthorized_surfaces_error(
             assert any("Unauthorized" in text for text in toast_texts), (
                 f"A failed call must surface the server's real error message; got toasts: {toast_texts!r}"
             )
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.dev("navigation")
+async def test_return_to_index_preserves_namespace_sort(
+    lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+):
+    """
+    Regression: returning from the reader to the index must preserve a non-title sort.
+
+    The index reads/writes the ?sort= URL param by tag-namespace NAME (e.g. ?sort=artist),
+    but reader.js returnToIndex() derives the return URL from localStorage.indexSort, which
+    is a numeric column index. If returnToIndex emits the bare number (?sort=1), the index's
+    name-based reader cannot resolve it and silently falls back to title order. returnToIndex
+    must resolve the index to the column's namespace name so the sort survives the round-trip.
+
+    Flow: sort the index by artist (a non-title namespace whose order differs from title
+    order) -> open an archive in the reader -> return to the index -> assert the index is
+    still sorted by artist, not reset to title.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    # artist tags (c, a, b) are deliberately misaligned with title order, so artist-asc
+    # order differs from title order and a silent reset to title is detectable.
+    archive_specs = [
+        {"name": "archive_1", "title": "Title 1", "tags": "artist:c"},
+        {"name": "archive_2", "title": "Title 2", "tags": "artist:a"},
+        {"name": "archive_3", "title": "Title 3", "tags": "artist:b"},
+    ]
+    artist_asc_titles = ["Title 2", "Title 3", "Title 1"]  # a, b, c
+    num_archives = len(archive_specs)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for spec in archive_specs:
+            archive_path = create_archive_file(Path(tmpdir), spec["name"], num_pages=1)
+            response, error = await upload_archive(
+                lrr_client, archive_path, archive_path.name, semaphore,
+                title=spec["title"], tags=spec["tags"],
+            )
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> STAT REBUILD STAGE >>>>>
+    await trigger_stat_rebuild(lrr_client)
+    # <<<<< STAT REBUILD STAGE <<<<<
+
+    async def capture_search_titles(page, action) -> list[str]:
+        """Run `action` (a DT redraw or a full index load) and return the title order from the
+        LAST DataTables /search response after the network settles.
+
+        On a fresh index load the table draws twice: once with its hardcoded default order
+        (title), then again after consumeURLParameters() applies the URL's sort. The settled
+        order is therefore the LAST response, not the first. Only `draw=` requests are matched,
+        which excludes the carousel's /api/search* calls (they also return these archives, in a
+        different order)."""
+        captured: list[list[str]] = []
+
+        async def on_response(response: playwright.async_api._generated.Response) -> None:
+            if "draw=" not in response.url or response.request.method != "GET" or response.status != 200:
+                return
+            try:
+                body = json.loads(await response.text())
+            except Exception:  # noqa: BLE001 - response body may be gone after navigation
+                return
+            if "data" in body and len(body["data"]) == num_archives:
+                captured.append([entry["title"] for entry in body["data"]])
+
+        page.on("response", on_response)
+        try:
+            await action()
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(500)  # allow the post-URL-resolution redraw to land
+            assert captured, "no DataTables /search response was captured"
+            return captured[-1]
+        finally:
+            page.remove_listener("response", on_response)
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+        try:
+            page = await bc.new_page()
+
+            await page.goto(lrr_client.lrr_base_url, timeout=60000)
+            await page.wait_for_load_state("networkidle")
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
+
+            # Sort the index by the artist column (compact mode exposes the column header,
+            # avoiding the namespace dropdown). This sets localStorage.indexSort and pushes
+            # ?sort=artist into the URL.
+            await switch_display_mode(page, "compact")
+            await page.wait_for_load_state("networkidle")
+            artist_header = page.locator("#customheader1")
+            await artist_header.wait_for(state="visible", timeout=5000)
+
+            sorted_titles = await capture_search_titles(page, artist_header.click)
+            assert sorted_titles == artist_asc_titles, (
+                f"Precondition failed: expected artist-asc {artist_asc_titles}, got {sorted_titles}"
+            )
+            assert "sort=artist" in page.url, f"Expected sort=artist in index URL after sorting, got {page.url}"
+
+            # Open the first archive (in artist order) in the reader.
+            first_archive = page.locator("td.title.itd a").first
+            await first_archive.wait_for(state="visible", timeout=5000)
+            async with page.expect_navigation(timeout=30000):
+                await first_archive.click()
+            await page.wait_for_load_state("networkidle")
+            assert "/reader" in page.url, f"Expected reader page, got {page.url}"
+
+            # Return to the index via the "done reading" button and confirm the sort survived.
+            return_button = page.locator("#return-to-index")
+            await return_button.wait_for(state="visible", timeout=5000)
+            returned_titles = await capture_search_titles(page, return_button.click)
+            await page.wait_for_load_state("networkidle")
+
+            assert returned_titles == artist_asc_titles, (
+                f"Sort not preserved on return to index: expected artist-asc {artist_asc_titles}, "
+                f"got {returned_titles} (title order is {['Title 1', 'Title 2', 'Title 3']})"
+            )
+            assert "sort=artist" in page.url, f"Expected sort=artist in index URL after return, got {page.url}"
         finally:
             await bc.close()
             await browser.close()
