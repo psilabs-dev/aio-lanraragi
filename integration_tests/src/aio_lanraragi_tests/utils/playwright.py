@@ -87,9 +87,16 @@ async def switch_display_mode(page: playwright.async_api._generated.Page, mode: 
     await page.locator("ul.context-menu-list").wait_for(state="hidden")
 
 async def assert_no_spinner(page: playwright.async_api.Page, timeout_ms: int = 3000):
-    """Assert that the reader loading spinner is gone within timeout_ms."""
+    """
+    Assert that no spinners are active that can indicate something is loading when it shouldn't.
+    """
     await page.wait_for_function(
-        """() => !document.querySelector('#i3.loading')""",
+        """() => {
+            const readerSpinning = document.querySelector('#i3.loading') !== null;
+            const indexProc = document.querySelector('#progress');
+            const indexSpinning = indexProc !== null && indexProc.offsetParent !== null;
+            return !readerSpinning && !indexSpinning;
+        }""",
         timeout=timeout_ms,
     )
 
