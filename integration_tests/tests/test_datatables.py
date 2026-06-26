@@ -519,3 +519,158 @@ async def test_navigation_grouptanks(
             await bc.close()
             await browser.close()
     # <<<<< UI STAGE: UNGROUPED MODE <<<<<
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.dev("navigation-sort")
+async def test_navigation_sort_by_namespace(
+        lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+        environment: AbstractLRRDeploymentContext,
+):
+    """
+    Test that a `?sort=<namespace>` index URL sorts by that namespace and drives
+    archive navigation in that order, rather than by title.
+
+    1. Upload 4 archives tagged with a shared series and chapter:NNN values
+       assigned so chapter order diverges from title order.
+    2. With `chapter` bound to a display column (the name-based sort resolves a namespace
+       to an already-bound column, not an arbitrary one), open the index at
+       /?q=series:...$&sort=chapter; verify the URL stays in the namespace form
+       (sort=chapter, not a column index) on round-trip.
+    3. Enter the reader on the first archive and step forward with "." across the
+       whole lineup, verifying each landing matches the chapter-sorted order.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    # Titles and chapters are deliberately misaligned so a chapter sort differs from a title sort.
+    title_to_chapter = {"Delta": 1, "Alpha": 2, "Charlie": 3, "Bravo": 4}
+    title_to_arcid: dict[str, str] = {}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for title, chapter in title_to_chapter.items():
+            archive_path = create_archive_file(Path(tmpdir), f"archive-{chapter}", num_pages=3)
+            response, error = await upload_archive(
+                lrr_client, archive_path, archive_path.name, semaphore,
+                title=title, tags=f"series:Manga, chapter:{str(chapter).zfill(3)}",
+            )
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+            title_to_arcid[title] = response.arcid
+    del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> GROUND TRUTH STAGE >>>>>
+    # Derive chapter-sorted and title-sorted orderings from the search API; they must differ
+    # for the test to distinguish a real chapter sort from a title fallback.
+    chapter_order: list[str] = []
+    response, error = await lrr_client.search_api.search_archive_index(
+        SearchArchiveIndexRequest(search_filter="series:Manga$", sortby="chapter", order="asc", start="-1")
+    )
+    assert not error, f"Chapter-sorted search failed (status {error.status}): {error.error}"
+    for record in response.data:
+        chapter_order.append(record.arcid)
+
+    title_order: list[str] = []
+    response, error = await lrr_client.search_api.search_archive_index(
+        SearchArchiveIndexRequest(search_filter="series:Manga$", sortby="title", order="asc", start="-1")
+    )
+    assert not error, f"Title-sorted search failed (status {error.status}): {error.error}"
+    for record in response.data:
+        title_order.append(record.arcid)
+
+    assert len(chapter_order) == 4, f"Expected 4 archives in chapter order, got {len(chapter_order)}"
+    assert chapter_order != title_order, "Chapter and title orderings must differ to detect the sort"
+    arcid_to_title = {arcid: title for title, arcid in title_to_arcid.items()}
+    LOGGER.info(f"Chapter order: {[arcid_to_title[a] for a in chapter_order]}")
+    del response, error
+    # <<<<< GROUND TRUTH STAGE <<<<<
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+        # Bind a display column to the `chapter` namespace before the index loads. The
+        # name-based ?sort= reader resolves a namespace to a column already bound to it; it
+        # does not auto-bind an arbitrary namespace to a column. Seeding customColumn1 is how a
+        # real user who wants to sort by chapter has it configured.
+        await bc.add_init_script("localStorage.setItem('customColumn1', 'chapter');")
+
+        try:
+            page = await bc.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page_errors: list[str] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+            page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+
+            # Open the index already sorted by the chapter namespace via the URL.
+            await page.goto(f"{lrr_client.lrr_base_url}/?q=series%3AManga%24&sort=chapter")
+            await page.wait_for_load_state("networkidle")
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+            await assert_no_spinner(page)
+            await page.wait_for_timeout(500)
+
+            # The URL must round-trip as the namespace name, not a column index.
+            assert "sort=chapter" in page.url, f"Expected namespace sort to persist in URL, got {page.url}"
+            assert "sort=1" not in page.url, f"URL should not collapse the namespace to a column index, got {page.url}"
+
+            # The index page must be JS-error-free. A throwing drawCallback (e.g. a bad
+            # column accessor in buildURLParameters) is an *uncaught* exception, not a
+            # console.error, so it surfaces via pageerror rather than console_evts; it
+            # leaves the spinner stuck and silently breaks the URL writer. Assert here,
+            # before the reader stage clears the console.
+            assert not page_errors, f"Uncaught JS error(s) on the index page: {page_errors}"
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+
+            # Writer isolation: the round-trip check above is partly satisfied by the URL we
+            # navigated to, so it doesn't prove the app *generated* the name. Toggle the sort
+            # direction to force buildURLParameters to regenerate the URL from scratch: the new
+            # sortdir=desc is the witness that the writer ran, and sort=chapter (not sort=1)
+            # proves it emitted the namespace name rather than the column index.
+            await page.click("#order-sortby")
+            # buildURLParameters rewrites the URL via pushState inside the (async) DataTables draw
+            # callback, which can land after networkidle -- wait on the URL itself, not the network.
+            # (assert_no_spinner watches the reader's #i3 spinner, which never exists on the index.)
+            await page.wait_for_function("() => location.search.includes('sortdir=desc')", timeout=5000)
+            assert "sortdir=desc" in page.url, f"Sort-direction toggle must regenerate the URL, got {page.url}"
+            assert "sort=chapter" in page.url, f"Writer must regenerate the namespace name, got {page.url}"
+            assert "sort=1" not in page.url, f"Writer must not regenerate a column index, got {page.url}"
+            # Restore ascending order for the reader-navigation stage below.
+            await page.click("#order-sortby")
+            await page.wait_for_function("() => !location.search.includes('sortdir=desc')", timeout=5000)
+            assert "sortdir=desc" not in page.url, f"Expected ascending order restored, got {page.url}"
+
+            # Enter the reader on the first chapter-sorted archive.
+            first_title = arcid_to_title[chapter_order[0]]
+            LOGGER.info(f"Opening first chapter-sorted archive: {first_title}")
+            responses.clear()
+            console_evts.clear()
+            await page.locator("#thumbs_container a", has_text=first_title).first.click()
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+            assert f"id={chapter_order[0]}" in page.url, f"Expected first chapter archive in URL, got {page.url}"
+
+            # Step forward with "." across the lineup; each landing must follow chapter order.
+            for expected_arcid in chapter_order[1:]:
+                await page.keyboard.press(".")
+                await page.wait_for_load_state("networkidle")
+                await assert_no_spinner(page)
+                await page.wait_for_timeout(500)
+                assert f"id={expected_arcid}" in page.url, (
+                    f"Expected next archive {arcid_to_title[expected_arcid]} in chapter order, got {page.url}"
+                )
+
+            assert not page_errors, f"Uncaught JS error(s) during reader navigation: {page_errors}"
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
