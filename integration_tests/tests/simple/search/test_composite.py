@@ -57,10 +57,11 @@ async def test_composite_search(
     2. Upload 10 archives with distinct tags.
     3. Create static categories for grouping.
     4. Test multi-clause OR with categories and namespace sort.
-    5. Test duplicate clause deduplication.
-    6. Test subset clause absorption.
-    7. Test clause order idempotence.
-    8. Test newonly tank membership under tank grouping (tank is new iff a member is new).
+    5. Test multi-category AND intersection within a single clause.
+    6. Test duplicate clause deduplication.
+    7. Test subset clause absorption.
+    8. Test clause order idempotence.
+    9. Test newonly tank membership under tank grouping (tank is new iff a member is new).
     """
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -209,6 +210,39 @@ async def test_composite_search(
 
     LOGGER.debug("Multi-clause + categories + namespace sort test passed.")
     # <<<<< TEST: MULTI-CLAUSE + CATEGORIES + NAMESPACE SORT <<<<<
+
+    # >>>>> TEST: MULTI-CATEGORY AND (SINGLE CLAUSE) >>>>>
+    # Two "include" categories in one clause intersect (AND). "Favorites" overlaps
+    # "Wada Rco" only at "Fate GO MEMO", so the AND result is exactly that archive
+    # (an OR would instead yield Fate GO MEMO, Fate GO MEMO 2, and Cool Collection 1).
+    response, error = await lrr_client.category_api.create_category(
+        CreateCategoryRequest(name="Favorites")
+    )
+    assert not error, f"Failed to create Favorites category (status {error.status}): {error.error}"
+    favorites_category_id = response.category_id
+
+    for title in ["Fate GO MEMO", "Cool Collection 1"]:
+        response, error = await retry_on_lock(lambda t=title: lrr_client.category_api.add_archive_to_category(
+            AddArchiveToCategoryRequest(category_id=favorites_category_id, arcid=title_to_arcid[t])
+        ))
+        assert not error, f"Failed to add {title} to Favorites (status {error.status}): {error.error}"
+
+    clause_wada_and_favorites = CompositeSearchClause(
+        categories=[
+            CompositeSearchCategoryEntry(id=wada_category_id, mode="include"),
+            CompositeSearchCategoryEntry(id=favorites_category_id, mode="include"),
+        ],
+    )
+    response, error = await lrr_client.search_api.composite_search(
+        CompositeSearchRequest(clauses=[clause_wada_and_favorites], groupby_tanks=False)
+    )
+    assert not error, f"Multi-category AND search failed (status {error.status}): {error.error}"
+    result_titles = {r.title for r in response.data}
+    assert result_titles == {"Fate GO MEMO"}, f"Multi-category AND should intersect to Fate GO MEMO only: {result_titles}"
+    assert len(response.data) == 1, f"Multi-category AND should return exactly 1 archive, got {len(response.data)}"
+
+    LOGGER.debug("Multi-category AND test passed.")
+    # <<<<< TEST: MULTI-CATEGORY AND (SINGLE CLAUSE) <<<<<
 
     # >>>>> TEST: DUPLICATE CLAUSES >>>>>
     # Two identical clauses should produce same results as single clause
