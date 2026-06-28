@@ -16,6 +16,7 @@ import playwright.async_api._generated
 import pytest
 import pytest_asyncio
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.archive import ClearNewArchiveFlagRequest
 from lanraragi.models.search import SearchArchiveIndexRequest
 from lanraragi.models.tankoubon import (
     AddArchiveToTankoubonRequest,
@@ -25,7 +26,7 @@ from lanraragi.models.tankoubon import (
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
-from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
+from aio_lanraragi_tests.utils.concurrency import get_bounded_sem, retry_on_lock
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
@@ -203,6 +204,155 @@ async def test_reader_to_index_cross_dt(
             index_url = page.url
             LOGGER.info(f"After return-to-index: {index_url}")
             assert "/reader" not in index_url, f"Expected index page after icon click, got {index_url}"
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.dev("navigation")
+async def test_navigation_new_category_cross_dt(
+        lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+        environment: AbstractLRRDeploymentContext,
+):
+    """
+    Cross-DT-page archive navigation must stay within the "New Archives" special
+    category (regression for the NEW_ONLY/UNTAGGED_ONLY neighbor-prefetch drift).
+
+    The reader prefetches neighbor pages via /api/search/ids. The built-in "New"
+    selector is not a real category ID: the search engine only honors it through the
+    newonly flag. If the reader sends category=NEW_ONLY, the server's get_category
+    rejects the short id and silently returns the *unfiltered* library, so crossing a
+    DT page boundary lands on a non-new archive.
+
+    1. pagesize=3, upload 6 archives (3 pages each); clear the "new" flag on the 4th
+       in title order so the New set and the full library diverge at the page-2 boundary:
+       - full-library page-2 first -> the non-new archive  [the buggy landing]
+       - New-set     page-2 first -> the next new archive  [the correct landing]
+    2. Toggle "New Archives", open the last archive on New DT page 1.
+    3. Navigate forward across the DT boundary; assert we land on the New set's next
+       archive, never the unfiltered library's non-new archive.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> CONFIG STAGE >>>>>
+    environment.set_pagesize(3)
+    # <<<<< CONFIG STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i in range(6):
+            archive_path = create_archive_file(Path(tmpdir), f"newcat-{i+1}", num_pages=3)
+            response, error = await upload_archive(
+                lrr_client, archive_path, archive_path.name, semaphore,
+                title=f"NewCat {i+1}", tags="",
+            )
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+    del response, error
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> EXPECTED ORDER STAGE >>>>>
+    # Full library order (all 6 are new on upload). The page-2 first archive is what the
+    # bug surfaces; we will make it the non-new archive so the lineups diverge there.
+    response, error = await lrr_client.search_api.search_archive_index(SearchArchiveIndexRequest(start="-1"))
+    assert not error, f"Failed to fetch full search order (status {error.status}): {error.error}"
+    full_order = [record.arcid for record in response.data]
+    titles = {record.arcid: record.title for record in response.data}
+    assert len(full_order) == 6, f"Expected 6 archives in full order, got {len(full_order)}"
+    non_new_arcid = full_order[3]          # title-order 4th -> DT page 2 (pagesize=3) first
+    buggy_landing_arcid = non_new_arcid    # what the unfiltered prefetch would surface
+
+    # Drop the 4th from the New set without touching the full-library order.
+    response, error = await retry_on_lock(lambda: lrr_client.archive_api.clear_new_archive_flag(
+        ClearNewArchiveFlagRequest(arcid=non_new_arcid)
+    ))
+    assert not error, f"Failed to clear new flag (status {error.status}): {error.error}"
+
+    # New-set order: this is the lineup cross-boundary navigation must follow.
+    response, error = await lrr_client.search_api.search_archive_index(
+        SearchArchiveIndexRequest(start="-1", newonly=True)
+    )
+    assert not error, f"Failed to fetch newonly search order (status {error.status}): {error.error}"
+    new_order = [record.arcid for record in response.data]
+    assert len(new_order) == 5, f"Expected 5 new archives after clearing one, got {len(new_order)}"
+    assert non_new_arcid not in new_order, "Cleared archive still present in the New set"
+    page1_last_arcid = new_order[2]            # last on New DT page 1 (pagesize=3)
+    expected_landing_arcid = new_order[3]      # first on New DT page 2 -> correct landing
+    assert expected_landing_arcid != buggy_landing_arcid, (
+        "Test setup invariant: New and full lineups must diverge at the page boundary"
+    )
+    page1_last_title = titles[page1_last_arcid]
+    del response, error
+    # <<<<< EXPECTED ORDER STAGE <<<<<
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            page = await bc.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            await page.goto(lrr_client.lrr_base_url)
+            await page.wait_for_load_state("networkidle")
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+
+            # Toggle the "New Archives" special category and wait for the DT redraw.
+            LOGGER.info("Toggling New Archives category.")
+            responses.clear()
+            console_evts.clear()
+            await page.locator("#NEW_ONLY").click()
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+            await page.wait_for_timeout(500)
+
+            # The New page 1 must contain the boundary archive, and must NOT contain the non-new one.
+            new_page1_visible = await page.locator(f"#thumbs_container a[href*='id={page1_last_arcid}']").count()
+            assert new_page1_visible > 0, f"Expected New DT page 1 to contain {page1_last_title!r}"
+            non_new_visible = await page.locator(f"#thumbs_container a[href*='id={non_new_arcid}']").count()
+            assert non_new_visible == 0, "Non-new archive unexpectedly present in the New Archives lineup"
+
+            # Open the last archive on New DT page 1.
+            LOGGER.info(f"Opening last archive on New DT page 1: {page1_last_title}")
+            await page.locator(f"#thumbs_container a[href*='id={page1_last_arcid}']").first.click()
+            await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+            assert f"id={page1_last_arcid}" in page.url
+
+            # Read past the last page (3 pages -> 3 presses) to cross the DT boundary.
+            LOGGER.info("Navigating forward across the New DT boundary.")
+            responses.clear()
+            console_evts.clear()
+            for _ in range(3):
+                await page.keyboard.press("ArrowRight")
+                await page.wait_for_load_state("networkidle")
+                await assert_no_spinner(page)
+                await page.wait_for_timeout(500)
+
+            cross_dt_url = page.url
+            LOGGER.info(f"After cross-DT navigation: {cross_dt_url}")
+            assert f"id={page1_last_arcid}" not in cross_dt_url, "Expected to have crossed the DT boundary"
+            assert f"id={buggy_landing_arcid}" not in cross_dt_url, (
+                "Crossed into the unfiltered library: landed on the non-new archive "
+                f"{buggy_landing_arcid} (NEW_ONLY neighbor-prefetch drift regression)"
+            )
+            assert f"id={expected_landing_arcid}" in cross_dt_url, (
+                f"Expected to land on the New set's next archive {expected_landing_arcid}, got {cross_dt_url}"
+            )
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
