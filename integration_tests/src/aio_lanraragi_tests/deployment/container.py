@@ -1,5 +1,5 @@
 """
-Python module for setting up and tearing down docker environments for LANraragi.
+Python module for setting up and tearing down containerized LANraragi environments.
 """
 
 import contextlib
@@ -38,24 +38,51 @@ DEFAULT_LANRARAGI_DOCKER_TAG = "difegue/lanraragi"
 
 LOGGER = logging.getLogger(__name__)
 
-class DockerLRRCacheBackend(Enum):
+class ContainerLRRCacheBackend(Enum):
     REDIS = "redis"
     VALKEY = "valkey"
     VALKEY_8 = "valkey8"
 
     @property
     def is_valkey(self) -> bool:
-        return self in (DockerLRRCacheBackend.VALKEY, DockerLRRCacheBackend.VALKEY_8)
+        return self in (ContainerLRRCacheBackend.VALKEY, ContainerLRRCacheBackend.VALKEY_8)
 
     @property
-    def docker_tag(self): # Implicitly hinted
+    def image_tag(self): # Implicitly hinted
         match self:
-            case DockerLRRCacheBackend.REDIS:
+            case ContainerLRRCacheBackend.REDIS:
                 return "redis:7.2.4"
-            case DockerLRRCacheBackend.VALKEY:
+            case ContainerLRRCacheBackend.VALKEY:
                 return "valkey/valkey:7.2"
-            case DockerLRRCacheBackend.VALKEY_8:
+            case ContainerLRRCacheBackend.VALKEY_8:
                 return "valkey/valkey:8.1"
+
+
+class ContainerRuntime(Enum):
+    """
+    Container runtime backing a deployment. Both are driven through the same docker-py client over
+    a Docker-compatible API; Podman is assumed to be rootless and reachable only via its socket.
+    """
+    DOCKER = "docker"
+    PODMAN = "podman"
+
+    @property
+    def is_rootless(self) -> bool:
+        """
+        Whether the runtime runs containers in a rootless user namespace (Podman). When rootless,
+        the deployment runs services as the user-namespace root (UID 0 maps to the host user) so the
+        images' privileged startup steps succeed and bind-mounted files remain host-owned.
+        """
+        return self is ContainerRuntime.PODMAN
+
+    @property
+    def uses_cli_build(self) -> bool:
+        """
+        Whether image builds may shell out to a runtime CLI (`docker buildx`). The rootless Podman
+        backend is socket-only with no assumed CLI, so it builds over the socket instead.
+        """
+        return self is ContainerRuntime.DOCKER
+
 
 def get_container_memory_mb(container: docker.models.containers.Container | None) -> float | None:
     """Memory usage of a Docker container in MB, or None if container is unavailable."""
@@ -65,11 +92,11 @@ def get_container_memory_mb(container: docker.models.containers.Container | None
     mem_usage = stats["memory_stats"].get("usage", 0)
     return mem_usage / (1024 * 1024)
 
-class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
+class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
     """
-    Set up a containerized LANraragi environment with Docker.
-    This can be used in a pytest function and provided as a fixture.
+    Set up a containerized LANraragi environment via the Docker-compatible API (Docker or rootless
+    Podman, selected by `container_runtime`).
     """
 
     @property
@@ -238,33 +265,37 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         return "/home/koyomi/lanraragi/database"
 
     @property
-    def lrr_uid(self) -> bool:
+    def lrr_uid(self) -> int:
         """
-        LRR user UID
+        LRR user UID. Under rootless runtime, return 0.
         """
+        if self.container_runtime.is_rootless:
+            return 0
         if not hasattr(self, "_lrr_uid"):
             self._lrr_uid = os.getuid()
         return self._lrr_uid
 
     @property
-    def lrr_gid(self) -> bool:
+    def lrr_gid(self) -> int:
         """
-        LRR user GID
+        LRR user GID. Under rootless runtime, return 0.
         """
+        if self.container_runtime.is_rootless:
+            return 0
         if not hasattr(self, "_lrr_gid"):
             self._lrr_gid = os.getgid()
         return self._lrr_gid
 
     @property
-    def cache_backend(self) -> DockerLRRCacheBackend:
+    def cache_backend(self) -> ContainerLRRCacheBackend:
         """
         Returns LRR cache backend.
         """
         return self._cache_backend
 
     @property
-    def cache_docker_tag(self):
-        return self.cache_backend.docker_tag
+    def cache_image_tag(self):
+        return self.cache_backend.image_tag
 
     @property
     def cache_server_bin(self) -> str:
@@ -282,11 +313,14 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self, build: str, image: str, git_url: str, git_ref: str, docker_client: docker.DockerClient, staging_dir: str,
             resource_prefix: str, port_offset: int,
             build_ref: str=None, dockerfile: str=None, docker_api: docker.APIClient=None, logger: logging.Logger | None=None,
-            global_run_id: int=None, is_allow_uploads: bool=True, is_force_build: bool=False, cache_backend: DockerLRRCacheBackend=DockerLRRCacheBackend.REDIS
+            global_run_id: int=None, is_allow_uploads: bool=True, is_force_build: bool=False,
+            cache_backend: ContainerLRRCacheBackend=ContainerLRRCacheBackend.REDIS,
+            container_runtime: ContainerRuntime=ContainerRuntime.DOCKER
     ):
 
         self.resource_prefix = resource_prefix
         self.port_offset = port_offset
+        self.container_runtime = container_runtime
 
         if build is not None:
             build_path = Path(build)
@@ -440,7 +474,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         test_connection_max_retries: int=4
     ):
         """
-        Main entrypoint to setting up a LRR docker environment. Pulls/builds required images,
+        Main entrypoint to setting up a containerized LRR environment. Pulls/builds required images,
         creates/recreates required volumes, containers, networks, and connects them together,
         as well as any other configuration.
 
@@ -504,7 +538,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         # log the setup resource allocations for user to see
         # the docker image is not included, haven't decided how to classify it yet.
         self.logger.info(
-            f"Deploying Docker LRR with the following resources: "
+            f"Deploying LRR ({self.container_runtime.value}) with the following resources: "
             f"LRR container {self.lrr_container_name}, Redis container {self.redis_container_name}, "
             f"contents path {contents_dir}, thumb path {thumb_dir}, logs path {logs_dir}, redis path {redis_dir}, "
             f"network {self.network_name}"
@@ -518,7 +552,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         redis_conf_src: Path | None = None
         if build_path := self.build_path:
             self.logger.info(f"Building LRR image {image_id} from build path {build_path}.")
-            self._build_docker_image(build_path, force=self.is_force_build)
+            self._build_image(build_path, force=self.is_force_build, buildx_shell=self._buildx_shell)
             redis_conf_src = Path(build_path) / "tools" / "build" / "docker" / "redis.conf"
         elif self.git_url:
             # When building by git URL, we always clone the repository and rebuild.
@@ -529,7 +563,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 repo = Repo.clone_from(self.git_url, repo_dir)
                 if self.git_ref: # throws git.exc.GitCommandError if ref does not exist.
                     repo.git.checkout(self.git_ref)
-                self._build_docker_image(repo.working_dir, force=True)
+                self._build_image(repo.working_dir, force=True, buildx_shell=self.container_runtime.uses_cli_build)
                 conf_in_repo = Path(repo.working_dir) / "tools" / "build" / "docker" / "redis.conf"
                 if conf_in_repo.exists():
                     redis_conf_src = self.staging_dir / (self.resource_prefix + "redis.conf")
@@ -541,7 +575,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if self.image:
                 image = self.image
             self.logger.info(f"Pulling LRR image from Docker Hub: {image}.")
-            self._pull_docker_image_if_not_exists(image, force=False)
+            self._pull_image_if_not_exists(image, force=False)
             self.docker_client.images.get(image).tag(image_id)
             redis_conf_src = self._extract_redis_conf_from_image(image_id)
 
@@ -549,7 +583,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self._applied_redis_conf_src = redis_conf_src
 
         # pull cache backend image
-        self._pull_docker_image_if_not_exists(self.cache_docker_tag, force=False)
+        self._pull_image_if_not_exists(self.cache_image_tag, force=False)
         # <<<<< IMAGE PREPARATION <<<<<
 
         # prepare the network
@@ -609,8 +643,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             # override to the bind-mounted data dir so the check passes.
             if self.cache_backend.is_valkey:
                 create_kwargs["working_dir"] = self.redis_container_data_path
+            if self.container_runtime.is_rootless:
+                # Run the cache server as our own user, so the data it writes stays ours to clean up.
+                create_kwargs["entrypoint"] = [""]
             self.redis_container = self.docker_client.containers.create(
-                self.cache_docker_tag, **create_kwargs
+                self.cache_image_tag, **create_kwargs
             )
 
         # then prepare the LRR container.
@@ -721,7 +758,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
     @override
     def stop(self):
         """
-        Stops the LRR and Redis docker containers.
+        Stops the LRR and Redis containers.
 
         WARNING: stopping container does NOT necessarily make the corresponding ports available.
         It is possible that the docker daemon still reserves the port, and may not free it until
@@ -768,7 +805,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         """
         Remove all resources and close all closable resources/clients/connections.
         """
-        self._reset_docker_test_env(remove_data=remove_data)
+        self._reset_test_env(remove_data=remove_data)
         self._cleanup_worktree()
         if hasattr(self, "_redis_client") and self._redis_client is not None:
             self._redis_client.close()
@@ -837,9 +874,9 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         finally:
             container.remove()
 
-    def _reset_docker_test_env(self, remove_data: bool=False):
+    def _reset_test_env(self, remove_data: bool=False):
         """
-        Reset docker test environment (LRR and Redis containers, testing network) between tests.
+        Reset the container test environment (LRR and Redis containers, testing network) between tests.
         Stops containers, then removes them. Then, removes the data (if applied). Finally removes
         the network.
 
@@ -867,8 +904,11 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.lrr_container.remove(v=True, force=True)
             self.logger.debug(f"Removed container: {self.lrr_container_name}")
 
-        if remove_data and self.redis_container and self.redis_container.status == 'running':
-            self.redis_container.exec_run(["bash", "-c", f"rm -rf {self.redis_container_data_path}/*"], user='redis')
+        if remove_data and self.redis_container:
+            self.redis_container.reload()
+            if self.redis_container.status == 'running':
+                # Clear the cache data from inside the container, where it's ours to delete.
+                self.redis_container.exec_run(["bash", "-c", f"rm -rf {self.redis_container_data_path}/*"], user='root')
         if self.redis_container:
             self.redis_container.stop(timeout=1)
             self.logger.debug(f"Stopped container: {self.redis_container_name}")
@@ -901,7 +941,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.network.remove()
             self.logger.debug(f"Removed network: {self.network_name}")
 
-    def _build_docker_image(
+    def _build_image(
             self, build_path: str, force: bool=False, buildx_shell: bool=True
     ):
         """
@@ -927,7 +967,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 return
             except docker.errors.ImageNotFound:
                 self.logger.debug(f"Image {image_id} not found, building.")
-                self._build_docker_image(build_path, force=True, buildx_shell=buildx_shell)
+                self._build_image(build_path, force=True, buildx_shell=buildx_shell)
                 return
 
         if not Path(build_path).exists():
@@ -1053,7 +1093,7 @@ class DockerLRRDeploymentContext(AbstractLRRDeploymentContext):
         self.build_path = self._original_build_path
         self._worktree_dir = None
 
-    def _pull_docker_image_if_not_exists(self, image: str, force: bool=False):
+    def _pull_image_if_not_exists(self, image: str, force: bool=False):
         """
         Pull a docker image if it does not exist.
 
