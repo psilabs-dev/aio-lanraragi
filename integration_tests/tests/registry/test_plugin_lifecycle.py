@@ -781,6 +781,130 @@ async def test_install_failure_preserves_other_plugins(
 
 @pytest.mark.asyncio
 @pytest.mark.dev("registry")
+async def test_server_restart_status(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
+    """
+    Test the server restart-pending flag across plugin install, upgrade, and uninstall.
+
+    1. Fresh server reports restart_required False.
+    2. First-time install keeps it False (no worker had the artifact loaded).
+    3. Reinstalling the same namespace sets it True (workers may hold the prior code).
+    4. Restarting the server clears it back to False.
+    5. Uninstalling the plugin sets it True again.
+    """
+    environment.setup(with_api_key=True)
+
+    plugin_ns = "sample-restart-1"
+    plugin_pm_name = "SampleRestart1.pm"
+    plugin_pm_body = (
+        "package LANraragi::Plugin::Managed::Metadata::SampleRestart1;\n"
+        "use strict;\n"
+        "use warnings;\n"
+        "no warnings 'uninitialized';\n"
+        "sub plugin_info {\n"
+        "    return (\n"
+        "        name      => 'sample-restart-1',\n"
+        "        type      => 'metadata',\n"
+        f"        namespace => '{plugin_ns}',\n"
+        "        author    => 'test',\n"
+        "        version   => '1.0.0',\n"
+        "    );\n"
+        "}\n"
+        "sub get_tags { return (); }\n"
+        "1;\n"
+    )
+    plugin_bytes = plugin_pm_body.encode("utf-8")
+    plugin_sha = hashlib.sha256(plugin_bytes).hexdigest()
+    generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    plugin_rel_path = f"artifacts/{plugin_ns}/1.0.0/{plugin_pm_name}"
+
+    registry_data = {
+        "version": 1,
+        "generated_at": generated_at,
+        "plugins": {
+            plugin_ns: {
+                "namespace": plugin_ns,
+                "type": "metadata",
+                "versions": {
+                    "1.0.0": {
+                        "version": "1.0.0",
+                        "name": "sample-restart-1",
+                        "author": "test",
+                        "description": "restart-status test plugin",
+                        "artifact": plugin_rel_path,
+                        "sha256": plugin_sha,
+                        "published_at": generated_at,
+                    },
+                },
+            },
+        },
+    }
+    plugin_file = environment.local_registry_dir / plugin_rel_path
+    plugin_file.parent.mkdir(parents=True, exist_ok=True)
+    plugin_file.write_bytes(plugin_bytes)
+    registry_json = environment.local_registry_dir / "registry.json"
+    registry_json.write_text(json.dumps(registry_data), encoding="utf-8")
+
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(name="local-restart", provider="local", path=environment.local_registry_path)
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
+
+    # >>>>> FRESH SERVER >>>>>
+    response, error = await lrr_client.misc_api.get_server_status()
+    assert not error, f"Failed to get server status (status {getattr(error, 'status', None)})"
+    assert response.restart_required is False, "Fresh server should not report a pending restart"
+    # <<<<< FRESH SERVER <<<<<
+
+    # >>>>> FIRST INSTALL DOES NOT REQUIRE RESTART >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace=plugin_ns, registry=reg_id, version="1.0.0")
+    )
+    assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.get_server_status()
+    assert not error, f"Failed to get server status (status {getattr(error, 'status', None)})"
+    assert response.restart_required is False, "First-time install should not require a restart"
+    # <<<<< FIRST INSTALL DOES NOT REQUIRE RESTART <<<<<
+
+    # >>>>> REINSTALL REQUIRES RESTART >>>>>
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace=plugin_ns, registry=reg_id, version="1.0.0")
+    )
+    assert not error, f"Failed to reinstall plugin (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.get_server_status()
+    assert not error, f"Failed to get server status (status {getattr(error, 'status', None)})"
+    assert response.restart_required is True, "Reinstall of an already-registered plugin should require a restart"
+    # <<<<< REINSTALL REQUIRES RESTART <<<<<
+
+    # >>>>> RESTART CLEARS THE FLAG >>>>>
+    environment.restart()
+    response, error = await lrr_client.misc_api.get_server_status()
+    assert not error, f"Failed to get server status (status {getattr(error, 'status', None)})"
+    assert response.restart_required is False, "Restart should clear the pending-restart flag"
+    # <<<<< RESTART CLEARS THE FLAG <<<<<
+
+    # >>>>> UNINSTALL REQUIRES RESTART >>>>>
+    response, error = await lrr_client.misc_api.uninstall_plugin(plugin_ns)
+    assert not error, f"Failed to uninstall plugin (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.get_server_status()
+    assert not error, f"Failed to get server status (status {getattr(error, 'status', None)})"
+    assert response.restart_required is True, "Uninstall should set the pending-restart flag"
+    # <<<<< UNINSTALL REQUIRES RESTART <<<<<
+
+    response, error = await lrr_client.misc_api.delete_registry(reg_id)
+    assert not error, f"Failed to delete registry (status {error.status}): {error.error}"
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
 @pytest.mark.ratelimit
 async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
     """
