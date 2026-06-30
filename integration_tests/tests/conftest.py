@@ -88,6 +88,16 @@ def pytest_addoption(parser: pytest.Parser):
 
     resource-prefix : `str = ""`
         Session-wide prefix prepended to per-module resource prefixes.
+
+    container-runtime : `str = "docker"`
+        Container runtime for linux/macos deployments: "docker" or "podman". "podman" is assumed
+        rootless and driven only over its socket (no CLI); it runs services as the user-namespace
+        root so image startup and bind-mount ownership behave like Docker's rootful passthrough.
+
+    container-host : `str = None`
+        Override the container runtime socket URL (e.g.
+        "unix:///run/user/1000/podman/podman.sock"). Defaults to docker-py environment discovery
+        (honoring DOCKER_HOST) for docker, or the rootless per-user socket for podman.
     """
     parser.addoption("--build", action="store", default=None, help="Absolute path to docker build context for LANraragi.")
     parser.addoption("--build-ref", action="store", default=None, help="Git ref (commit, branch, tag) to checkout before building. Requires --build.")
@@ -116,7 +126,9 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--benchmark-label", action="store", default=None, help="Label for this benchmark run (e.g. c0-r0).")
     parser.addoption("--no-rate-limit", action="store_true", default=False, help="Skip tests that depend on rate-limited external resources (e.g. raw.githubusercontent.com).")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
-    parser.addoption("--cache-backend", action="store", default="valkey", choices=["redis", "valkey", "valkey8"], help="Cache backend for Docker deployments. Default: valkey.")
+    parser.addoption("--cache-backend", action="store", default="valkey", choices=["redis", "valkey", "valkey8"], help="Cache backend for container deployments. Default: valkey.")
+    parser.addoption("--container-runtime", action="store", default="docker", choices=["docker", "podman"], help="Container runtime for linux/macos deployments. 'podman' is rootless and socket-only. Default: docker.")
+    parser.addoption("--container-host", action="store", default=None, help="Override container runtime socket URL (e.g. unix:///run/user/1000/podman/podman.sock). Defaults to the daemon for docker, or the rootless user socket for podman.")
     parser.addoption("--port-offset", type=int, action="store", default=0, help="Session-wide base port offset added to per-module offsets. Use to avoid conflicts between parallel sessions.")
     parser.addoption("--resource-prefix", action="store", default="", help="Session-wide prefix prepended to per-module resource prefixes. Use to isolate parallel sessions.")
 
