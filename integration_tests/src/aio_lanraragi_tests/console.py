@@ -10,7 +10,7 @@ from pathlib import Path
 
 import docker
 
-from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
+from aio_lanraragi_tests.deployment.container import ContainerLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
 from aio_lanraragi_tests.utils.version import get_version
 
@@ -23,7 +23,7 @@ DEFAULT_STAGING_DIR = str(Path.cwd() / ".staging")
 def get_deployment(
     build_path: str=None, build_ref: str=None, image: str=None, git_url: str=None, git_ref: str=None, dockerfile: str=None,
     docker_api: docker.APIClient=None, staging_dir: str=None
-) -> DockerLRRDeploymentContext:
+) -> ContainerLRRDeploymentContext:
     """
     Get docker deployment context.
 
@@ -38,7 +38,7 @@ def get_deployment(
     if dockerfile and image:
         raise DeploymentException("--dockerfile cannot be combined with --image.")
     docker_client = docker.from_env()
-    environment = DockerLRRDeploymentContext(
+    environment = ContainerLRRDeploymentContext(
         build_path, image, git_url, git_ref, docker_client, staging_dir, STAGING_RESOURCE_PREFIX, STAGING_PORT_OFFSET,
         build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
         global_run_id=0, is_allow_uploads=True, is_force_build=True

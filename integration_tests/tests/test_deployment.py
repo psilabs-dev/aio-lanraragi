@@ -7,7 +7,7 @@ from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
 )
-from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
+from aio_lanraragi_tests.deployment.container import ContainerLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 
 LOGGER = logging.getLogger(__name__)
@@ -32,8 +32,8 @@ def test_two_deployment_toggling(request: pytest.FixtureRequest):
     }
     request.session.lrr_environments = environments
 
-    if isinstance(env_1, DockerLRRDeploymentContext):
-        # see DockerLRRDeploymentContext.stop documentation.
+    if isinstance(env_1, ContainerLRRDeploymentContext):
+        # see ContainerLRRDeploymentContext.stop documentation.
         pytest.skip("Port availability condition too strict in Docker environment.")
 
     try:
