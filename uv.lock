@@ -51,7 +51,7 @@ dev = [
 
 [[package]]
 name = "aio-lanraragi-integration-tests"
-version = "0.1.24"
+version = "0.1.24.post1"
 source = { editable = "integration_tests" }
 dependencies = [
     { name = "aio-lanraragi" },
