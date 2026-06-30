@@ -314,7 +314,7 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
             resource_prefix: str, port_offset: int,
             build_ref: str=None, dockerfile: str=None, docker_api: docker.APIClient=None, logger: logging.Logger | None=None,
             global_run_id: int=None, is_allow_uploads: bool=True, is_force_build: bool=False,
-            cache_backend: ContainerLRRCacheBackend=ContainerLRRCacheBackend.REDIS,
+            cache_backend: ContainerLRRCacheBackend=ContainerLRRCacheBackend.VALKEY,
             container_runtime: ContainerRuntime=ContainerRuntime.DOCKER
     ):
 
