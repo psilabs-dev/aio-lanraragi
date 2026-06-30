@@ -47,7 +47,7 @@ from aio_lanraragi_tests.archive_generation.models import (
     WriteArchiveResponse,
 )
 from aio_lanraragi_tests.common import DEFAULT_API_KEY, compute_archive_id
-from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
+from aio_lanraragi_tests.deployment.container import ContainerLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
 from aio_lanraragi_tests.utils.api_wrappers import trigger_stat_rebuild, upload_archive
 
@@ -76,9 +76,9 @@ def _mock_source_tag(arcidx: int) -> str:
 
 def get_deployment(
     build_path: str=None, image: str=None, git_url: str=None, git_ref: str=None, docker_api: docker.APIClient=None, staging_dir: str=None
-) -> DockerLRRDeploymentContext:
+) -> ContainerLRRDeploymentContext:
     docker_client = docker.from_env()
-    environment = DockerLRRDeploymentContext(
+    environment = ContainerLRRDeploymentContext(
         build_path, image, git_url, git_ref, docker_client, staging_dir, DEFAULT_RESOURCE_PREFIX, DEFAULT_PORT_OFFSET, docker_api=docker_api,
         global_run_id=0, is_allow_uploads=True, is_force_build=True
     )
