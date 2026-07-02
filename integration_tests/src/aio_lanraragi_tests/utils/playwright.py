@@ -68,6 +68,9 @@ async def assert_console_logs_ok(
         if (url := evt.location.get("url")) and not url.startswith(lrr_base_url):
             LOGGER.debug(f"Skipping non-LRR console log: {url}")
             continue
+        if evt.type == "error" and "api.github.com" in evt.text:
+            LOGGER.warning(f"Skipping external GitHub error console log: {evt.text}")
+            continue
         LOGGER.info(f"Console: {evt.text}")
 
         assert evt.type != "error", f"Console logged at error level: {evt.text}"
