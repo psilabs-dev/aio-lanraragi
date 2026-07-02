@@ -552,7 +552,7 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
         redis_conf_src: Path | None = None
         if build_path := self.build_path:
             self.logger.info(f"Building LRR image {image_id} from build path {build_path}.")
-            self._build_image(build_path, force=self.is_force_build, buildx_shell=self._buildx_shell)
+            self._build_image(build_path, force=self.is_force_build, buildx_shell=self.container_runtime.uses_cli_build)
             redis_conf_src = Path(build_path) / "tools" / "build" / "docker" / "redis.conf"
         elif self.git_url:
             # When building by git URL, we always clone the repository and rebuild.
