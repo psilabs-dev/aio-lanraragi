@@ -905,10 +905,11 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
             self.logger.debug(f"Removed container: {self.lrr_container_name}")
 
         if remove_data and self.redis_container:
-            self.redis_container.reload()
-            if self.redis_container.status == 'running':
-                # Clear the cache data from inside the container, where it's ours to delete.
-                self.redis_container.exec_run(["bash", "-c", f"rm -rf {self.redis_container_data_path}/*"], user='root')
+            with contextlib.suppress(docker.errors.NotFound):
+                self.redis_container.reload()
+                if self.redis_container.status == 'running':
+                    # Clear the cache data from inside the container, where it's ours to delete.
+                    self.redis_container.exec_run(["bash", "-c", f"rm -rf {self.redis_container_data_path}/*"], user='root')
         if self.redis_container:
             self.redis_container.stop(timeout=1)
             self.logger.debug(f"Stopped container: {self.redis_container_name}")
