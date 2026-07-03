@@ -477,7 +477,7 @@ if __name__ == "__main__":
             case 'up':
                 docker_api: docker.APIClient | None = None
                 if args.docker_api:
-                    docker_api = docker.APIClient(base_url="unix://var/run/docker.sock")
+                    docker_api = docker.from_env().api
                 up(
                     image=args.image, git_url=args.git_url, git_ref=args.git_ref, build=args.build, docker_api=docker_api, staging_dir=args.staging,
                     with_nofunmode=args.nofunmode
