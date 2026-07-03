@@ -104,7 +104,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--image", action="store", default=None, help="LANraragi image to use.")
     parser.addoption("--git-url", action="store", default=None, help="Link to a LANraragi git repository (e.g. fork or branch).")
     parser.addoption("--git-ref", action="store", default=None, help="Git ref to checkout; if not supplied, uses the default branch.")
-    parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
+    parser.addoption("--docker-api", action="store_true", default=False, help="Enable the low-level API client to stream image build logs. Uses the runtime-resolved socket (--container-host / DOCKER_HOST, or the default daemon).")
     parser.addoption("--dockerfile", action="store", default=None, help="Path to a custom Dockerfile. If relative, resolved relative to --build. Cannot be combined with --git-url or --image.")
     parser.addoption("--windist", action="store", default=None, help="Path to the LRR app distribution for Windows.")
     parser.addoption("--staging", action="store", default=Path.cwd() / ".staging", help="Path to the LRR staging directory (defaults to .staging).")

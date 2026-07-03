@@ -70,10 +70,11 @@ def generate_deployment(
             if dockerfile and image:
                 raise DeploymentException("--dockerfile cannot be combined with --image.")
 
-            # Resolve a single socket for the runtime, then derive both the high-level client and the
-            # low-level API client from it so they always target the same endpoint.
+            # Resolve the socket once and export it as DOCKER_HOST for all clients and processes
             socket_url = _resolve_socket(container_runtime, container_host)
-            docker_client = docker.DockerClient(base_url=socket_url) if socket_url else docker.from_env()
+            if socket_url:
+                os.environ["DOCKER_HOST"] = socket_url
+            docker_client = docker.from_env()
             docker_api = docker_client.api if use_docker_api else None
             environment = ContainerLRRDeploymentContext(
                 build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
