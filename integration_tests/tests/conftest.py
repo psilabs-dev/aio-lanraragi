@@ -107,6 +107,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
     parser.addoption("--dockerfile", action="store", default=None, help="Path to a custom Dockerfile. If relative, resolved relative to --build. Cannot be combined with --git-url or --image.")
     parser.addoption("--windist", action="store", default=None, help="Path to the LRR app distribution for Windows.")
+    parser.addoption("--homebrew", action="store_true", default=False, help="On macOS/Linux, deploy LRR natively via Homebrew (builds the brew formula from --build) instead of a container. Requires --build; cannot combine with --image/--git-url/--dockerfile/--windist.")
     parser.addoption("--staging", action="store", default=Path.cwd() / ".staging", help="Path to the LRR staging directory (defaults to .staging).")
     parser.addoption("--server-logs", action="store", default=None, help="Absolute path to generated test-time server logs directory (not saved by default).")
     parser.addoption("--lrr-debug", action="store_true", default=False, help="Enable debug mode for the LRR logs.")
