@@ -13,10 +13,9 @@ from lanraragi.clients.client import LRRClient
 
 from aio_lanraragi_tests.common import DEFAULT_LRR_PORT, DEFAULT_REDIS_PORT
 from aio_lanraragi_tests.exceptions import DeploymentException
-from aio_lanraragi_tests.log_parse import parse_lrr_logs
+from aio_lanraragi_tests.log_parse import format_error_logs, parse_lrr_logs
 
 PluginPathsT = dict[Literal["Download", "Login", "Metadata", "Scripts"], list[str]]
-
 
 class AbstractLRRDeploymentContext(abc.ABC):
 
@@ -588,11 +587,11 @@ def expect_no_error_logs(environment: AbstractLRRDeploymentContext, logger: logg
     """
     Assert no logs with error level severity in LRR and Shinobu.
     """
-    for event in parse_lrr_logs(environment.read_lrr_logs()):
-        assert event.severity_level != 'error', "LANraragi process emitted error logs."
+    lrr_errors = [event for event in parse_lrr_logs(environment.read_lrr_logs()) if event.severity_level == 'error']
+    assert not lrr_errors, format_error_logs("LANraragi", lrr_errors)
 
     if environment.shinobu_logs_path.exists():
-        for event in parse_lrr_logs(environment.read_log(environment.shinobu_logs_path)):
-            assert event.severity_level != 'error', "Shinobu process emitted error logs."
+        shinobu_errors = [event for event in parse_lrr_logs(environment.read_log(environment.shinobu_logs_path)) if event.severity_level == 'error']
+        assert not shinobu_errors, format_error_logs("Shinobu", shinobu_errors)
     else:
         logger.warning("No shinobu logs found.")

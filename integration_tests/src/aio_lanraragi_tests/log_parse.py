@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-
+MAX_REPORTED_ERROR_LOGS = 10
 class LogEvent(BaseModel):
 
     log_time: int
@@ -49,3 +49,12 @@ def parse_lrr_logs(log_content: str, after: int | None=None, before: int | None=
                 events[-1].message = f"{events[-1].message}\n{line}"
 
     return events
+
+def format_error_logs(process_name: str, errors: list[LogEvent]) -> str:
+    """
+    Build an assertion message listing up to MAX_REPORTED_ERROR_LOGS error events.
+    """
+    shown = errors[:MAX_REPORTED_ERROR_LOGS]
+    body = "\n".join(str(event) for event in shown)
+    overflow = f"\n... and {len(errors) - len(shown)} more." if len(errors) > len(shown) else ""
+    return f"{process_name} process emitted {len(errors)} error log(s):\n{body}{overflow}"
