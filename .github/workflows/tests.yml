@@ -274,12 +274,83 @@ jobs:
           path: ${{ github.workspace }}\server-logs\
           retention-days: 14
 
+  # macOS/Homebrew integration tests
+  tests-homebrew-macos:
+    name: Tests (Homebrew/macOS)
+    runs-on: macos-latest
+    timeout-minutes: 140
+
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout aio-lanraragi
+        uses: actions/checkout@v4
+        with:
+          path: aio-lanraragi
+
+      - name: Checkout LANraragi repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LRR_REPOSITORY }}
+          ref: ${{ env.LRR_REF }}
+          path: lanraragi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install workspace packages
+        working-directory: aio-lanraragi
+        run: |
+          uv sync --all-packages
+          uv run playwright install
+
+      - name: Run unit tests
+        working-directory: aio-lanraragi
+        run: |
+          uv run pytest tests --log-cli-level=INFO \
+            tests/
+
+      - name: Create staging directory
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/staging"
+
+      - name: Run integration tests
+        working-directory: aio-lanraragi/integration_tests
+        timeout-minutes: 120
+        run: |
+          export CI=true
+          uv run pytest tests --log-cli-level=INFO \
+            --homebrew \
+            --build "$GITHUB_WORKSPACE/lanraragi" \
+            --cache-backend redis \
+            --staging "$GITHUB_WORKSPACE/staging" \
+            --server-logs "$GITHUB_WORKSPACE/server-logs" \
+            --playwright \
+            --no-rate-limit \
+            --npseed 42
+
+      - name: Upload server logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs-homebrew-macos
+          path: ${{ github.workspace }}/server-logs/
+          retention-days: 14
+
   check:
     if: always()
 
     needs:
       - tests-ubuntu
       - tests-windows
+      - tests-homebrew-macos
     runs-on: ubuntu-latest
     steps:
       - name: Check if tests passed
