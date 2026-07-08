@@ -29,6 +29,7 @@ from aio_lanraragi_tests.utils.api_wrappers import (
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
+    assert_toasts_ok,
     switch_display_mode,
 )
 
@@ -104,6 +105,7 @@ async def test_header_click_sort(
             # switch to compact/table mode
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             responses.clear()
             console_evts.clear()
 
@@ -189,6 +191,7 @@ async def test_header_click_sort(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -333,6 +336,7 @@ async def test_compact_column_sort_with_three_columns(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             responses.clear()
             console_evts.clear()
             # <<<<< 2 COLUMNS (DEFAULT: ARTIST, SERIES) <<<<<
@@ -371,6 +375,7 @@ async def test_compact_column_sort_with_three_columns(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             responses.clear()
             console_evts.clear()
             # <<<<< 3 COLUMNS (CHANGE COLUMN COUNT) <<<<<
@@ -435,6 +440,7 @@ async def test_compact_column_sort_with_three_columns(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             # <<<<< EDIT COLUMN 3 NAMESPACE <<<<<
         finally:
             await bc.close()
@@ -450,13 +456,20 @@ async def test_index_page(lrr_client: LRRClient) -> None:
     """
     Test that the index page loads without errors.
 
-    1. Navigate to index page.
-    2. Expect no HTTP errors and no console errors.
+    1. Verify the server has no archives.
+    2. Navigate to index page.
+    3. Expect the empty-library carousel search to return 200.
+    4. Expect no HTTP errors and no console errors.
     """
 
     # >>>>> TEST CONNECTION STAGE >>>>>
     _, error = await lrr_client.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+    assert len(response.data) == 0, "Server contains archives!"
+    del response, error
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
@@ -469,12 +482,36 @@ async def test_index_page(lrr_client: LRRClient) -> None:
 
             responses: list[playwright.async_api._generated.Response] = []
             console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
+            carousel_search_future: asyncio.Future = asyncio.get_event_loop().create_future()
+
+            async def on_response(response: playwright.async_api._generated.Response) -> None:
+                responses.append(response)
+                if carousel_search_future.done():
+                    return
+                if response.request.method != "GET":
+                    return
+                if "/api/search?" not in response.url:
+                    return
+                if "draw=" in response.url or "random" in response.url or "cache" in response.url:
+                    return
+                carousel_search_future.set_result(response)
+
+            page.on("response", on_response)
             page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("domcontentloaded")
             await page.wait_for_load_state("networkidle")
+
+            carousel_search_response = await asyncio.wait_for(carousel_search_future, timeout=10)
+            assert carousel_search_response.status == 200, (
+                "Expected empty-library carousel search to return 200, "
+                f"got {carousel_search_response.status}: {carousel_search_response.url}"
+            )
+            carousel_search_body = json.loads(await carousel_search_response.text())
+            assert carousel_search_body["recordsTotal"] == 0
+            assert carousel_search_body["recordsFiltered"] == 0
+            assert carousel_search_body["data"] == []
 
             # dismiss new version overlay if present
             if "New Version Release Notes" in await page.content():
@@ -482,6 +519,7 @@ async def test_index_page(lrr_client: LRRClient) -> None:
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -619,6 +657,7 @@ async def test_custom_column_sort_display(
             # switch to compact/table mode and verify custom column headers are visible
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             responses.clear()
             console_evts.clear()
 
@@ -633,6 +672,7 @@ async def test_custom_column_sort_display(
             # switch back to thumbnail mode and select series sort
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             responses.clear()
             console_evts.clear()
 
@@ -675,6 +715,7 @@ async def test_custom_column_sort_display(
             # switch back to title sort
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             responses.clear()
             console_evts.clear()
 
@@ -688,6 +729,7 @@ async def test_custom_column_sort_display(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -782,6 +824,7 @@ async def test_search_autocomplete_namespace_exclusion(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -858,6 +901,7 @@ async def test_search_autocomplete_namespace_exclusion(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -1012,6 +1056,7 @@ async def test_category_context_menu(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             responses.clear()
             console_evts.clear()
 
@@ -1058,6 +1103,7 @@ async def test_category_context_menu(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
