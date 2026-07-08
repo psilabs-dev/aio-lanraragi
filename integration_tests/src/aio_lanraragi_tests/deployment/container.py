@@ -674,9 +674,17 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
         create_lrr_container = False
         if self.lrr_container:
             self.logger.debug(f"LRR container exists: {self.lrr_container_name}.")
-            # in this situation, whether we restart the LRR container depends on whether or not the images used for both containers
-            # match.
-            needs_recreate_lrr = self.lrr_container.image.id != self.docker_client.images.get(image_id).id
+            needs_recreate_lrr = self.is_force_build and bool(self.build_path or self.git_url)
+            if needs_recreate_lrr:
+                self.logger.debug("LRR image was rebuilt; removing existing container for recreation.")
+            else:
+                # in this situation, whether we restart the LRR container depends on whether or not the images used for both containers
+                # match.
+                try:
+                    needs_recreate_lrr = self.lrr_container.image.id != self.docker_client.images.get(image_id).id
+                except docker.errors.ImageNotFound:
+                    self.logger.debug("Existing LRR container image is no longer available; removing existing container for recreation.")
+                    needs_recreate_lrr = True
             # If environment differs from desired, recreate to apply env
             self.lrr_container.reload()
             current_env_list: list[str] = self.lrr_container.attrs["Config"]["Env"]
@@ -687,7 +695,7 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.logger.debug("Test-time plugin mounts are configured; removing existing container for recreation.")
                 needs_recreate_lrr = True
             if needs_recreate_lrr:
-                self.logger.debug("LRR Image hash has been updated: removing existing container.")
+                self.logger.debug("Removing existing LRR container.")
                 self.lrr_container.stop(timeout=1)
                 self.lrr_container.remove(force=True)
                 create_lrr_container = True

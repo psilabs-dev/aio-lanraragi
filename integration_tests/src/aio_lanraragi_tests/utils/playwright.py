@@ -106,6 +106,16 @@ async def assert_no_spinner(page: playwright.async_api.Page, timeout_ms: int = 3
         timeout=timeout_ms,
     )
 
+async def assert_toasts_ok(page: playwright.async_api.Page):
+    """
+    Assert that none of LRR toast messages have severity error.
+    """
+    error_toasts = page.locator(".Toastify__toast--error")
+    count = await error_toasts.count()
+    if count:
+        messages = [(await error_toasts.nth(i).inner_text()).strip() for i in range(count)]
+        raise AssertionError(f"Expected no error toasts, found {count}: {messages}")
+
 async def get_image_bytes_from_responses(
         responses: list[playwright.async_api._generated.Response],
         img_src: str,
