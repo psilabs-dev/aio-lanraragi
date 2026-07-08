@@ -1287,3 +1287,152 @@ sub get_tags {{
     # <<<<< UPGRADE FROM VERSION-ORPHAN STATE AND INVOKE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.dev("registry")
+async def test_install_validation_classification(
+    environment: AbstractLRRDeploymentContext,
+    lrr_client: LRRClient,
+):
+    """
+    User expectation: the load check distinguishes a bad plugin from a check
+    that could not run. A plugin that passes filename/package/sha checks but
+    fails to compile is a content error (422 "failed to load"); a plugin whose
+    load blocks past the load-check timeout is an operational fault
+    (500 "load check failed"), not a bad plugin. Neither leaves an artifact
+    behind.
+
+    1. Publish a plugin that compiles-fails; install fails 422 ("failed to load").
+    2. Publish a plugin that blocks at load past the 20s load-check timeout;
+       install fails 500 ("load check failed").
+    3. No .pm files land in Plugin/Managed/.
+    """
+    environment.setup(with_api_key=True)
+
+    registry_json = environment.local_registry_dir / "registry.json"
+    generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(name="load-check-classification", provider="local", path=environment.local_registry_path)
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
+
+    # >>>>> COMPILE FAILURE -> 422 (content error) >>>>>
+    broken_rel = "artifacts/broken-loader/1.0.0/BrokenLoader.pm"
+    broken_file = environment.local_registry_dir / broken_rel
+    broken_file.parent.mkdir(parents=True, exist_ok=True)
+    broken_file.write_text("""\
+package LANraragi::Plugin::Managed::Metadata::BrokenLoader;
+
+use strict;
+use warnings;
+
+my $unterminated = (
+
+1;
+""", encoding="utf-8")
+    broken_sha = hashlib.sha256(broken_file.read_bytes()).hexdigest()
+    registry_json.write_text(json.dumps({
+        "version": 1,
+        "generated_at": generated_at,
+        "plugins": {
+            "broken-loader": {
+                "namespace": "broken-loader",
+                "type": "metadata",
+                "versions": {
+                    "1.0.0": {
+                        "version": "1.0.0",
+                        "name": "broken-loader",
+                        "author": "test",
+                        "description": "fails to compile",
+                        "artifact": broken_rel,
+                        "sha256": broken_sha,
+                        "published_at": generated_at,
+                    },
+                },
+            },
+        },
+    }))
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Refresh should accept the manifest (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="broken-loader", registry=reg_id, version="1.0.0")
+    )
+    assert error is not None, "Expected install to fail for a plugin that does not compile"
+    assert error.status == 422, f"Expected 422 for compile failure, got {error.status}: {error.error}"
+    assert "failed to load" in (error.error or ""), (
+        f"Expected a bad-plugin 'failed to load' message, got: {error.error!r}"
+    )
+    # <<<<< COMPILE FAILURE -> 422 <<<<<
+
+    # >>>>> LOAD TIMEOUT -> 500 (operational fault) >>>>>
+    slow_rel = "artifacts/slow-loader/1.0.0/SlowLoader.pm"
+    slow_file = environment.local_registry_dir / slow_rel
+    slow_file.parent.mkdir(parents=True, exist_ok=True)
+    slow_file.write_text("""\
+package LANraragi::Plugin::Managed::Metadata::SlowLoader;
+
+use strict;
+use warnings;
+no warnings 'uninitialized';
+
+# Block at load past the 20s load-check timeout.
+sleep 25;
+
+sub plugin_info {
+    return (
+        name      => "slow-loader",
+        type      => "metadata",
+        namespace => "slow-loader",
+        author    => "test",
+        version   => "1.0",
+    );
+}
+
+sub get_tags { return (); }
+
+1;
+""", encoding="utf-8")
+    slow_sha = hashlib.sha256(slow_file.read_bytes()).hexdigest()
+    registry_json.write_text(json.dumps({
+        "version": 1,
+        "generated_at": generated_at,
+        "plugins": {
+            "slow-loader": {
+                "namespace": "slow-loader",
+                "type": "metadata",
+                "versions": {
+                    "1.0.0": {
+                        "version": "1.0.0",
+                        "name": "slow-loader",
+                        "author": "test",
+                        "description": "blocks at load",
+                        "artifact": slow_rel,
+                        "sha256": slow_sha,
+                        "published_at": generated_at,
+                    },
+                },
+            },
+        },
+    }))
+
+    response, error = await lrr_client.misc_api.refresh_registry(reg_id)
+    assert not error, f"Refresh should accept the manifest (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.misc_api.install_plugin(
+        InstallPluginRequest(namespace="slow-loader", registry=reg_id, version="1.0.0")
+    )
+    assert error is not None, "Expected install to fail when the load check times out"
+    assert error.status == 500, f"Expected 500 for load-check timeout, got {error.status}: {error.error}"
+    assert "load check failed" in (error.error or ""), (
+        f"Expected an operational 'load check failed' message, got: {error.error!r}"
+    )
+    # <<<<< LOAD TIMEOUT -> 500 <<<<<
+
+    assert not list(environment.plugin_managed_dir.rglob("*.pm")), (
+        "No .pm files should be written for a failed load check"
+    )
