@@ -24,7 +24,6 @@ from lanraragi.models.misc import (
     GetRegistryResponse,
     GetServerInfoResponse,
     InstallPluginRequest,
-    InstallPluginResponse,
     ListRegistriesResponse,
     QueueUrlDownloadRequest,
     QueueUrlDownloadResponse,
@@ -289,7 +288,7 @@ class _MiscApiClient(_ApiClient):
             return (RefreshRegistryResponse(index=response_j.get("index")), None)
         return (None, _build_err_response(content, status))
 
-    async def install_plugin(self, request: InstallPluginRequest) -> _LRRClientResponse[InstallPluginResponse]:
+    async def install_plugin(self, request: InstallPluginRequest) -> _LRRClientResponse[int]:
         """
         POST /api/plugins/install
         """
@@ -303,14 +302,7 @@ class _MiscApiClient(_ApiClient):
             http.HTTPMethod.POST, url, self.headers, json_data=body
         )
         if status == 200:
-            response_j = json.loads(content)
-            return (InstallPluginResponse(
-                name=response_j["name"],
-                namespace=response_j["namespace"],
-                version=response_j["version"],
-                registry=response_j["registry"],
-                sha256=response_j["sha256"],
-            ), None)
+            return (int(json.loads(content)["job"]), None)
         return (None, _build_err_response(content, status))
 
     async def uninstall_plugin(self, namespace: str) -> _LRRClientResponse[LanraragiResponse]:

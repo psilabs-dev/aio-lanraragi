@@ -19,6 +19,7 @@ from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
 )
+from aio_lanraragi_tests.utils.api_wrappers import install_plugin_and_wait
 
 LOGGER = logging.getLogger(__name__)
 
@@ -412,7 +413,7 @@ async def test_registry_update_relink(lrr_client: LRRClient, environment: Abstra
     # <<<<< CREATE AND REFRESH <<<<<
 
     # >>>>> INSTALL PLUGIN BEFORE SOURCE CHANGE >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"

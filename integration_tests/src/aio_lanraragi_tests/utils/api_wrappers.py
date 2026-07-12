@@ -28,7 +28,8 @@ from lanraragi.models.category import (
     GetCategoryResponse,
     RemoveArchiveFromCategoryRequest,
 )
-from lanraragi.models.minion import GetMinionJobStatusRequest
+from lanraragi.models.minion import GetMinionJobDetailRequest, GetMinionJobStatusRequest
+from lanraragi.models.misc import InstallPluginRequest, InstallPluginResponse
 
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
@@ -412,4 +413,40 @@ async def trigger_stat_rebuild(lrr_client: LRRClient, timeout_seconds: int = 60)
             break
         elif state == "failed":
             raise AssertionError("build_stat_hashes job failed")
+        await asyncio.sleep(0.5)
+
+
+async def install_plugin_and_wait(
+    lrr_client: LRRClient, request: InstallPluginRequest, timeout_seconds: int = 60
+) -> tuple[InstallPluginResponse | None, LanraragiErrorResponse | None]:
+    """Enqueue a plugin install and wait for its Minion job, returning the result or an error."""
+    job_id, error = await lrr_client.misc_api.install_plugin(request)
+    if error is not None:
+        return (None, error)
+
+    start_time = time.time()
+    while True:
+        assert time.time() - start_time < timeout_seconds, f"install_plugin timed out after {timeout_seconds}s"
+        detail, detail_error = await lrr_client.minion_api.get_minion_job_details(
+            GetMinionJobDetailRequest(job_id=job_id)
+        )
+        assert not detail_error, f"Failed to get install job details: {detail_error.error}"
+        state = detail.state.lower()
+        if state == "finished":
+            result = detail.result
+            if result and result.success:
+                data = result.data or {}
+                return (InstallPluginResponse(
+                    name=data["name"],
+                    namespace=data["namespace"],
+                    version=data["version"],
+                    registry=data["registry"],
+                    sha256=data["sha256"],
+                ), None)
+            message = result.error if result and result.error else "install failed"
+            return (None, LanraragiErrorResponse(error=message, status=200))
+        if state == "failed":
+            result = detail.result
+            message = result.error if result and result.error else "install job failed"
+            return (None, LanraragiErrorResponse(error=message, status=500))
         await asyncio.sleep(0.5)

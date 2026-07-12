@@ -23,7 +23,11 @@ from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
 )
-from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
+from aio_lanraragi_tests.utils.api_wrappers import (
+    create_archive_file,
+    install_plugin_and_wait,
+    upload_archive,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -344,7 +348,7 @@ async def test_local_registry_install_errors(
         response, error = await lrr_client.misc_api.refresh_registry(reg_id)
         assert not error, f"Expected refresh to succeed with symlink artifact entry (status {error.status}): {error.error}"
 
-        response, error = await lrr_client.misc_api.install_plugin(
+        response, error = await install_plugin_and_wait(lrr_client,
             InstallPluginRequest(namespace="symlink-plugin", registry=reg_id, version="1.0.0")
         )
         assert error is not None, "Expected install to fail for symlink escape"
@@ -409,7 +413,7 @@ sub provide_url {
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Expected refresh to succeed with wrong sha entry (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="local-sample-downloader", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to fail for wrong sha256"
@@ -454,7 +458,7 @@ sub provide_url {
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Expected refresh to succeed (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="local-sample-downloader", registry=reg_id, version="1.0.0")
     )
     assert not error, f"Expected install to succeed (status {error.status}): {error.error}"
@@ -549,13 +553,13 @@ sub get_tags { return (); }
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="copytags", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to be rejected over a default plugin namespace"
     assert error.status == 400, f"Expected 400 for default-namespace conflict, got {error.status}"
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="copytags", registry=reg_id, version="1.0.0", force=True)
     )
     assert error is not None, "force=true must not bypass a default-plugin namespace conflict"
@@ -648,7 +652,7 @@ sub provide_url { return; }
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Refresh should accept the manifest (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="filename-test", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to fail for invalid filename"
@@ -746,7 +750,7 @@ sub provide_url { return; }
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Refresh should accept the manifest (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="package-mismatch", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to fail for package mismatch"
@@ -891,7 +895,7 @@ sub provide_url { return; }
         assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
 
         # >>>>> INSTALL BLOCKED AGAINST SIDELOADED >>>>>
-        response, error = await lrr_client.misc_api.install_plugin(
+        response, error = await install_plugin_and_wait(lrr_client,
             InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version="1.0.0")
         )
         assert error is not None, "Expected install to be rejected over a sideloaded plugin"
@@ -901,7 +905,7 @@ sub provide_url { return; }
         # <<<<< INSTALL BLOCKED AGAINST SIDELOADED <<<<<
 
         # >>>>> FORCE INSTALL ALSO BLOCKED >>>>>
-        response, error = await lrr_client.misc_api.install_plugin(
+        response, error = await install_plugin_and_wait(lrr_client,
             InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version="1.0.0", force=True)
         )
         assert error is not None, "force=true must not bypass a sideloaded namespace conflict"
@@ -1099,7 +1103,7 @@ sub get_tags {{
     # <<<<< UPLOAD ARCHIVE <<<<<
 
     # >>>>> MAX-VERSION INSTALL AND INVOKE FROM REGISTRY 1 >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="shared-metadata-1", registry=reg1_id)
     )
     assert not error, f"Failed to install from registry 1 (status {error.status}): {error.error}"
@@ -1135,7 +1139,7 @@ sub get_tags {{
     else:
         pytest.fail("shared-metadata-1 not found before force reinstall")
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="shared-metadata-1", registry=reg1_id, version="2.0.0", force=True)
     )
     assert not error, f"Force reinstall failed (status {error.status}): {error.error}"
@@ -1169,7 +1173,7 @@ sub get_tags {{
     # <<<<< UNINSTALL <<<<<
 
     # >>>>> EXPLICIT VERSION INSTALL AND INVOKE FROM REGISTRY 2 >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="shared-metadata-1", registry=reg2_id, version="1.0.0")
     )
     assert not error, f"Failed to install v1.0.0 from registry 2 (status {error.status}): {error.error}"
@@ -1220,7 +1224,7 @@ sub get_tags {{
     # <<<<< REGISTRY-ORPHAN (DELETE REGISTRY 2) <<<<<
 
     # >>>>> CROSS-REGISTRY WITHOUT FORCE (400) >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="shared-metadata-1", registry=reg3_id, version="1.0.0")
     )
     assert error is not None, "Expected 400 for cross-registry install without force"
@@ -1228,7 +1232,7 @@ sub get_tags {{
     # <<<<< CROSS-REGISTRY WITHOUT FORCE (400) <<<<<
 
     # >>>>> CROSS-REGISTRY WITH FORCE AND INVOKE >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="shared-metadata-1", registry=reg3_id, version="1.0.0", force=True)
     )
     assert not error, f"Failed to force install from registry 3 (status {error.status}): {error.error}"
@@ -1261,7 +1265,7 @@ sub get_tags {{
     # <<<<< VERSION-ORPHAN (DROP v1.0.0 FROM REGISTRY 3) <<<<<
 
     # >>>>> UPGRADE FROM VERSION-ORPHAN STATE AND INVOKE >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="shared-metadata-1", registry=reg3_id, version="2.0.0", force=True)
     )
     assert not error, f"Failed to install v2.0.0 from registry 3 (status {error.status}): {error.error}"
@@ -1359,7 +1363,7 @@ my $unterminated = (
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Refresh should accept the manifest (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="broken-loader", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to fail for a plugin that does not compile"
@@ -1423,7 +1427,7 @@ sub get_tags { return (); }
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Refresh should accept the manifest (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="slow-loader", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to fail when the load check times out"
