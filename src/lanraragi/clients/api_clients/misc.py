@@ -8,7 +8,6 @@ from lanraragi.clients.api_clients.base import _ApiClient
 from lanraragi.clients.res_processors.misc import (
     _handle_get_available_plugins_response,
     _process_get_server_info_response,
-    _process_get_server_status_response,
 )
 from lanraragi.clients.utils import _build_err_response
 from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
@@ -24,7 +23,6 @@ from lanraragi.models.misc import (
     GetOpdsCatalogResponse,
     GetRegistryResponse,
     GetServerInfoResponse,
-    GetServerStatusResponse,
     InstallPluginRequest,
     InstallPluginResponse,
     ListRegistriesResponse,
@@ -57,16 +55,6 @@ class _MiscApiClient(_ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             return (_process_get_server_info_response(content), None)
-        return (None, _build_err_response(content, status))
-
-    async def get_server_status(self) -> _LRRClientResponse[GetServerStatusResponse]:
-        """
-        GET /api/server/status
-        """
-        url = self.api_context.build_url("/api/server/status")
-        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
-        if status == 200:
-            return (_process_get_server_status_response(content), None)
         return (None, _build_err_response(content, status))
 
     async def get_opds_catalog(self, request: GetOpdsCatalogRequest) -> _LRRClientResponse[GetOpdsCatalogResponse]:
