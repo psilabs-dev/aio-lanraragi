@@ -28,11 +28,7 @@ from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
 )
-
-# from aio_lanraragi_tests.utils.api_wrappers import (
-#     create_archive_file,
-#     upload_archive,
-# )
+from aio_lanraragi_tests.utils.api_wrappers import install_plugin_and_wait
 
 LOGGER = logging.getLogger(__name__)
 
@@ -72,7 +68,7 @@ async def test_plugin_install_and_uninstall(lrr_client: LRRClient, environment: 
     # >>>>> INSTALL PLUGIN >>>>>
     refresh_response = response
     version_key = max(refresh_response.index["plugins"]["sample-downloader"]["versions"].keys())
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=version_key)
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
@@ -175,7 +171,7 @@ async def test_plugin_install_provenance_roundtrip(lrr_client: LRRClient, enviro
     version_record = refresh_response.index["plugins"]["sample-downloader"]["versions"][version_key]
     expected_sha = version_record["sha256"]
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=version_key)
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
@@ -219,7 +215,7 @@ async def test_plugin_install_provenance_roundtrip(lrr_client: LRRClient, enviro
     response, error = await lrr_client.misc_api.uninstall_plugin("sample-downloader")
     assert not error, f"Failed to uninstall plugin (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=version_key)
     )
     assert not error, f"Failed to reinstall plugin (status {error.status}): {error.error}"
@@ -254,7 +250,7 @@ async def test_plugin_install_error_paths(lrr_client: LRRClient, environment: Ab
     environment.setup(with_api_key=True)
 
     # >>>>> INSTALL FROM NONEXISTENT REGISTRY >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-downloader", registry="REG_0000000001", version="1.0")
     )
     assert error is not None, "Expected error for nonexistent registry"
@@ -273,7 +269,7 @@ async def test_plugin_install_error_paths(lrr_client: LRRClient, environment: Ab
     assert not error, f"Failed to create registry (status {error.status}): {error.error}"
     reg_id = response.id
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version="1.0")
     )
     assert error is not None, "Expected error when installing without refresh"
@@ -284,7 +280,7 @@ async def test_plugin_install_error_paths(lrr_client: LRRClient, environment: Ab
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="does-not-exist-xyz", registry=reg_id, version="1.0")
     )
     assert error is not None, "Expected error for nonexistent namespace"
@@ -484,7 +480,7 @@ async def test_plugin_install_failed_require_rolls_back(
     # <<<<< SETUP REGISTRY <<<<<
 
     # >>>>> INSTALL BROKEN PLUGIN >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace=broken_ns, registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected error for broken plugin install"
@@ -510,7 +506,7 @@ async def test_plugin_install_failed_require_rolls_back(
     # <<<<< ROLLBACK ASSERTIONS <<<<<
 
     # >>>>> INSTALL UPGRADE BASELINE v1.0.0 AND CAPTURE STATE >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace=upgrade_ns, registry=reg_id, version="1.0.0")
     )
     assert not error, f"Failed to install upgrade baseline (status {error.status}): {error.error}"
@@ -534,7 +530,7 @@ async def test_plugin_install_failed_require_rolls_back(
     # <<<<< INSTALL UPGRADE BASELINE v1.0.0 AND CAPTURE STATE <<<<<
 
     # >>>>> ATTEMPT UPGRADE TO BROKEN v1.1.0 >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace=upgrade_ns, registry=reg_id, version="1.1.0")
     )
     assert error is not None, "Expected error for broken upgrade install"
@@ -704,7 +700,7 @@ async def test_install_failure_preserves_other_plugins(
     # <<<<< SETUP REGISTRY <<<<<
 
     # >>>>> INSTALL GOOD PLUGIN AND CAPTURE STATE >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace=good_ns, registry=reg_id, version="1.0.0")
     )
     assert not error, f"Failed to install good plugin (status {error.status}): {error.error}"
@@ -725,7 +721,7 @@ async def test_install_failure_preserves_other_plugins(
     # <<<<< INSTALL GOOD PLUGIN AND CAPTURE STATE <<<<<
 
     # >>>>> INSTALL BROKEN PLUGIN >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace=broken_ns, registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected error for broken plugin install"
@@ -860,7 +856,7 @@ async def test_server_restart_status(lrr_client: LRRClient, environment: Abstrac
     # <<<<< FRESH SERVER <<<<<
 
     # >>>>> FIRST INSTALL DOES NOT REQUIRE RESTART >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace=plugin_ns, registry=reg_id, version="1.0.0")
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
@@ -871,7 +867,7 @@ async def test_server_restart_status(lrr_client: LRRClient, environment: Abstrac
     # <<<<< FIRST INSTALL DOES NOT REQUIRE RESTART <<<<<
 
     # >>>>> REINSTALL REQUIRES RESTART >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace=plugin_ns, registry=reg_id, version="1.0.0")
     )
     assert not error, f"Failed to reinstall plugin (status {error.status}): {error.error}"
@@ -939,7 +935,7 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     # <<<<< SETUP REGISTRY <<<<<
 
     # >>>>> INSTALL >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="title-suffix-1", registry=reg_id, version=title_suffix_1_version)
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
@@ -974,7 +970,7 @@ async def test_plugin_uninstall_reinstall(lrr_client: LRRClient, environment: Ab
     # <<<<< VERIFY REMOVED <<<<<
 
     # >>>>> REINSTALL >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="title-suffix-1", registry=reg_id, version=title_suffix_1_version)
     )
     assert not error, f"Failed to reinstall plugin (status {error.status}): {error.error}"
@@ -1110,7 +1106,7 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
         # <<<<< SETUP REGISTRY <<<<<
 
         # >>>>> INSTALL WITH NON-MANAGED CONFLICT >>>>>
-        response, error = await lrr_client.misc_api.install_plugin(
+        response, error = await install_plugin_and_wait(lrr_client,
             InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version)
         )
         assert error is not None, "Expected error when installing plugin with existing non-managed copy"
@@ -1119,7 +1115,7 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
         # <<<<< INSTALL WITH NON-MANAGED CONFLICT <<<<<
 
         # >>>>> FORCE INSTALL STILL BLOCKED OVER NON-MANAGED >>>>>
-        response, error = await lrr_client.misc_api.install_plugin(
+        response, error = await install_plugin_and_wait(lrr_client,
             InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version, force=True)
         )
         assert error is not None, "Expected error: force must not bypass non-managed conflict"
@@ -1128,7 +1124,7 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
         # <<<<< FORCE INSTALL STILL BLOCKED OVER NON-MANAGED <<<<<
 
         # >>>>> INSTALL WITHOUT CONFLICT >>>>>
-        response, error = await lrr_client.misc_api.install_plugin(
+        response, error = await install_plugin_and_wait(lrr_client,
             InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
         )
         assert not error, f"Failed to install non-conflicting plugin (status {error.status}): {error.error}"
@@ -1137,7 +1133,7 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
         # <<<<< INSTALL WITHOUT CONFLICT <<<<<
 
         # >>>>> UPGRADE (REINSTALL) >>>>>
-        response, error = await lrr_client.misc_api.install_plugin(
+        response, error = await install_plugin_and_wait(lrr_client,
             InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
         )
         assert not error, f"Failed to reinstall/upgrade plugin (status {error.status}): {error.error}"
@@ -1182,7 +1178,7 @@ async def test_plugin_uninstall_not_listed(lrr_client: LRRClient, environment: A
 
     for i in range(5):
         LOGGER.debug(f"Cycle {i}: installing sample-login")
-        response, error = await lrr_client.misc_api.install_plugin(
+        response, error = await install_plugin_and_wait(lrr_client,
             InstallPluginRequest(namespace="sample-login", registry=reg_id, version=sample_login_version)
         )
         assert not error, f"Cycle {i}: install failed (status {error.status}): {error.error}"
@@ -1237,7 +1233,7 @@ async def test_plugin_cross_provenance_force(lrr_client: LRRClient, environment:
     # <<<<< SETUP REG A <<<<<
 
     # >>>>> INSTALL FROM REG A >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-downloader", registry=reg_a_id, version=sample_downloader_version)
     )
     assert not error, f"Failed to install sample-downloader from reg A (status {error.status}): {error.error}"
@@ -1253,7 +1249,7 @@ async def test_plugin_cross_provenance_force(lrr_client: LRRClient, environment:
     # <<<<< DELETE REG A -> ORPHAN <<<<<
 
     # >>>>> UPGRADE WITH ORPHAN REGISTRY -> 404 >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-downloader", registry=reg_a_id, version=sample_downloader_version)
     )
     assert error is not None, "Expected error when installing from deleted registry"
@@ -1279,7 +1275,7 @@ async def test_plugin_cross_provenance_force(lrr_client: LRRClient, environment:
     # <<<<< CREATE REG B (SAME SOURCE) <<<<<
 
     # >>>>> INSTALL FROM REG B WITHOUT FORCE -> PROVENANCE MISMATCH >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-downloader", registry=reg_b_id, version=sample_downloader_version_b)
     )
     assert error is not None, "Expected provenance mismatch error when installing from different registry without force"
@@ -1287,7 +1283,7 @@ async def test_plugin_cross_provenance_force(lrr_client: LRRClient, environment:
     # <<<<< INSTALL FROM REG B WITHOUT FORCE -> PROVENANCE MISMATCH <<<<<
 
     # >>>>> INSTALL FROM REG B WITH FORCE -> 200 >>>>>
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-downloader", registry=reg_b_id, version=sample_downloader_version_b, force=True)
     )
     assert not error, f"Expected force install to succeed (status {error.status}): {error.error}"
@@ -1348,7 +1344,7 @@ async def test_managed_plugin_upgrade_reloads_class(
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     main_version = max(main_refresh_response.index["plugins"]["sample-script"]["versions"].keys())
 
-    _, error = await lrr_client.misc_api.install_plugin(
+    _, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-script", registry=reg_id, version=main_version)
     )
     assert not error, f"Failed to install sample-script v1.0 (status {error.status}): {error.error}"
@@ -1378,7 +1374,7 @@ async def test_managed_plugin_upgrade_reloads_class(
     assert not error, f"Failed to refresh registry after ref change (status {error.status}): {error.error}"
     v11_version = max(v11_refresh_response.index["plugins"]["sample-script"]["versions"].keys())
 
-    _, error = await lrr_client.misc_api.install_plugin(
+    _, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-script", registry=reg_id, version=v11_version, force=True)
     )
     assert not error, f"Failed to upgrade sample-script to v1.1 (status {error.status}): {error.error}"
@@ -1445,7 +1441,7 @@ async def test_managed_plugin_upgrade_reloads_across_workers(
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     main_version = max(main_refresh_response.index["plugins"]["sample-script"]["versions"].keys())
 
-    _, error = await lrr_client.misc_api.install_plugin(
+    _, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-script", registry=reg_id, version=main_version)
     )
     assert not error, f"Failed to install sample-script v1.0 (status {error.status}): {error.error}"
@@ -1474,7 +1470,7 @@ async def test_managed_plugin_upgrade_reloads_across_workers(
     assert not error, f"Failed to refresh registry after ref change (status {error.status}): {error.error}"
     v11_version = max(v11_refresh_response.index["plugins"]["sample-script"]["versions"].keys())
 
-    _, error = await lrr_client.misc_api.install_plugin(
+    _, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-script", registry=reg_id, version=v11_version, force=True)
     )
     assert not error, f"Failed to upgrade sample-script to v1.1 (status {error.status}): {error.error}"
@@ -1551,7 +1547,7 @@ async def test_managed_plugin_upgrade_reloads_across_workers_via_list_plugins(
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     main_version = max(main_refresh_response.index["plugins"]["sample-script"]["versions"].keys())
 
-    _, error = await lrr_client.misc_api.install_plugin(
+    _, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-script", registry=reg_id, version=main_version)
     )
     assert not error, f"Failed to install sample-script v1.0 (status {error.status}): {error.error}"
@@ -1588,7 +1584,7 @@ async def test_managed_plugin_upgrade_reloads_across_workers_via_list_plugins(
         f"Demo registry must publish a different version on the v1.1 ref; got {v11_version!r}"
     )
 
-    _, error = await lrr_client.misc_api.install_plugin(
+    _, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-script", registry=reg_id, version=v11_version, force=True)
     )
     assert not error, f"Failed to upgrade sample-script to v1.1 (status {error.status}): {error.error}"
@@ -1653,7 +1649,7 @@ async def test_managed_plugin_survives_restart(lrr_client: LRRClient, environmen
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     sample_downloader_version = max(refresh_response.index["plugins"]["sample-downloader"]["versions"].keys())
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
     )
     assert not error, f"Failed to install sample-downloader (status {error.status}): {error.error}"
@@ -1731,7 +1727,7 @@ async def test_plugin_file_deleted_under_lrr(lrr_client: LRRClient, environment:
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     sample_downloader_version = max(refresh_response.index["plugins"]["sample-downloader"]["versions"].keys())
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
     )
     assert not error, f"Failed to install sample-downloader (status {error.status}): {error.error}"

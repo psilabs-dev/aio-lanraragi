@@ -22,7 +22,11 @@ from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
 )
-from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
+from aio_lanraragi_tests.utils.api_wrappers import (
+    create_archive_file,
+    install_plugin_and_wait,
+    upload_archive,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -62,7 +66,7 @@ async def test_save_config_preserves_managed_plugin_provenance(
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     version_key = max(refresh_response.index["plugins"]["sample-metadata"]["versions"].keys())
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=version_key)
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
@@ -127,7 +131,7 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     sample_metadata_version = max(refresh_response.index["plugins"]["sample-metadata"]["versions"].keys())
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version)
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
@@ -201,7 +205,7 @@ async def test_plugin_hide_unhide(lrr_client: LRRClient, environment: AbstractLR
     response, error = await lrr_client.misc_api.uninstall_plugin("sample-metadata")
     assert not error, f"Failed to uninstall plugin (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version)
     )
     assert not error, f"Failed to reinstall plugin (status {error.status}): {error.error}"
@@ -290,7 +294,7 @@ async def test_plugin_priority(lrr_client: LRRClient, environment: AbstractLRRDe
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     sample_metadata_version = max(refresh_response.index["plugins"]["sample-metadata"]["versions"].keys())
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version)
     )
     assert not error, f"Failed to install sample-metadata (status {error.status}): {error.error}"
@@ -382,7 +386,7 @@ async def test_plugin_config_rejects_non_metadata_fields(
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
     sample_downloader_version = max(refresh_response.index["plugins"]["sample-downloader"]["versions"].keys())
 
-    response, error = await lrr_client.misc_api.install_plugin(
+    response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version=sample_downloader_version)
     )
     assert not error, f"Failed to install sample-downloader (status {error.status}): {error.error}"
@@ -473,7 +477,7 @@ async def test_plugin_priority_execution_order(lrr_client: LRRClient, environmen
     # >>>>> INSTALL ALL THREE >>>>>
     for ns in ("title-suffix-1", "title-suffix-2", "title-suffix-3"):
         version_key = max(refresh_response.index["plugins"][ns]["versions"].keys())
-        response, error = await lrr_client.misc_api.install_plugin(
+        response, error = await install_plugin_and_wait(lrr_client,
             InstallPluginRequest(namespace=ns, registry=reg_id, version=version_key)
         )
         assert not error, f"Failed to install {ns} (status {error.status}): {error.error}"
