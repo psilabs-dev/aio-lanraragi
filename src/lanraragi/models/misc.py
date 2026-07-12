@@ -33,6 +33,12 @@ class GetOpdsCatalogResponse(LanraragiResponse):
 class GetAvailablePluginsRequest(LanraragiRequest):
     type: Literal["login", "metadata", "script", "download", "all"] = Field(...)
 
+class PluginParameter(BaseModel):
+    name: str | None = Field(None)
+    desc: str | None = Field(None)
+    type: Literal["bool", "int", "string"] | None = Field(None)
+    default_value: bool | int | str | None = Field(None)
+
 class GetAvailablePluginsResponsePlugin(BaseModel):
     author: str = Field(...)
     description: str | None = Field(None)
@@ -40,7 +46,7 @@ class GetAvailablePluginsResponsePlugin(BaseModel):
     name: str = Field(...)
     namespace: str = Field(...)
     oneshot_arg: str | None = Field(None)
-    parameters: list[dict[str, str]] | None = Field(None)
+    parameters: list[PluginParameter] | None = Field(None)
     type: Literal["login", "metadata", "script", "download", "all"] = Field(...)
     version: str = Field(...)
 
