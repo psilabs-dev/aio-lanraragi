@@ -22,8 +22,6 @@ class GetServerInfoResponse(LanraragiResponse):
     version_desc: str = Field(...)
     version_name: str = Field(...)
     excluded_namespaces: list[str] = Field(default_factory=list)
-
-class GetServerStatusResponse(LanraragiResponse):
     restart_required: bool = Field(...)
 
 class GetOpdsCatalogRequest(LanraragiRequest):

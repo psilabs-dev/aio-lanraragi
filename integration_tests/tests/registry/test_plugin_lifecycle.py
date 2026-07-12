@@ -854,8 +854,8 @@ async def test_server_restart_status(lrr_client: LRRClient, environment: Abstrac
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
 
     # >>>>> FRESH SERVER >>>>>
-    response, error = await lrr_client.misc_api.get_server_status()
-    assert not error, f"Failed to get server status (status {getattr(error, 'status', None)})"
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to get server info (status {getattr(error, 'status', None)})"
     assert response.restart_required is False, "Fresh server should not report a pending restart"
     # <<<<< FRESH SERVER <<<<<
 
@@ -865,8 +865,8 @@ async def test_server_restart_status(lrr_client: LRRClient, environment: Abstrac
     )
     assert not error, f"Failed to install plugin (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.get_server_status()
-    assert not error, f"Failed to get server status (status {getattr(error, 'status', None)})"
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to get server info (status {getattr(error, 'status', None)})"
     assert response.restart_required is False, "First-time install should not require a restart"
     # <<<<< FIRST INSTALL DOES NOT REQUIRE RESTART <<<<<
 
@@ -876,15 +876,15 @@ async def test_server_restart_status(lrr_client: LRRClient, environment: Abstrac
     )
     assert not error, f"Failed to reinstall plugin (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.get_server_status()
-    assert not error, f"Failed to get server status (status {getattr(error, 'status', None)})"
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to get server info (status {getattr(error, 'status', None)})"
     assert response.restart_required is True, "Reinstall of an already-registered plugin should require a restart"
     # <<<<< REINSTALL REQUIRES RESTART <<<<<
 
     # >>>>> RESTART CLEARS THE FLAG >>>>>
     environment.restart()
-    response, error = await lrr_client.misc_api.get_server_status()
-    assert not error, f"Failed to get server status (status {getattr(error, 'status', None)})"
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to get server info (status {getattr(error, 'status', None)})"
     assert response.restart_required is False, "Restart should clear the pending-restart flag"
     # <<<<< RESTART CLEARS THE FLAG <<<<<
 
@@ -892,8 +892,8 @@ async def test_server_restart_status(lrr_client: LRRClient, environment: Abstrac
     response, error = await lrr_client.misc_api.uninstall_plugin(plugin_ns)
     assert not error, f"Failed to uninstall plugin (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.get_server_status()
-    assert not error, f"Failed to get server status (status {getattr(error, 'status', None)})"
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to get server info (status {getattr(error, 'status', None)})"
     assert response.restart_required is True, "Uninstall should set the pending-restart flag"
     # <<<<< UNINSTALL REQUIRES RESTART <<<<<
 
