@@ -49,7 +49,7 @@ class GetMinionJobDetailResponse(LanraragiResponse):
     state: str = Field(...)
     task: str = Field(...)
     time: str | None = Field(None)
-    worker: int = Field(default=0)
+    worker: int | None = Field(default=None)
 
 __all__ = [
     "GetMinionJobStatusRequest",
