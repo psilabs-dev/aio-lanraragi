@@ -954,7 +954,7 @@ async def test_composite_registry(
         - v1.1.0 (appends " from registry 3 v1.1.0" to title)
         - v2.0.0 (appends " from registry 3 v2.0.0" to title)
 
-    Default-registry designation is covered separately in test_default_registry.py.
+    Ougi (default registry) designation is covered separately in test_ougi.py.
 
     Steps:
     1. Add registry 1, registry 2, registry 3.

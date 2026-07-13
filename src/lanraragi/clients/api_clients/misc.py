@@ -18,9 +18,9 @@ from lanraragi.models.misc import (
     CreateRegistryResponse,
     GetAvailablePluginsRequest,
     GetAvailablePluginsResponse,
-    GetDefaultRegistryResponse,
     GetOpdsCatalogRequest,
     GetOpdsCatalogResponse,
+    GetOugiResponse,
     GetRegistryResponse,
     GetServerInfoResponse,
     InstallPluginRequest,
@@ -31,9 +31,9 @@ from lanraragi.models.misc import (
     RegenerateThumbnailRequest,
     RegenerateThumbnailResponse,
     RegistryConfig,
-    RemoveDefaultRegistryResponse,
-    UpdateDefaultRegistryResponse,
+    RemoveOugiResponse,
     UpdateMetadataPluginConfigRequest,
+    UpdateOugiResponse,
     UpdateRegistryRequest,
     UpdateRegistryResponse,
     UsePluginAsyncRequest,
@@ -244,37 +244,37 @@ class _MiscApiClient(_ApiClient):
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))
 
-    async def get_default_registry(self) -> _LRRClientResponse[GetDefaultRegistryResponse]:
+    async def get_ougi(self) -> _LRRClientResponse[GetOugiResponse]:
         """
-        GET /api/registries/default
+        GET /api/registries/ougi
         """
-        url = self.api_context.build_url("/api/registries/default")
+        url = self.api_context.build_url("/api/registries/ougi")
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
-            return (GetDefaultRegistryResponse(id=response_j["id"]), None)
+            return (GetOugiResponse(id=response_j["id"]), None)
         return (None, _build_err_response(content, status))
 
-    async def update_default_registry(self, registry_id: str) -> _LRRClientResponse[UpdateDefaultRegistryResponse]:
+    async def update_ougi(self, registry_id: str) -> _LRRClientResponse[UpdateOugiResponse]:
         """
-        PUT /api/registries/default/{id}
+        PUT /api/registries/ougi/{id}
         """
-        url = self.api_context.build_url(f"/api/registries/default/{registry_id}")
+        url = self.api_context.build_url(f"/api/registries/ougi/{registry_id}")
         status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
-            return (UpdateDefaultRegistryResponse(id=response_j["id"]), None)
+            return (UpdateOugiResponse(id=response_j["id"]), None)
         return (None, _build_err_response(content, status))
 
-    async def remove_default_registry(self) -> _LRRClientResponse[RemoveDefaultRegistryResponse]:
+    async def remove_ougi(self) -> _LRRClientResponse[RemoveOugiResponse]:
         """
-        DELETE /api/registries/default
+        DELETE /api/registries/ougi
         """
-        url = self.api_context.build_url("/api/registries/default")
+        url = self.api_context.build_url("/api/registries/ougi")
         status, content = await self.api_context.handle_request(http.HTTPMethod.DELETE, url, self.headers)
         if status == 200:
             response_j = json.loads(content)
-            return (RemoveDefaultRegistryResponse(id=response_j["id"]), None)
+            return (RemoveOugiResponse(id=response_j["id"]), None)
         return (None, _build_err_response(content, status))
 
     async def refresh_registry(self, registry_id: str) -> _LRRClientResponse[RefreshRegistryResponse]:
