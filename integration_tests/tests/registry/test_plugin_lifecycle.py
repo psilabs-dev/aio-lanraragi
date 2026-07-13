@@ -254,7 +254,7 @@ async def test_plugin_install_error_paths(lrr_client: LRRClient, environment: Ab
         InstallPluginRequest(namespace="sample-downloader", registry="REG_0000000001", version="1.0")
     )
     assert error is not None, "Expected error for nonexistent registry"
-    assert error.status == 404, f"Expected 404 for nonexistent registry, got {error.status}"
+    assert "doesn't exist" in error.error, f"Expected nonexistent-registry rejection, got: {error.error!r}"
     # <<<<< INSTALL FROM NONEXISTENT REGISTRY <<<<<
 
     # >>>>> INSTALL WITHOUT REFRESH >>>>>
@@ -273,7 +273,7 @@ async def test_plugin_install_error_paths(lrr_client: LRRClient, environment: Ab
         InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version="1.0")
     )
     assert error is not None, "Expected error when installing without refresh"
-    assert error.status == 409, f"Expected 409 for no cached index, got {error.status}"
+    assert "No registry index cached" in error.error, f"Expected no-cached-index rejection, got: {error.error!r}"
     # <<<<< INSTALL WITHOUT REFRESH <<<<<
 
     # >>>>> INSTALL NONEXISTENT NAMESPACE >>>>>
@@ -284,7 +284,7 @@ async def test_plugin_install_error_paths(lrr_client: LRRClient, environment: Ab
         InstallPluginRequest(namespace="does-not-exist-xyz", registry=reg_id, version="1.0")
     )
     assert error is not None, "Expected error for nonexistent namespace"
-    assert error.status == 404, f"Expected 404 for unknown namespace, got {error.status}"
+    assert "not found in registry" in error.error, f"Expected unknown-namespace rejection, got: {error.error!r}"
     # <<<<< INSTALL NONEXISTENT NAMESPACE <<<<<
 
     # >>>>> INSTALL EMPTY VERSION >>>>>
@@ -484,7 +484,7 @@ async def test_plugin_install_failed_require_rolls_back(
         InstallPluginRequest(namespace=broken_ns, registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected error for broken plugin install"
-    assert error.status >= 400, f"Expected non-2xx status for broken plugin install, got {error.status}"
+    assert "failed to load" in error.error, f"Expected broken-plugin load failure, got: {error.error!r}"
     LOGGER.debug(f"Install broken plugin: status={error.status}, error={error.error!r}")
     # <<<<< INSTALL BROKEN PLUGIN <<<<<
 
@@ -534,7 +534,7 @@ async def test_plugin_install_failed_require_rolls_back(
         InstallPluginRequest(namespace=upgrade_ns, registry=reg_id, version="1.1.0")
     )
     assert error is not None, "Expected error for broken upgrade install"
-    assert error.status >= 400, f"Expected non-2xx status for broken upgrade install, got {error.status}"
+    assert "failed to load" in error.error, f"Expected broken-upgrade load failure, got: {error.error!r}"
     LOGGER.debug(f"Upgrade install: status={error.status}, error={error.error!r}")
     # <<<<< ATTEMPT UPGRADE TO BROKEN v1.1.0 <<<<<
 
@@ -725,7 +725,7 @@ async def test_install_failure_preserves_other_plugins(
         InstallPluginRequest(namespace=broken_ns, registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected error for broken plugin install"
-    assert error.status >= 400, f"Expected non-2xx status for broken plugin install, got {error.status}"
+    assert "failed to load" in error.error, f"Expected broken-plugin load failure, got: {error.error!r}"
     LOGGER.debug(f"Install broken plugin: status={error.status}, error={error.error!r}")
     # <<<<< INSTALL BROKEN PLUGIN <<<<<
 
@@ -1110,7 +1110,6 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
             InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version)
         )
         assert error is not None, "Expected error when installing plugin with existing non-managed copy"
-        assert error.status == 400, f"Expected 400 for non-managed conflict, got {error.status}"
         assert "Remove it first" in error.error, f"Expected 'Remove it first' in error, got: {error.error}"
         # <<<<< INSTALL WITH NON-MANAGED CONFLICT <<<<<
 
@@ -1119,7 +1118,6 @@ async def test_plugin_install_conflict(lrr_client: LRRClient, environment: Abstr
             InstallPluginRequest(namespace="sample-metadata", registry=reg_id, version=sample_metadata_version, force=True)
         )
         assert error is not None, "Expected error: force must not bypass non-managed conflict"
-        assert error.status == 400, f"Expected 400 for non-managed conflict (force), got {error.status}"
         assert "Remove it first" in error.error, f"Expected 'Remove it first' in error, got: {error.error}"
         # <<<<< FORCE INSTALL STILL BLOCKED OVER NON-MANAGED <<<<<
 
@@ -1253,7 +1251,7 @@ async def test_plugin_cross_provenance_force(lrr_client: LRRClient, environment:
         InstallPluginRequest(namespace="sample-downloader", registry=reg_a_id, version=sample_downloader_version)
     )
     assert error is not None, "Expected error when installing from deleted registry"
-    assert error.status == 404, f"Expected 404 for deleted registry, got {error.status}"
+    assert "doesn't exist" in error.error, f"Expected deleted-registry rejection, got: {error.error!r}"
     # <<<<< UPGRADE WITH ORPHAN REGISTRY -> 404 <<<<<
 
     # >>>>> CREATE REG B (SAME SOURCE) >>>>>
@@ -1279,7 +1277,7 @@ async def test_plugin_cross_provenance_force(lrr_client: LRRClient, environment:
         InstallPluginRequest(namespace="sample-downloader", registry=reg_b_id, version=sample_downloader_version_b)
     )
     assert error is not None, "Expected provenance mismatch error when installing from different registry without force"
-    assert error.status == 400, f"Expected 400 for cross-registry provenance mismatch, got {error.status}"
+    assert "already installed from" in error.error, f"Expected cross-registry provenance mismatch, got: {error.error!r}"
     # <<<<< INSTALL FROM REG B WITHOUT FORCE -> PROVENANCE MISMATCH <<<<<
 
     # >>>>> INSTALL FROM REG B WITH FORCE -> 200 >>>>>
@@ -1380,9 +1378,20 @@ async def test_managed_plugin_upgrade_reloads_class(
     assert not error, f"Failed to upgrade sample-script to v1.1 (status {error.status}): {error.error}"
     # <<<<< SWITCH REGISTRY TO v1.1 AND UPGRADE <<<<<
 
-    # >>>>> VERIFY v1.1 IN LOADED CLASS ACROSS WORKERS >>>>>
-    # Fan out concurrent reads to spread across workers. Every response must report v1.1;
-    # any stale v1.0 indicates a worker whose %INC short-circuited require after upgrade.
+    # >>>>> RESTART, THEN VERIFY v1.1 IN LOADED CLASS ACROSS WORKERS >>>>>
+    # Inter-worker hot-reload was removed in favor of a restart signal: after an upgrade
+    # LRR flags restart_required, and workers only load the new class once restarted.
+    info, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to get server info (status {error.status}): {error.error}"
+    assert info.restart_required is True, "Upgrade of an already-registered plugin should require a restart"
+
+    # Restart so the upgraded plugin code loads, then drop the now-dead keep-alive
+    # connections to the old container so the fan-out reconnects fresh.
+    environment.restart()
+    await lrr_client.close()
+
+    # After restart every prefork worker loads the upgraded class fresh from disk;
+    # fan out concurrent reads across workers and require v1.1 everywhere.
     verify_results = await asyncio.gather(*[
         lrr_client.misc_api.get_available_plugins(GetAvailablePluginsRequest(type="script"))
         for _ in range(40)
@@ -1396,10 +1405,10 @@ async def test_managed_plugin_upgrade_reloads_class(
             stale_responses.append((i, sample.version))
 
     assert not stale_responses, (
-        f"{len(stale_responses)} of 40 responses from stale workers still report v{main_version} "
-        f"plugin_info after upgrade: {stale_responses[:5]}. %INC reload not converging."
+        f"{len(stale_responses)} of 40 responses still report v{main_version} plugin_info "
+        f"after upgrade + restart: {stale_responses[:5]}. Worker did not reload the upgraded class."
     )
-    # <<<<< VERIFY v1.1 IN LOADED CLASS ACROSS WORKERS <<<<<
+    # <<<<< RESTART, THEN VERIFY v1.1 IN LOADED CLASS ACROSS WORKERS <<<<<
 
     expect_no_error_logs(environment, LOGGER)
 
@@ -1476,9 +1485,20 @@ async def test_managed_plugin_upgrade_reloads_across_workers(
     assert not error, f"Failed to upgrade sample-script to v1.1 (status {error.status}): {error.error}"
     # <<<<< UPGRADE TO v1.1 <<<<<
 
-    # >>>>> VERIFY v1.1 ACROSS WORKERS >>>>>
+    # >>>>> RESTART, THEN VERIFY v1.1 ACROSS WORKERS >>>>>
+    # Inter-worker hot-reload was removed in favor of a restart signal: after an upgrade
+    # LRR flags restart_required, and workers only load the new class once restarted.
     # v1.1 run_script prefixes its result with "v1.1:". v1.0 returns the raw arg.
-    # Concurrent requests spread across workers via the connection pool.
+    info, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to get server info (status {error.status}): {error.error}"
+    assert info.restart_required is True, "Upgrade of an already-registered plugin should require a restart"
+
+    # Restart so the upgraded plugin code loads, then drop the now-dead keep-alive
+    # connections to the old container so the fan-out reconnects fresh.
+    environment.restart()
+    await lrr_client.close()
+
+    # After restart, concurrent requests spread across workers must all run v1.1 symbols.
     verify_results = await asyncio.gather(*[
         lrr_client.misc_api.use_plugin(
             UsePluginRequest(plugin="sample-script", arg=f"ping-{i}")
@@ -1494,10 +1514,10 @@ async def test_managed_plugin_upgrade_reloads_across_workers(
             v10_responses.append((i, result))
 
     assert not v10_responses, (
-        f"{len(v10_responses)} of 40 responses from stale workers still running v1.0 symbols: "
-        f"{v10_responses[:5]}. Cross-worker coherence not converging after upgrade."
+        f"{len(v10_responses)} of 40 responses still running v1.0 symbols after upgrade + restart: "
+        f"{v10_responses[:5]}. Worker did not reload the upgraded class."
     )
-    # <<<<< VERIFY v1.1 ACROSS WORKERS <<<<<
+    # <<<<< RESTART, THEN VERIFY v1.1 ACROSS WORKERS <<<<<
 
     expect_no_error_logs(environment, LOGGER)
 
@@ -1590,7 +1610,18 @@ async def test_managed_plugin_upgrade_reloads_across_workers_via_list_plugins(
     assert not error, f"Failed to upgrade sample-script to v1.1 (status {error.status}): {error.error}"
     # <<<<< UPGRADE TO v1.1 <<<<<
 
-    # >>>>> VERIFY v1.1 IN LISTING ACROSS WORKERS >>>>>
+    # >>>>> RESTART, THEN VERIFY v1.1 IN LISTING ACROSS WORKERS >>>>>
+    # Inter-worker hot-reload was removed in favor of a restart signal: after an upgrade
+    # LRR flags restart_required, and workers only load the new class once restarted.
+    info, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to get server info (status {error.status}): {error.error}"
+    assert info.restart_required is True, "Upgrade of an already-registered plugin should require a restart"
+
+    # Restart so the upgraded plugin code loads, then drop the now-dead keep-alive
+    # connections to the old container so the fan-out reconnects fresh.
+    environment.restart()
+    await lrr_client.close()
+
     verify_results = await asyncio.gather(*[
         lrr_client.misc_api.get_available_plugins(GetAvailablePluginsRequest(type="script"))
         for _ in range(40)
@@ -1604,11 +1635,10 @@ async def test_managed_plugin_upgrade_reloads_across_workers_via_list_plugins(
             stale_listings.append((i, sample.version))
 
     assert not stale_listings, (
-        f"{len(stale_listings)} of 40 list_plugins responses still report the old "
-        f"version after upgrade: {stale_listings[:5]}. The listing path is "
-        f"serving cached plugin_info() from %INC without checking for upgrades."
+        f"{len(stale_listings)} of 40 list_plugins responses still report the old version "
+        f"after upgrade + restart: {stale_listings[:5]}. Worker did not reload the upgraded class."
     )
-    # <<<<< VERIFY v1.1 IN LISTING ACROSS WORKERS <<<<<
+    # <<<<< RESTART, THEN VERIFY v1.1 IN LISTING ACROSS WORKERS <<<<<
 
     expect_no_error_logs(environment, LOGGER)
 

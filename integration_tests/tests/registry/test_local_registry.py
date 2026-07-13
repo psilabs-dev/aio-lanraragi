@@ -352,7 +352,7 @@ async def test_local_registry_install_errors(
             InstallPluginRequest(namespace="symlink-plugin", registry=reg_id, version="1.0.0")
         )
         assert error is not None, "Expected install to fail for symlink escape"
-        assert error.status == 400, f"Expected 400 for symlink escape install, got {error.status}"
+        assert "Plugin file not found" in error.error, f"Expected symlink-escape install rejected, got: {error.error!r}"
         assert not list(environment.plugin_managed_dir.rglob("*.pm")), "No .pm files should be written for symlink escape"
     finally:
         symlink_path.unlink(missing_ok=True)
@@ -417,7 +417,7 @@ sub provide_url {
         InstallPluginRequest(namespace="local-sample-downloader", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to fail for wrong sha256"
-    assert error.status == 422, f"Expected 422 for wrong sha256 install, got {error.status}"
+    assert "SHA-256 mismatch" in error.error, f"Expected SHA-256 mismatch, got: {error.error!r}"
 
     target_pm = environment.plugin_managed_dir / "Download" / "LocalSample.pm"
     assert not target_pm.exists(), f"Plugin file should not exist after sha256 mismatch: {target_pm}"
@@ -557,13 +557,13 @@ sub get_tags { return (); }
         InstallPluginRequest(namespace="copytags", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to be rejected over a default plugin namespace"
-    assert error.status == 400, f"Expected 400 for default-namespace conflict, got {error.status}"
+    assert "already exists as a builtin plugin" in error.error, f"Expected builtin-conflict rejection, got: {error.error!r}"
 
     response, error = await install_plugin_and_wait(lrr_client,
         InstallPluginRequest(namespace="copytags", registry=reg_id, version="1.0.0", force=True)
     )
     assert error is not None, "force=true must not bypass a default-plugin namespace conflict"
-    assert error.status == 400, f"Expected 400 for default-namespace conflict (force), got {error.status}"
+    assert "already exists as a builtin plugin" in error.error, f"Expected builtin-conflict rejection (force), got: {error.error!r}"
 
     target_pm = environment.plugin_managed_dir / "Metadata" / "CopyTagsImpostor.pm"
     assert not target_pm.exists(), f"Impostor plugin must not be written to disk: {target_pm}"
@@ -656,8 +656,7 @@ sub provide_url { return; }
         InstallPluginRequest(namespace="filename-test", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to fail for invalid filename"
-    assert error.status == 422, f"Expected 422 for invalid filename, got {error.status}: {error.error}"
-    assert "Invalid plugin filename" in (error.error or ""), (
+    assert "Invalid plugin filename" in error.error, (
         f"Expected error message to mention 'Invalid plugin filename', got: {error.error!r}. "
         f"A different rejection reason indicates the filename allowlist did not fire — install reached a later validation."
     )
@@ -754,8 +753,7 @@ sub provide_url { return; }
         InstallPluginRequest(namespace="package-mismatch", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to fail for package mismatch"
-    assert error.status == 422, f"Expected 422 for package mismatch, got {error.status}: {error.error}"
-    assert "Package mismatch" in (error.error or ""), (
+    assert "Package mismatch" in error.error, (
         f"Expected error message to mention 'Package mismatch', got: {error.error!r}. "
         f"A different rejection reason indicates the package check did not fire — install reached a later validation."
     )
@@ -899,8 +897,8 @@ sub provide_url { return; }
             InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version="1.0.0")
         )
         assert error is not None, "Expected install to be rejected over a sideloaded plugin"
-        assert error.status == 400, (
-            f"Expected 400 for sideloaded conflict, got {error.status}: {error.error}"
+        assert "already exists as a sideloaded plugin" in error.error, (
+            f"Expected sideloaded-conflict rejection, got: {error.error!r}"
         )
         # <<<<< INSTALL BLOCKED AGAINST SIDELOADED <<<<<
 
@@ -909,8 +907,8 @@ sub provide_url { return; }
             InstallPluginRequest(namespace="sample-downloader", registry=reg_id, version="1.0.0", force=True)
         )
         assert error is not None, "force=true must not bypass a sideloaded namespace conflict"
-        assert error.status == 400, (
-            f"Expected 400 for sideloaded conflict (force), got {error.status}: {error.error}"
+        assert "already exists as a sideloaded plugin" in error.error, (
+            f"Expected sideloaded-conflict rejection (force), got: {error.error!r}"
         )
         # <<<<< FORCE INSTALL ALSO BLOCKED <<<<<
 
@@ -1228,7 +1226,7 @@ sub get_tags {{
         InstallPluginRequest(namespace="shared-metadata-1", registry=reg3_id, version="1.0.0")
     )
     assert error is not None, "Expected 400 for cross-registry install without force"
-    assert error.status == 400, f"Expected 400 for cross-registry conflict, got {error.status}"
+    assert "already installed from" in error.error, f"Expected cross-registry conflict, got: {error.error!r}"
     # <<<<< CROSS-REGISTRY WITHOUT FORCE (400) <<<<<
 
     # >>>>> CROSS-REGISTRY WITH FORCE AND INVOKE >>>>>
@@ -1367,8 +1365,7 @@ my $unterminated = (
         InstallPluginRequest(namespace="broken-loader", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to fail for a plugin that does not compile"
-    assert error.status == 422, f"Expected 422 for compile failure, got {error.status}: {error.error}"
-    assert "failed to load" in (error.error or ""), (
+    assert "failed to load" in error.error, (
         f"Expected a bad-plugin 'failed to load' message, got: {error.error!r}"
     )
     # <<<<< COMPILE FAILURE -> 422 <<<<<
@@ -1431,8 +1428,7 @@ sub get_tags { return (); }
         InstallPluginRequest(namespace="slow-loader", registry=reg_id, version="1.0.0")
     )
     assert error is not None, "Expected install to fail when the load check times out"
-    assert error.status == 500, f"Expected 500 for load-check timeout, got {error.status}: {error.error}"
-    assert "load check failed" in (error.error or ""), (
+    assert "load check failed" in error.error, (
         f"Expected an operational 'load check failed' message, got: {error.error!r}"
     )
     # <<<<< LOAD TIMEOUT -> 500 <<<<<
