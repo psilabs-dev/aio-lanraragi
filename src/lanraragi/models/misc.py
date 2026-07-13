@@ -138,13 +138,13 @@ class ListRegistriesResponse(LanraragiResponse):
 class RefreshRegistryResponse(LanraragiResponse):
     index: dict[str, Any] | None = Field(None)
 
-class GetDefaultRegistryResponse(LanraragiResponse):
+class GetOugiResponse(LanraragiResponse):
     id: str = Field(...)
 
-class UpdateDefaultRegistryResponse(LanraragiResponse):
+class UpdateOugiResponse(LanraragiResponse):
     id: str = Field(...)
 
-class RemoveDefaultRegistryResponse(LanraragiResponse):
+class RemoveOugiResponse(LanraragiResponse):
     id: str = Field(...)
 
 class UpdateMetadataPluginConfigRequest(LanraragiRequest):
@@ -190,9 +190,9 @@ __all__ = [
     "GetRegistryResponse",
     "ListRegistriesResponse",
     "RefreshRegistryResponse",
-    "GetDefaultRegistryResponse",
-    "UpdateDefaultRegistryResponse",
-    "RemoveDefaultRegistryResponse",
+    "GetOugiResponse",
+    "UpdateOugiResponse",
+    "RemoveOugiResponse",
     "UpdateMetadataPluginConfigRequest",
     "InstallPluginRequest",
     "InstallPluginResponse",
