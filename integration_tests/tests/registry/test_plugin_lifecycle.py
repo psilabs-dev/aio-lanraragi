@@ -28,7 +28,8 @@ from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
 )
-from aio_lanraragi_tests.utils.api_wrappers import install_plugin_and_wait
+from aio_lanraragi_tests.registries.local_registry import LocalRegistry
+from aio_lanraragi_tests.utils.api_wrappers import add_registry, install_plugin_and_wait
 
 LOGGER = logging.getLogger(__name__)
 
@@ -450,30 +451,25 @@ async def test_plugin_install_failed_require_rolls_back(
         },
     }
 
-    plugin_file = environment.local_registry_dir / plugin_rel_path
+    registry = LocalRegistry(name="local-broken", root=environment.shared_dir / "local-broken")
+    registry.root.mkdir(parents=True, exist_ok=True)
+
+    plugin_file = registry.root / plugin_rel_path
     plugin_file.parent.mkdir(parents=True, exist_ok=True)
     plugin_file.write_bytes(broken_pm_bytes)
 
-    upgrade_v1_file = environment.local_registry_dir / upgrade_v1_rel_path
+    upgrade_v1_file = registry.root / upgrade_v1_rel_path
     upgrade_v1_file.parent.mkdir(parents=True, exist_ok=True)
     upgrade_v1_file.write_bytes(upgrade_v1_bytes)
-    upgrade_v2_file = environment.local_registry_dir / upgrade_v2_rel_path
+    upgrade_v2_file = registry.root / upgrade_v2_rel_path
     upgrade_v2_file.parent.mkdir(parents=True, exist_ok=True)
     upgrade_v2_file.write_bytes(upgrade_v2_bytes)
 
-    registry_json = environment.local_registry_dir / "registry.json"
+    registry_json = registry.registry_json_path
     registry_json.write_text(json.dumps(registry_data), encoding="utf-8")
 
     # >>>>> SETUP REGISTRY >>>>>
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(
-            name="local-broken",
-            provider="local",
-            path=environment.local_registry_path,
-        )
-    )
-    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
-    reg_id = response.id
+    reg_id = await add_registry(lrr_client, environment, registry)
 
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
@@ -637,11 +633,14 @@ async def test_install_failure_preserves_other_plugins(
     good_rel_path = f"artifacts/{good_ns}/1.0.0/{good_pm_name}"
     broken_rel_path = f"artifacts/{broken_ns}/1.0.0/{broken_pm_name}"
 
-    good_file = environment.local_registry_dir / good_rel_path
+    registry = LocalRegistry(name="local-two-plugins", root=environment.shared_dir / "local-two-plugins")
+    registry.root.mkdir(parents=True, exist_ok=True)
+
+    good_file = registry.root / good_rel_path
     good_file.parent.mkdir(parents=True, exist_ok=True)
     good_file.write_bytes(good_pm_bytes)
 
-    broken_file = environment.local_registry_dir / broken_rel_path
+    broken_file = registry.root / broken_rel_path
     broken_file.parent.mkdir(parents=True, exist_ok=True)
     broken_file.write_bytes(broken_pm_bytes)
 
@@ -681,19 +680,11 @@ async def test_install_failure_preserves_other_plugins(
             },
         },
     }
-    registry_json = environment.local_registry_dir / "registry.json"
+    registry_json = registry.registry_json_path
     registry_json.write_text(json.dumps(registry_data), encoding="utf-8")
 
     # >>>>> SETUP REGISTRY >>>>>
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(
-            name="local-two-plugins",
-            provider="local",
-            path=environment.local_registry_path,
-        )
-    )
-    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
-    reg_id = response.id
+    reg_id = await add_registry(lrr_client, environment, registry)
 
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
@@ -834,17 +825,16 @@ async def test_server_restart_status(lrr_client: LRRClient, environment: Abstrac
             },
         },
     }
-    plugin_file = environment.local_registry_dir / plugin_rel_path
+    registry = LocalRegistry(name="local-restart", root=environment.shared_dir / "local-restart")
+    registry.root.mkdir(parents=True, exist_ok=True)
+
+    plugin_file = registry.root / plugin_rel_path
     plugin_file.parent.mkdir(parents=True, exist_ok=True)
     plugin_file.write_bytes(plugin_bytes)
-    registry_json = environment.local_registry_dir / "registry.json"
+    registry_json = registry.registry_json_path
     registry_json.write_text(json.dumps(registry_data), encoding="utf-8")
 
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="local-restart", provider="local", path=environment.local_registry_path)
-    )
-    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
-    reg_id = response.id
+    reg_id = await add_registry(lrr_client, environment, registry)
 
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"

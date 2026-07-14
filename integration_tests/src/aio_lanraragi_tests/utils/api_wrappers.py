@@ -29,7 +29,11 @@ from lanraragi.models.category import (
     RemoveArchiveFromCategoryRequest,
 )
 from lanraragi.models.minion import GetMinionJobDetailRequest, GetMinionJobStatusRequest
-from lanraragi.models.misc import InstallPluginRequest, InstallPluginResponse
+from lanraragi.models.misc import (
+    CreateRegistryRequest,
+    InstallPluginRequest,
+    InstallPluginResponse,
+)
 
 from aio_lanraragi_tests.archive_generation.archive import write_archives_to_disk
 from aio_lanraragi_tests.archive_generation.enums import ArchivalStrategyEnum
@@ -42,6 +46,9 @@ from aio_lanraragi_tests.archive_generation.models import (
     WriteArchiveResponse,
 )
 from aio_lanraragi_tests.common import compute_upload_checksum
+from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.registries.base import AbstractRegistry
+from aio_lanraragi_tests.registries.local_registry import LocalRegistry
 from aio_lanraragi_tests.utils.concurrency import retry_on_lock
 
 LOGGER = logging.getLogger(__name__)
@@ -450,3 +457,33 @@ async def install_plugin_and_wait(
             message = result.error if result and result.error else "install job failed"
             return (None, LanraragiErrorResponse(error=message, status=500))
         await asyncio.sleep(0.5)
+
+async def add_registry(
+    client: LRRClient,
+    deployment: AbstractLRRDeploymentContext,
+    registry: AbstractRegistry,
+    *,
+    refresh: bool = False,
+) -> str:
+    """
+    Register a registry with LRR and return its id. ``refresh`` is opt-in
+    because a registry's ``registry.json`` may not exist yet at creation time.
+    """
+    if isinstance(registry, LocalRegistry):
+        create_request = CreateRegistryRequest(
+            name=registry.name, provider="local", path=deployment.lrr_mount_path(registry.root)
+        )
+    else:
+        raise NotImplementedError(f"add_registry does not support {type(registry).__name__}")
+
+    response, error = await client.misc_api.create_registry(create_request)
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    registry_id = response.id
+
+    if refresh:
+        _, refresh_error = await client.misc_api.refresh_registry(registry_id)
+        assert not refresh_error, (
+            f"Failed to refresh registry (status {refresh_error.status}): {refresh_error.error}"
+        )
+
+    return registry_id
