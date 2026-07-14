@@ -35,7 +35,7 @@ from aio_lanraragi_tests.exceptions import DeploymentException
 from aio_lanraragi_tests.utils.docker import set_pdeathsig
 
 DEFAULT_LANRARAGI_DOCKER_TAG = "difegue/lanraragi"
-LOCAL_REGISTRY_CONTAINER_PATH = "/srv/test-registry"
+LRR_SHARED_CONTAINER_PATH = "/srv/shared"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -233,20 +233,9 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
         dirname = self.resource_prefix + "plugin_sideloaded"
         return self.staging_dir / dirname
 
-    @property
-    def local_registry_dir(self) -> Path:
-        """
-        Host path bind-mounted at ``local_registry_path`` for local-registry tests.
-        """
-        dirname = self.resource_prefix + "local_registry"
-        return self.staging_dir / dirname
-
-    @property
-    def local_registry_path(self) -> str:
-        """
-        Path at which LRR reads the local registry. Pass this to ``CreateRegistryRequest(path=...)``.
-        """
-        return LOCAL_REGISTRY_CONTAINER_PATH
+    def lrr_mount_path(self, host_path: Path) -> str:
+        rel = Path(host_path).relative_to(self.shared_dir)
+        return f"{LRR_SHARED_CONTAINER_PATH}/{rel.as_posix()}"
 
     @property
     def docker_client(self) -> docker.DockerClient:
@@ -543,7 +532,7 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
         redis_dir = self.redis_dir
         plugin_managed_dir = self.plugin_managed_dir
         plugin_sideloaded_dir = self.plugin_sideloaded_dir
-        local_registry_dir = self.local_registry_dir
+        shared_dir = self.shared_dir
         if contents_dir.exists():
             self.logger.debug(f"Contents directory exists: {contents_dir}")
         else:
@@ -583,11 +572,11 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
             plugin_sideloaded_dir.mkdir(parents=True, exist_ok=False)
             if sys.platform == "darwin":
                 time.sleep(1)
-        if local_registry_dir.exists():
-            self.logger.debug(f"Local registry directory exists: {local_registry_dir}")
+        if shared_dir.exists():
+            self.logger.debug(f"Shared directory exists: {shared_dir}")
         else:
-            self.logger.debug(f"Creating local registry dir: {local_registry_dir}")
-            local_registry_dir.mkdir(parents=True, exist_ok=False)
+            self.logger.debug(f"Creating shared dir: {shared_dir}")
+            shared_dir.mkdir(parents=True, exist_ok=False)
             if sys.platform == "darwin":
                 time.sleep(1)
 
@@ -759,7 +748,7 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 str(logs_dir): {"bind": "/home/koyomi/lanraragi/log", "mode": "rw"},
                 str(plugin_managed_dir): {"bind": "/home/koyomi/lanraragi/lib/LANraragi/Plugin/Managed", "mode": "rw"},
                 str(plugin_sideloaded_dir): {"bind": "/home/koyomi/lanraragi/lib/LANraragi/Plugin/Sideloaded", "mode": "rw"},
-                str(local_registry_dir): {"bind": LOCAL_REGISTRY_CONTAINER_PATH, "mode": "ro"},
+                str(self.shared_dir): {"bind": LRR_SHARED_CONTAINER_PATH, "mode": "ro"},
             }
             lrr_volumes.update(plugin_volumes)
             self.lrr_container = self.docker_client.containers.create(
@@ -1000,9 +989,9 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if self.plugin_sideloaded_dir.exists():
                 shutil.rmtree(self.plugin_sideloaded_dir)
                 self.logger.debug(f"Removed plugin sideloaded directory: {self.plugin_sideloaded_dir}")
-            if self.local_registry_dir.exists():
-                shutil.rmtree(self.local_registry_dir)
-                self.logger.debug(f"Removed local registry directory: {self.local_registry_dir}")
+            if self.shared_dir.exists():
+                shutil.rmtree(self.shared_dir)
+                self.logger.debug(f"Removed shared directory: {self.shared_dir}")
             redis_conf_staging = self.staging_dir / (self.resource_prefix + "redis.conf")
             if redis_conf_staging.exists():
                 redis_conf_staging.unlink()

@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.misc import (
-    CreateRegistryRequest,
     GetAvailablePluginsRequest,
     InstallPluginRequest,
     UsePluginRequest,
@@ -23,7 +22,9 @@ from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
 )
+from aio_lanraragi_tests.registries.local_registry import LocalRegistry
 from aio_lanraragi_tests.utils.api_wrappers import (
+    add_registry,
     create_archive_file,
     install_plugin_and_wait,
     upload_archive,
@@ -57,17 +58,10 @@ async def test_local_registry_install_errors(
     """
     environment.setup(with_api_key=True)
 
-    registry_json = environment.local_registry_dir / "registry.json"
-
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(
-            name="local-test",
-            provider="local",
-            path=environment.local_registry_path,
-        )
-    )
-    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
-    reg_id = response.id
+    registry = LocalRegistry(name="local-test", root=environment.shared_dir / "local-test")
+    registry.generate_manifest()
+    reg_id = await add_registry(lrr_client, environment, registry)
+    registry_json = registry.registry_json_path
 
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     dummy_sha = "00" * 32
@@ -314,13 +308,24 @@ async def test_local_registry_install_errors(
     # <<<<< ABSOLUTE PATH REJECTED <<<<<
 
     # >>>>> SYMLINK ESCAPE REJECTED >>>>>
-    escape_target = environment.local_registry_dir.parent / "outside-plugin.pm"
-    escape_target.write_text("outside", encoding="utf-8")
-    symlink_path = environment.local_registry_dir / "artifacts" / "escape-link.pm"
-    symlink_path.parent.mkdir(parents=True, exist_ok=True)
-    if symlink_path.exists() or symlink_path.is_symlink():
-        symlink_path.unlink()
-    symlink_path.symlink_to(escape_target)
+    # Escape target lives inside the shared mount but OUTSIDE this registry's
+    # root, so LRR resolves the symlink and rejects it via root-confinement on
+    # every deployment -- not merely because the target is invisible, which is
+    # all a bind-mount boundary would prove.
+    escape_target = environment.shared_dir / "outside-plugin.pm"
+    symlink_path = registry.root / "artifacts" / "escape-link.pm"
+    # Relative target so the link resolves identically on the host and inside the
+    # container's mount namespace.
+    relative_target = escape_target.relative_to(symlink_path.parent, walk_up=True)
+
+    def _plant_escape_symlink():
+        escape_target.write_text("outside", encoding="utf-8")
+        symlink_path.parent.mkdir(parents=True, exist_ok=True)
+        if symlink_path.exists() or symlink_path.is_symlink():
+            symlink_path.unlink()
+        symlink_path.symlink_to(relative_target)
+
+    await asyncio.to_thread(_plant_escape_symlink)
 
     try:
         registry_json.write_text(json.dumps({
@@ -352,17 +357,17 @@ async def test_local_registry_install_errors(
             InstallPluginRequest(namespace="symlink-plugin", registry=reg_id, version="1.0.0")
         )
         assert error is not None, "Expected install to fail for symlink escape"
-        assert "Plugin file not found" in error.error, f"Expected symlink-escape install rejected, got: {error.error!r}"
+        assert "escapes registry root" in error.error, (
+            f"Expected symlink-escape install rejected via root confinement, got: {error.error!r}"
+        )
         assert not list(environment.plugin_managed_dir.rglob("*.pm")), "No .pm files should be written for symlink escape"
     finally:
-        symlink_path.unlink(missing_ok=True)
-        escape_target.unlink(missing_ok=True)
+        await asyncio.to_thread(symlink_path.unlink, missing_ok=True)
+        await asyncio.to_thread(escape_target.unlink, missing_ok=True)
     # <<<<< SYMLINK ESCAPE REJECTED <<<<<
 
     plugin_rel_path = "artifacts/local-sample-downloader/1.0.0/LocalSample.pm"
-    plugin_file = environment.local_registry_dir / plugin_rel_path
-    plugin_file.parent.mkdir(parents=True, exist_ok=True)
-    plugin_file.write_text("""\
+    local_sample_pm = """\
 package LANraragi::Plugin::Managed::Download::LocalSample;
 
 use strict;
@@ -384,8 +389,10 @@ sub provide_url {
 }
 
 1;
-""", encoding="utf-8")
-    real_sha = hashlib.sha256(plugin_file.read_bytes()).hexdigest()
+"""
+    plugin_file = registry.root / plugin_rel_path
+    plugin_file.parent.mkdir(parents=True, exist_ok=True)
+    plugin_file.write_text(local_sample_pm, encoding="utf-8")
 
     # >>>>> SHA256 MISMATCH REJECTED >>>>>
     registry_json.write_text(json.dumps({
@@ -433,27 +440,13 @@ sub provide_url {
     # <<<<< SHA256 MISMATCH REJECTED <<<<<
 
     # >>>>> SHA256 MATCH INSTALLS >>>>>
-    registry_json.write_text(json.dumps({
-        "version": 1,
-        "generated_at": generated_at,
-        "plugins": {
-            "local-sample-downloader": {
-                "namespace": "local-sample-downloader",
-                "type": "download",
-                "versions": {
-                    "1.0.0": {
-                        "version": "1.0.0",
-                        "name": "Local Sample",
-                        "author": "test",
-                        "description": "local sample downloader",
-                        "artifact": plugin_rel_path,
-                        "sha256": real_sha,
-                        "published_at": generated_at,
-                    },
-                },
-            },
-        },
-    }))
+    registry.add_plugin(
+        "local-sample-downloader", "download", "1.0.0",
+        name="Local Sample", author="test", description="local sample downloader",
+        artifact_content=local_sample_pm, artifact_relpath=plugin_rel_path,
+        published_at=generated_at,
+    )
+    registry.generate_manifest()
 
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Expected refresh to succeed (status {error.status}): {error.error}"
@@ -491,7 +484,9 @@ async def test_install_blocked_against_default_namespace(
     environment.setup(with_api_key=True)
 
     plugin_rel_path = "artifacts/copytags-impostor/1.0.0/CopyTagsImpostor.pm"
-    plugin_file = environment.local_registry_dir / plugin_rel_path
+    registry = LocalRegistry(name="default-conflict", root=environment.shared_dir / "default-conflict")
+    registry.root.mkdir(parents=True, exist_ok=True)
+    plugin_file = registry.root / plugin_rel_path
     plugin_file.parent.mkdir(parents=True, exist_ok=True)
     plugin_file.write_text("""\
 package LANraragi::Plugin::Managed::Metadata::CopyTagsImpostor;
@@ -517,7 +512,7 @@ sub get_tags { return (); }
     real_sha = hashlib.sha256(plugin_file.read_bytes()).hexdigest()
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-    registry_json = environment.local_registry_dir / "registry.json"
+    registry_json = registry.registry_json_path
     registry_json.write_text(json.dumps({
         "version": 1,
         "generated_at": generated_at,
@@ -540,15 +535,7 @@ sub get_tags { return (); }
         },
     }))
 
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(
-            name="default-conflict",
-            provider="local",
-            path=environment.local_registry_path,
-        )
-    )
-    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
-    reg_id = response.id
+    reg_id = await add_registry(lrr_client, environment, registry)
 
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
@@ -594,7 +581,9 @@ async def test_install_blocked_against_invalid_filename(
     environment.setup(with_api_key=True)
 
     plugin_rel_path = "artifacts/filename-test/1.0.0/My Plugin.pm"
-    plugin_file = environment.local_registry_dir / plugin_rel_path
+    registry = LocalRegistry(name="filename-test", root=environment.shared_dir / "filename-test")
+    registry.root.mkdir(parents=True, exist_ok=True)
+    plugin_file = registry.root / plugin_rel_path
     plugin_file.parent.mkdir(parents=True, exist_ok=True)
     plugin_file.write_text("""\
 package LANraragi::Plugin::Managed::Download::SafePackage;
@@ -620,7 +609,7 @@ sub provide_url { return; }
     real_sha = hashlib.sha256(plugin_file.read_bytes()).hexdigest()
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-    registry_json = environment.local_registry_dir / "registry.json"
+    registry_json = registry.registry_json_path
     registry_json.write_text(json.dumps({
         "version": 1,
         "generated_at": generated_at,
@@ -643,11 +632,7 @@ sub provide_url { return; }
         },
     }))
 
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="filename-test", provider="local", path=environment.local_registry_path)
-    )
-    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
-    reg_id = response.id
+    reg_id = await add_registry(lrr_client, environment, registry)
 
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Refresh should accept the manifest (status {error.status}): {error.error}"
@@ -691,7 +676,9 @@ async def test_install_blocked_against_package_mismatch(
     environment.setup(with_api_key=True)
 
     plugin_rel_path = "artifacts/package-mismatch/1.0.0/Foo.pm"
-    plugin_file = environment.local_registry_dir / plugin_rel_path
+    registry = LocalRegistry(name="package-mismatch", root=environment.shared_dir / "package-mismatch")
+    registry.root.mkdir(parents=True, exist_ok=True)
+    plugin_file = registry.root / plugin_rel_path
     plugin_file.parent.mkdir(parents=True, exist_ok=True)
     plugin_file.write_text("""\
 package LANraragi::Plugin::Managed::Download::Bar;
@@ -717,7 +704,7 @@ sub provide_url { return; }
     real_sha = hashlib.sha256(plugin_file.read_bytes()).hexdigest()
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-    registry_json = environment.local_registry_dir / "registry.json"
+    registry_json = registry.registry_json_path
     registry_json.write_text(json.dumps({
         "version": 1,
         "generated_at": generated_at,
@@ -740,11 +727,7 @@ sub provide_url { return; }
         },
     }))
 
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="package-mismatch", provider="local", path=environment.local_registry_path)
-    )
-    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
-    reg_id = response.id
+    reg_id = await add_registry(lrr_client, environment, registry)
 
     response, error = await lrr_client.misc_api.refresh_registry(reg_id)
     assert not error, f"Refresh should accept the manifest (status {error.status}): {error.error}"
@@ -830,7 +813,9 @@ sub provide_url { return; }
         )
 
         plugin_rel_path = "artifacts/sample-downloader/1.0.0/SampleDownload.pm"
-        plugin_file = environment.local_registry_dir / plugin_rel_path
+        registry = LocalRegistry(name="sideloaded-conflict", root=environment.shared_dir / "sideloaded-conflict")
+        registry.root.mkdir(parents=True, exist_ok=True)
+        plugin_file = registry.root / plugin_rel_path
         plugin_file.parent.mkdir(parents=True, exist_ok=True)
         plugin_file.write_text("""\
 package LANraragi::Plugin::Managed::Download::SampleDownload;
@@ -856,7 +841,7 @@ sub provide_url { return; }
         real_sha = hashlib.sha256(plugin_file.read_bytes()).hexdigest()
         generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-        registry_json = environment.local_registry_dir / "registry.json"
+        registry_json = registry.registry_json_path
         registry_json.write_text(json.dumps({
             "version": 1,
             "generated_at": generated_at,
@@ -879,15 +864,7 @@ sub provide_url { return; }
             },
         }))
 
-        response, error = await lrr_client.misc_api.create_registry(
-            CreateRegistryRequest(
-                name="sideloaded-conflict",
-                provider="local",
-                path=environment.local_registry_path,
-            )
-        )
-        assert not error, f"Failed to create registry (status {error.status}): {error.error}"
-        reg_id = response.id
+        reg_id = await add_registry(lrr_client, environment, registry)
 
         response, error = await lrr_client.misc_api.refresh_registry(reg_id)
         assert not error, f"Failed to refresh registry (status {error.status}): {error.error}"
@@ -1036,55 +1013,28 @@ sub get_tags {{
             "plugins": plugins,
         }), encoding="utf-8")
 
-    reg1_dir = environment.local_registry_dir / "registry-1"
-    reg2_dir = environment.local_registry_dir / "registry-2"
-    reg3_dir = environment.local_registry_dir / "registry-3"
+    reg1 = LocalRegistry(name="registry-1", root=environment.shared_dir / "registry-1")
+    reg2 = LocalRegistry(name="registry-2", root=environment.shared_dir / "registry-2")
+    reg3 = LocalRegistry(name="registry-3", root=environment.shared_dir / "registry-3")
 
-    reg1_dir.mkdir(parents=True, exist_ok=True)
-    reg2_dir.mkdir(parents=True, exist_ok=True)
-    reg3_dir.mkdir(parents=True, exist_ok=True)
+    reg1.root.mkdir(parents=True, exist_ok=True)
+    reg2.root.mkdir(parents=True, exist_ok=True)
+    reg3.root.mkdir(parents=True, exist_ok=True)
 
-    write_registry(reg1_dir, [("1.0.0", 1), ("2.0.0", 1)], generated_at)
-    write_registry(reg2_dir, [("1.0.0", 2), ("1.1.0", 2), ("2.0.0", 2)], generated_at)
-    write_registry(reg3_dir, [("1.0.0", 3), ("1.1.0", 3), ("2.0.0", 3)], generated_at)
+    write_registry(reg1.root, [("1.0.0", 1), ("2.0.0", 1)], generated_at)
+    write_registry(reg2.root, [("1.0.0", 2), ("1.1.0", 2), ("2.0.0", 2)], generated_at)
+    write_registry(reg3.root, [("1.0.0", 3), ("1.1.0", 3), ("2.0.0", 3)], generated_at)
 
     # >>>>> SETUP THREE REGISTRIES >>>>>
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(
-            name="registry-1",
-            provider="local",
-            path=f"{environment.local_registry_path}/registry-1",
-        )
-    )
-    assert not error, f"Failed to create registry 1 (status {error.status}): {error.error}"
-    reg1_id = response.id
-
+    reg1_id = await add_registry(lrr_client, environment, reg1)
     response, error = await lrr_client.misc_api.refresh_registry(reg1_id)
     assert not error, f"Failed to refresh registry 1 (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(
-            name="registry-2",
-            provider="local",
-            path=f"{environment.local_registry_path}/registry-2",
-        )
-    )
-    assert not error, f"Failed to create registry 2 (status {error.status}): {error.error}"
-    reg2_id = response.id
-
+    reg2_id = await add_registry(lrr_client, environment, reg2)
     response, error = await lrr_client.misc_api.refresh_registry(reg2_id)
     assert not error, f"Failed to refresh registry 2 (status {error.status}): {error.error}"
 
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(
-            name="registry-3",
-            provider="local",
-            path=f"{environment.local_registry_path}/registry-3",
-        )
-    )
-    assert not error, f"Failed to create registry 3 (status {error.status}): {error.error}"
-    reg3_id = response.id
-
+    reg3_id = await add_registry(lrr_client, environment, reg3)
     response, error = await lrr_client.misc_api.refresh_registry(reg3_id)
     assert not error, f"Failed to refresh registry 3 (status {error.status}): {error.error}"
     # <<<<< SETUP THREE REGISTRIES <<<<<
@@ -1256,7 +1206,7 @@ sub get_tags {{
 
     # >>>>> VERSION-ORPHAN (DROP v1.0.0 FROM REGISTRY 3) >>>>>
     # rewrite registry-3 to list only v1.1.0 and v2.0.0; v1.0.0 is gone
-    write_registry(reg3_dir, [("1.1.0", 3), ("2.0.0", 3)], generated_at)
+    write_registry(reg3.root, [("1.1.0", 3), ("2.0.0", 3)], generated_at)
 
     response, error = await lrr_client.misc_api.refresh_registry(reg3_id)
     assert not error, f"Failed to refresh registry 3 after version drop (status {error.status}): {error.error}"
@@ -1312,18 +1262,18 @@ async def test_install_validation_classification(
     """
     environment.setup(with_api_key=True)
 
-    registry_json = environment.local_registry_dir / "registry.json"
+    registry = LocalRegistry(
+        name="load-check-classification", root=environment.shared_dir / "load-check-classification"
+    )
+    registry.root.mkdir(parents=True, exist_ok=True)
+    registry_json = registry.registry_json_path
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-    response, error = await lrr_client.misc_api.create_registry(
-        CreateRegistryRequest(name="load-check-classification", provider="local", path=environment.local_registry_path)
-    )
-    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
-    reg_id = response.id
+    reg_id = await add_registry(lrr_client, environment, registry)
 
     # >>>>> COMPILE FAILURE -> 422 (content error) >>>>>
     broken_rel = "artifacts/broken-loader/1.0.0/BrokenLoader.pm"
-    broken_file = environment.local_registry_dir / broken_rel
+    broken_file = registry.root / broken_rel
     broken_file.parent.mkdir(parents=True, exist_ok=True)
     broken_file.write_text("""\
 package LANraragi::Plugin::Managed::Metadata::BrokenLoader;
@@ -1372,7 +1322,7 @@ my $unterminated = (
 
     # >>>>> LOAD TIMEOUT -> 500 (operational fault) >>>>>
     slow_rel = "artifacts/slow-loader/1.0.0/SlowLoader.pm"
-    slow_file = environment.local_registry_dir / slow_rel
+    slow_file = registry.root / slow_rel
     slow_file.parent.mkdir(parents=True, exist_ok=True)
     slow_file.write_text("""\
 package LANraragi::Plugin::Managed::Metadata::SlowLoader;
