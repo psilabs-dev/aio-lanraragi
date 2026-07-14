@@ -1,6 +1,7 @@
 import logging
 from urllib.parse import urlparse
 
+import aiohttp
 import playwright.async_api._generated
 from lanraragi.clients.client import LRRClient
 
@@ -51,6 +52,25 @@ async def assert_console_logs_ok(
     """
 
     for evt in console_evts:
+        text = evt.text
+        if evt.type != "error" or "api.github.com" not in text or "Access-Control-Allow-Origin" not in text:
+            continue
+        start = text.find("'")
+        end = text.find("'", start + 1)
+        if start == -1 or end == -1:
+            continue
+        probe_url = text[start + 1:end]
+        LOGGER.info(f"Probing CORS-blocked GitHub request {probe_url} from test process for rate-limit diagnostics.")
+        try:
+            async with aiohttp.ClientSession() as probe_session, probe_session.get(probe_url, timeout=aiohttp.ClientTimeout(total=10)) as probe_resp:
+                LOGGER.info(f"GitHub probe {probe_url}: status={probe_resp.status} access-control-allow-origin={probe_resp.headers.get('access-control-allow-origin')!r} x-ratelimit-limit={probe_resp.headers.get('x-ratelimit-limit')} x-ratelimit-remaining={probe_resp.headers.get('x-ratelimit-remaining')} x-ratelimit-used={probe_resp.headers.get('x-ratelimit-used')} x-ratelimit-reset={probe_resp.headers.get('x-ratelimit-reset')} retry-after={probe_resp.headers.get('retry-after')}")
+                probe_body = await probe_resp.text()
+                LOGGER.info(f"GitHub probe body (first 500 chars): {probe_body[:500]}")
+        except (aiohttp.ClientError, TimeoutError) as probe_exc:
+            LOGGER.info(f"GitHub probe failed for {probe_url}: {type(probe_exc).__name__}: {probe_exc}")
+        break
+
+    for evt in console_evts:
         if (url := evt.location.get("url")) and not url.startswith(lrr_base_url):
             LOGGER.debug(f"Skipping non-LRR console log: {url}")
             continue
@@ -73,9 +93,16 @@ async def switch_display_mode(page: playwright.async_api._generated.Page, mode: 
     await page.locator("ul.context-menu-list").wait_for(state="hidden")
 
 async def assert_no_spinner(page: playwright.async_api.Page, timeout_ms: int = 3000):
-    """Assert that the reader loading spinner is gone within timeout_ms."""
+    """
+    Assert that no spinners are active that can indicate something is loading when it shouldn't.
+    """
     await page.wait_for_function(
-        """() => !document.querySelector('#i3.loading')""",
+        """() => {
+            const readerSpinning = document.querySelector('#i3.loading') !== null;
+            const indexProc = document.querySelector('#progress');
+            const indexSpinning = indexProc !== null && indexProc.offsetParent !== null;
+            return !readerSpinning && !indexSpinning;
+        }""",
         timeout=timeout_ms,
     )
 

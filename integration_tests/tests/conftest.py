@@ -71,6 +71,9 @@ def pytest_addoption(parser: pytest.Parser):
     regression : `bool = False`
         Run regression tests (behavioral expectation and e2e tests).
 
+    security : `bool = False`
+        Run security tests (XSS and other vulnerability regression suites).
+
     benchmark : `bool = False`
         Run benchmark tests.
 
@@ -85,13 +88,23 @@ def pytest_addoption(parser: pytest.Parser):
 
     resource-prefix : `str = ""`
         Session-wide prefix prepended to per-module resource prefixes.
+
+    container-runtime : `str = "docker"`
+        Container runtime for linux/macos deployments: "docker" or "podman". "podman" is assumed
+        rootless and driven only over its socket (no CLI); it runs services as the user-namespace
+        root so image startup and bind-mount ownership behave like Docker's rootful passthrough.
+
+    container-host : `str = None`
+        Override the container runtime socket URL (e.g.
+        "unix:///run/user/1000/podman/podman.sock"). Defaults to docker-py environment discovery
+        (honoring DOCKER_HOST) for docker, or the rootless per-user socket for podman.
     """
     parser.addoption("--build", action="store", default=None, help="Absolute path to docker build context for LANraragi.")
     parser.addoption("--build-ref", action="store", default=None, help="Git ref (commit, branch, tag) to checkout before building. Requires --build.")
     parser.addoption("--image", action="store", default=None, help="LANraragi image to use.")
     parser.addoption("--git-url", action="store", default=None, help="Link to a LANraragi git repository (e.g. fork or branch).")
     parser.addoption("--git-ref", action="store", default=None, help="Git ref to checkout; if not supplied, uses the default branch.")
-    parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
+    parser.addoption("--docker-api", action="store_true", default=False, help="Enable the low-level API client to stream image build logs. Uses the runtime-resolved socket (--container-host / DOCKER_HOST, or the default daemon).")
     parser.addoption("--dockerfile", action="store", default=None, help="Path to a custom Dockerfile. If relative, resolved relative to --build. Cannot be combined with --git-url or --image.")
     parser.addoption("--windist", action="store", default=None, help="Path to the LRR app distribution for Windows.")
     parser.addoption("--staging", action="store", default=Path.cwd() / ".staging", help="Path to the LRR staging directory (defaults to .staging).")
@@ -107,12 +120,15 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--playwright", action="store_true", default=False, help="Run Playwright UI tests. Requires `playwright install`")
     parser.addoption("--failing", action="store_true", default=False, help="Run tests that are known to fail.")
     parser.addoption("--regression", action="store_true", default=False, help="Run regression tests (behavioral expectation and e2e tests).")
+    parser.addoption("--security", action="store_true", default=False, help="Run security tests (XSS and other vulnerability regression suites).")
     parser.addoption("--benchmark", action="store_true", default=False, help="Run benchmark tests.")
     parser.addoption("--benchmark-output", action="store", default=None, help="Path to write benchmark results JSON.")
     parser.addoption("--benchmark-label", action="store", default=None, help="Label for this benchmark run (e.g. c0-r0).")
     parser.addoption("--no-rate-limit", action="store_true", default=False, help="Skip tests that depend on rate-limited external resources (e.g. raw.githubusercontent.com).")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
-    parser.addoption("--cache-backend", action="store", default="valkey", choices=["redis", "valkey", "valkey8"], help="Cache backend for Docker deployments. Default: valkey.")
+    parser.addoption("--cache-backend", action="store", default="valkey", choices=["redis", "valkey", "valkey8"], help="Cache backend for container deployments. Default: valkey.")
+    parser.addoption("--container-runtime", action="store", default="docker", choices=["docker", "podman"], help="Container runtime for linux/macos deployments. 'podman' is rootless and socket-only. Default: docker.")
+    parser.addoption("--container-host", action="store", default=None, help="Override container runtime socket URL (e.g. unix:///run/user/1000/podman/podman.sock). Defaults to the daemon for docker, or the rootless user socket for podman.")
     parser.addoption("--port-offset", type=int, action="store", default=0, help="Session-wide base port offset added to per-module offsets. Use to avoid conflicts between parallel sessions.")
     parser.addoption("--resource-prefix", action="store", default="", help="Session-wide prefix prepended to per-module resource prefixes. Use to isolate parallel sessions.")
 
@@ -132,6 +148,10 @@ def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
         "markers",
         "regression: Regression tests will be skipped by default."
+    )
+    config.addinivalue_line(
+        "markers",
+        "security: Security tests will be skipped by default."
     )
     config.addinivalue_line(
         "markers",
@@ -195,6 +215,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         for item in items:
             if 'regression' in item.keywords:
                 item.add_marker(skip_regression)
+
+    if not config.getoption("--security"):
+        skip_security = pytest.mark.skip(reason="need --security option enabled")
+        for item in items:
+            if 'security' in item.keywords:
+                item.add_marker(skip_security)
 
     if not config.getoption("--benchmark"):
         skip_benchmark = pytest.mark.skip(reason="need --benchmark option enabled")
