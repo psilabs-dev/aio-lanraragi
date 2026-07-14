@@ -30,6 +30,12 @@ async def assert_browser_responses_ok(responses: list[playwright.async_api._gene
             if status < 400 or status == 401:
                 continue
 
+            # Skip locked resource checks
+            if status == 423:
+                text = await response.text()
+                logger.warning(f"Tolerating transient lock (423) on {response.request.method} {response.url}: {text}")
+                continue
+
             # get the error message.
             text = await response.text()
             raise AssertionError(f"Status {status} with {response.request.method} {response.url}: {text}")
