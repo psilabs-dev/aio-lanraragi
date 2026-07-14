@@ -35,6 +35,7 @@ from aio_lanraragi_tests.exceptions import DeploymentException
 from aio_lanraragi_tests.utils.docker import set_pdeathsig
 
 DEFAULT_LANRARAGI_DOCKER_TAG = "difegue/lanraragi"
+LRR_SHARED_CONTAINER_PATH = "/srv/shared"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -215,6 +216,26 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
     def plugins_root_dir(self) -> Path:
         dirname = self.resource_prefix + "plugins"
         return self.staging_dir / dirname
+
+    @property
+    def plugin_managed_dir(self) -> Path:
+        """
+        Bind mount for LRR container:/home/koyomi/lanraragi/lib/LANraragi/Plugin/Managed.
+        """
+        dirname = self.resource_prefix + "plugin_managed"
+        return self.staging_dir / dirname
+
+    @property
+    def plugin_sideloaded_dir(self) -> Path:
+        """
+        Bind mount for LRR container:/home/koyomi/lanraragi/lib/LANraragi/Plugin/Sideloaded.
+        """
+        dirname = self.resource_prefix + "plugin_sideloaded"
+        return self.staging_dir / dirname
+
+    def lrr_mount_path(self, host_path: Path) -> str:
+        rel = Path(host_path).relative_to(self.shared_dir)
+        return f"{LRR_SHARED_CONTAINER_PATH}/{rel.as_posix()}"
 
     @property
     def docker_client(self) -> docker.DockerClient:
@@ -509,6 +530,9 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
         thumb_dir = self.thumb_dir
         logs_dir = self.logs_dir
         redis_dir = self.redis_dir
+        plugin_managed_dir = self.plugin_managed_dir
+        plugin_sideloaded_dir = self.plugin_sideloaded_dir
+        shared_dir = self.shared_dir
         if contents_dir.exists():
             self.logger.debug(f"Contents directory exists: {contents_dir}")
         else:
@@ -532,6 +556,27 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
 
             # Brief delay for VirtioFS to propagate the
             # newly created directory before it is used as a bind mount source.
+            if sys.platform == "darwin":
+                time.sleep(1)
+        if plugin_managed_dir.exists():
+            self.logger.debug(f"Plugin managed directory exists: {plugin_managed_dir}")
+        else:
+            self.logger.debug(f"Creating plugin managed dir: {plugin_managed_dir}")
+            plugin_managed_dir.mkdir(parents=True, exist_ok=False)
+            if sys.platform == "darwin":
+                time.sleep(1)
+        if plugin_sideloaded_dir.exists():
+            self.logger.debug(f"Plugin sideloaded directory exists: {plugin_sideloaded_dir}")
+        else:
+            self.logger.debug(f"Creating plugin sideloaded dir: {plugin_sideloaded_dir}")
+            plugin_sideloaded_dir.mkdir(parents=True, exist_ok=False)
+            if sys.platform == "darwin":
+                time.sleep(1)
+        if shared_dir.exists():
+            self.logger.debug(f"Shared directory exists: {shared_dir}")
+        else:
+            self.logger.debug(f"Creating shared dir: {shared_dir}")
+            shared_dir.mkdir(parents=True, exist_ok=False)
             if sys.platform == "darwin":
                 time.sleep(1)
 
@@ -701,6 +746,9 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 str(contents_dir): {"bind": "/home/koyomi/lanraragi/content", "mode": "rw"},
                 str(thumb_dir): {"bind": "/home/koyomi/lanraragi/thumb", "mode": "rw"},
                 str(logs_dir): {"bind": "/home/koyomi/lanraragi/log", "mode": "rw"},
+                str(plugin_managed_dir): {"bind": "/home/koyomi/lanraragi/lib/LANraragi/Plugin/Managed", "mode": "rw"},
+                str(plugin_sideloaded_dir): {"bind": "/home/koyomi/lanraragi/lib/LANraragi/Plugin/Sideloaded", "mode": "rw"},
+                str(self.shared_dir): {"bind": LRR_SHARED_CONTAINER_PATH, "mode": "ro"},
             }
             lrr_volumes.update(plugin_volumes)
             self.lrr_container = self.docker_client.containers.create(
@@ -895,6 +943,8 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
                 self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/content/*'], user='root')
                 self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/thumb/*'], user='root')
                 self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/log/*'], user='root')
+                self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/lib/LANraragi/Plugin/Managed/*'], user='root')
+                self.lrr_container.exec_run(["sh", "-c", 'rm -rf /home/koyomi/lanraragi/lib/LANraragi/Plugin/Sideloaded/*'], user='root')
             else:
                 self.logger.info(f"Container not running with status {status} (no teardown commands run): {self.lrr_container_name}")
         if self.lrr_container:
@@ -933,6 +983,15 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if self.plugins_root_dir.exists():
                 shutil.rmtree(self.plugins_root_dir)
                 self.logger.debug(f"Removed plugins directory: {self.plugins_root_dir}")
+            if self.plugin_managed_dir.exists():
+                shutil.rmtree(self.plugin_managed_dir)
+                self.logger.debug(f"Removed plugin managed directory: {self.plugin_managed_dir}")
+            if self.plugin_sideloaded_dir.exists():
+                shutil.rmtree(self.plugin_sideloaded_dir)
+                self.logger.debug(f"Removed plugin sideloaded directory: {self.plugin_sideloaded_dir}")
+            if self.shared_dir.exists():
+                shutil.rmtree(self.shared_dir)
+                self.logger.debug(f"Removed shared directory: {self.shared_dir}")
             redis_conf_staging = self.staging_dir / (self.resource_prefix + "redis.conf")
             if redis_conf_staging.exists():
                 redis_conf_staging.unlink()
