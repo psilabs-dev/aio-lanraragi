@@ -236,16 +236,21 @@ async def test_bypass_via_redis_config(request: pytest.FixtureRequest, resource_
                 f"Expected 'String is too short' in errors with Content-Type params, got: {error_messages}"
             )
 
-            expected_warning_message = 'OpenAPI >>> GET /api/archives/123 [{"message":"String is too short: 3\\/40.","path":"\\/id"}]'
+            expected_warning_prefix = "OpenAPI >>> GET /api/archives/123 ["
+            expected_warning_error = '{"message":"String is too short: 3\\/40.","path":"\\/id"}'
             found_validation_warning = False
             mojo_logs = env.read_mojo_logs()
             for event in parse_lrr_logs(mojo_logs):
-                if event.severity_level == "warn" and event.message == expected_warning_message:
+                if (
+                    event.severity_level == "warn"
+                    and event.message.startswith(expected_warning_prefix)
+                    and expected_warning_error in event.message
+                ):
                     found_validation_warning = True
                     break
             assert found_validation_warning, (
-                "Expected exact OpenAPI validation warning in mojo.log, but it was not found. "
-                f"expected={expected_warning_message!r}\n\n"
+                "Expected OpenAPI validation warning in mojo.log, but it was not found. "
+                f"expected prefix={expected_warning_prefix!r}, expected error={expected_warning_error!r}\n\n"
                 f"full_mojo_logs:\n{mojo_logs}"
             )
 

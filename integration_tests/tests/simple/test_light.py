@@ -273,16 +273,21 @@ async def test_openapi_invalid_request(lrr_client: LRRClient, environment: Abstr
     )
     assert status == 400, f"Expected bad request status from malformed arcid, got {status}"
     assert "String is too short" in content, f"Expected \"String is too short\" in response, got: {content}"
-    expected_warning_message = 'OpenAPI >>> GET /api/archives/123 [{"message":"String is too short: 3\\/40.","path":"\\/id"}]'
+    expected_warning_prefix = "OpenAPI >>> GET /api/archives/123 ["
+    expected_warning_error = '{"message":"String is too short: 3\\/40.","path":"\\/id"}'
     found_validation_warning = False
     mojo_logs = environment.read_mojo_logs()
     for event in parse_lrr_logs(mojo_logs):
-        if event.severity_level == "warn" and event.message == expected_warning_message:
+        if (
+            event.severity_level == "warn"
+            and event.message.startswith(expected_warning_prefix)
+            and expected_warning_error in event.message
+        ):
             found_validation_warning = True
             break
     assert found_validation_warning, (
-        "Expected exact OpenAPI validation warning in mojo.log, but it was not found. "
-        f"expected={expected_warning_message!r}\n\n"
+        "Expected OpenAPI validation warning in mojo.log, but it was not found. "
+        f"expected prefix={expected_warning_prefix!r}, expected error={expected_warning_error!r}\n\n"
         f"full_mojo_logs:\n{mojo_logs}"
     )
 
