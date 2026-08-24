@@ -20,9 +20,10 @@ import docker.models.volumes
 
 from aio_lanraragi_tests.common import DEFAULT_POSTGRES_PORT
 from aio_lanraragi_tests.deployment.base import PluginPathsT
-from aio_lanraragi_tests.deployment.docker import (
-    DockerLRRCacheBackend,
-    DockerLRRDeploymentContext,
+from aio_lanraragi_tests.deployment.container import (
+    ContainerLRRCacheBackend,
+    ContainerLRRDeploymentContext,
+    ContainerRuntime,
 )
 from aio_lanraragi_tests.exceptions import DeploymentException
 
@@ -31,7 +32,7 @@ DEFAULT_POSTGRES_DOCKER_TAG = "postgres:17.4"
 LOGGER = logging.getLogger(__name__)
 
 
-class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
+class DockerPostgresLRRDeploymentContext(ContainerLRRDeploymentContext):
     """
     Docker LRR deployment with an additional PostgreSQL container.
 
@@ -114,7 +115,8 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
         docker_api=None, logger: logging.Logger | None = None,
         global_run_id: int = None, is_allow_uploads: bool = True,
         is_force_build: bool = False,
-        cache_backend: DockerLRRCacheBackend = DockerLRRCacheBackend.REDIS,
+        cache_backend: ContainerLRRCacheBackend = ContainerLRRCacheBackend.VALKEY,
+        container_runtime: ContainerRuntime = ContainerRuntime.DOCKER,
         postgres_jit: bool = True,
         postgres_shared_buffers_mb: int = 128,
         postgres_work_mem_mb: int = 4,
@@ -126,6 +128,7 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
             logger=logger, global_run_id=global_run_id,
             is_allow_uploads=is_allow_uploads, is_force_build=is_force_build,
             cache_backend=cache_backend,
+            container_runtime=container_runtime,
         )
         self._postgres_jit = postgres_jit
         self._postgres_shared_buffers_mb = postgres_shared_buffers_mb
@@ -176,7 +179,7 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
             self.logger.debug(f"Postgres volume exists: {volume_name}")
 
         # pull postgres image
-        self._pull_docker_image_if_not_exists(DEFAULT_POSTGRES_DOCKER_TAG, force=False)
+        self._pull_image_if_not_exists(DEFAULT_POSTGRES_DOCKER_TAG, force=False)
 
         # pre-create network so postgres container can join it
         if not self.network:
@@ -287,7 +290,7 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
         self.logger.debug("LRR server is ready.")
 
     @override
-    def _reset_docker_test_env(self, remove_data: bool = False):
+    def _reset_test_env(self, remove_data: bool = False):
         # clean up postgres container before parent handles redis/LRR/network
         if self.postgres_container:
             self.postgres_container.stop(timeout=1)
@@ -301,4 +304,4 @@ class DockerPostgresLRRDeploymentContext(DockerLRRDeploymentContext):
                 volume.remove(force=True)
                 self.logger.debug(f"Removed postgres volume: {self.postgres_volume_name}")
 
-        super()._reset_docker_test_env(remove_data=remove_data)
+        super()._reset_test_env(remove_data=remove_data)
