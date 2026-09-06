@@ -4,9 +4,6 @@ Security UI integration tests for the LANraragi server.
 Stored-XSS regression suite covering category names, archive tags, and ToC titles rendered across
 the index, reader, upload, batch, and stats pages. Each test plants a payload through a normal API,
 opens the page that renders it, and asserts the payload does not execute.
-
-All tests are xfail(strict=False): they report xfail without the LRR-side fix and XPASS once built
-(--build) against a branch that escapes the value. Drop the xfail marker per finding as each fix merges.
 """
 
 import asyncio
@@ -61,10 +58,6 @@ ATTR_PAYLOAD = f"\"><img src=x onerror=\"console.error('{CANARY_MARKER}')\">"
 @pytest.mark.playwright
 @pytest.mark.regression
 @pytest.mark.security
-@pytest.mark.xfail(
-    reason="requires LRR-side fix: category name not safely embedded in the catList inline script (templates/index.html.tt2:61, JS-string context)",
-    strict=False,
-)
 async def test_category_name_escape_index(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -126,10 +119,6 @@ async def test_category_name_escape_index(
 @pytest.mark.playwright
 @pytest.mark.regression
 @pytest.mark.security
-@pytest.mark.xfail(
-    reason="requires LRR-side fix: category name not HTML-escaped in templates/reader.html.tt2:113 (label span) and :127 (option)",
-    strict=False,
-)
 async def test_category_name_escape_reader(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -207,10 +196,6 @@ async def test_category_name_escape_reader(
 @pytest.mark.playwright
 @pytest.mark.regression
 @pytest.mark.security
-@pytest.mark.xfail(
-    reason="requires LRR-side fix: category name not HTML-escaped in templates/upload.html.tt2:51 and templates/batch.html.tt2:124 (category option)",
-    strict=False,
-)
 async def test_category_name_escape_login_pages(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -279,10 +264,6 @@ async def test_category_name_escape_login_pages(
 @pytest.mark.playwright
 @pytest.mark.regression
 @pytest.mark.security
-@pytest.mark.xfail(
-    reason="requires LRR-side fix: source tag value not escaped in public/js/mod/common.js buildTagsDiv (:268 href)",
-    strict=False,
-)
 async def test_tag_escape_reader(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -348,10 +329,6 @@ async def test_tag_escape_reader(
 @pytest.mark.playwright
 @pytest.mark.regression
 @pytest.mark.security
-@pytest.mark.xfail(
-    reason="requires LRR-side fix: tag namespace/value not escaped in public/js/stats.js:34 (tag cloud)",
-    strict=False,
-)
 async def test_tag_escape_stats(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -418,10 +395,6 @@ async def test_tag_escape_stats(
 @pytest.mark.playwright
 @pytest.mark.regression
 @pytest.mark.security
-@pytest.mark.xfail(
-    reason="requires LRR-side fix: tag value not escaped in the compact/datatables tag column public/js/mod/index_datatables.js:168/174 and the namespace dropdown public/js/mod/index.js:335",
-    strict=False,
-)
 async def test_tag_escape_index_compact(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -490,10 +463,6 @@ async def test_tag_escape_index_compact(
 @pytest.mark.playwright
 @pytest.mark.regression
 @pytest.mark.security
-@pytest.mark.xfail(
-    reason="requires LRR-side fix: ToC chapter name not escaped in public/js/reader.js:1680/1685 (chapter selector)",
-    strict=False,
-)
 async def test_toc_name_escape_reader(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -562,10 +531,6 @@ async def test_toc_name_escape_reader(
 @pytest.mark.playwright
 @pytest.mark.regression
 @pytest.mark.security
-@pytest.mark.xfail(
-    reason="requires LRR-side fix: archive filename not HTML-escaped in the filename input value attribute (templates/edit.html.tt2:65)",
-    strict=False,
-)
 async def test_edit_filename_escape(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -629,10 +594,6 @@ async def test_edit_filename_escape(
 @pytest.mark.playwright
 @pytest.mark.regression
 @pytest.mark.security
-@pytest.mark.xfail(
-    reason="requires LRR-side fix: archive title/filename/tags not escaped in templates/duplicates.html.tt2:103/104 (title), :112 (filename), :120 (tags in onmouseover)",
-    strict=False,
-)
 async def test_duplicates_metadata_escape(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -707,10 +668,6 @@ async def test_duplicates_metadata_escape(
 @pytest.mark.playwright
 @pytest.mark.regression
 @pytest.mark.security
-@pytest.mark.xfail(
-    reason="requires LRR-side fix: plugin config value not HTML-escaped in the input value attribute (templates/plugins.html.tt2:199/200)",
-    strict=False,
-)
 async def test_plugin_config_value_escape(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -771,10 +728,6 @@ async def test_plugin_config_value_escape(
 @pytest.mark.playwright
 @pytest.mark.regression
 @pytest.mark.security
-@pytest.mark.xfail(
-    reason="requires LRR-side fix: archive filename not escaped in the delete toast rendered via dangerouslySetInnerHTML (public/js/mod/server.js:333, public/js/mod/common.js:557)",
-    strict=False,
-)
 async def test_delete_toast_filename_escape(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -840,10 +793,6 @@ async def test_delete_toast_filename_escape(
 @pytest.mark.playwright
 @pytest.mark.regression
 @pytest.mark.security
-@pytest.mark.xfail(
-    reason="requires LRR-side fix: download-by-URL response not escaped in the upload result row (public/js/upload.js:154, reflected url)",
-    strict=False,
-)
 async def test_upload_url_reflect_escape(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -900,10 +849,6 @@ async def test_upload_url_reflect_escape(
 @pytest.mark.playwright
 @pytest.mark.regression
 @pytest.mark.security
-@pytest.mark.xfail(
-    reason="requires LRR-side fix: uploaded filename not escaped in the upload result row (public/js/upload.js:28/35/43/52)",
-    strict=False,
-)
 async def test_upload_filename_escape(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
