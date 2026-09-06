@@ -6,13 +6,14 @@ import logging
 
 import pytest
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.misc import (
+    CreateRegistryRequest,
+)
 
 from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
 )
-from aio_lanraragi_tests.registries.local_registry import LocalRegistry
-from aio_lanraragi_tests.utils.api_wrappers import add_registry
 
 LOGGER = logging.getLogger(__name__)
 
@@ -72,9 +73,11 @@ async def test_ougi_lifecycle(
     # <<<<< SET NONEXISTENT ID <<<<<
 
     # >>>>> SET VALID ID >>>>>
-    registry = LocalRegistry(name="ougi-test", root=environment.shared_dir / "ougi-test")
-    registry.generate_manifest()
-    reg_id = await add_registry(lrr_client, environment, registry)
+    response, error = await lrr_client.misc_api.create_registry(
+        CreateRegistryRequest(name="ougi-test", provider="local", path=environment.local_registry_path)
+    )
+    assert not error, f"Failed to create registry (status {error.status}): {error.error}"
+    reg_id = response.id
 
     response, error = await lrr_client.misc_api.update_ougi(reg_id)
     assert not error, f"Failed to set Ougi (status {error.status}): {error.error}"
