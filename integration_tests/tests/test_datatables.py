@@ -85,7 +85,6 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerato
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.dev("navigation")
 async def test_reader_to_index_cross_dt(
         lrr_client: LRRClient, semaphore: asyncio.Semaphore,
         environment: AbstractLRRDeploymentContext,
@@ -215,7 +214,6 @@ async def test_reader_to_index_cross_dt(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.dev("navigation")
 async def test_navigation_new_category_cross_dt(
         lrr_client: LRRClient, semaphore: asyncio.Semaphore,
         environment: AbstractLRRDeploymentContext,
@@ -532,7 +530,6 @@ async def test_back_stack_no_growth_on_reload(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.dev("navigation")
 async def test_navigation_grouptanks(
         lrr_client: LRRClient, semaphore: asyncio.Semaphore,
         environment: AbstractLRRDeploymentContext,
@@ -673,7 +670,6 @@ async def test_navigation_grouptanks(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.dev("navigation-sort")
 async def test_navigation_sort_by_namespace(
         lrr_client: LRRClient, semaphore: asyncio.Semaphore,
         environment: AbstractLRRDeploymentContext,
