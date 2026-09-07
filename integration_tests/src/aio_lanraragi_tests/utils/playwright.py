@@ -1,6 +1,8 @@
+import contextlib
 import logging
 import re
 import time
+from typing import TypeVar
 from urllib.parse import urlparse
 
 import aiohttp
@@ -8,6 +10,38 @@ import playwright.async_api._generated
 from lanraragi.clients.client import LRRClient
 
 LOGGER = logging.getLogger(__name__)
+
+_PlaywrightTestContextManagerLike = TypeVar('_PlaywrightTestContextManagerLike', bound='PlaywrightTestContextManager')
+class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
+    """
+    Async context manager for all LRR playwright related testing. Manages the following lifecycle:
+
+    ```python
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+
+        try:
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            failed_requests: list[playwright.async_api._generated.Request] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+            page.on("requestfailed", lambda request: failed_requests.append(request))
+        finally:
+            await bc.close()
+            await browser.close()
+    ```
+
+    User of this context manager gets:
+
+    - `page`: the page with all this tracking enabled by default.
+    - `assert_ok`: assert everything is OK.
+    - `assert_requests_ok`: assert only requests are OK.
+    - `assert_http_ok`: assert only browser HTTP responses are OK.
+    - `assert_console_ok`: assert only console logs are OK.
+    - `assert_toasts_ok`: assert only toasts are OK.
+    """
 
 async def assert_browser_responses_ok(responses: list[playwright.async_api._generated.Response], lrr_client: LRRClient, logger: logging.Logger=LOGGER):
     """
