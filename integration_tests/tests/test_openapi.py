@@ -33,6 +33,7 @@ from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_a
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
+    assert_toasts_ok,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -337,6 +338,7 @@ async def test_validation_carousel_search(request: pytest.FixtureRequest, resour
 
                     await assert_browser_responses_ok(responses, client, logger=LOGGER)
                     await assert_console_logs_ok(console_evts, client.lrr_base_url)
+                    await assert_toasts_ok(page)
                 finally:
                     await bc.close()
                     await browser.close()

@@ -3,7 +3,6 @@ Category editor UI integration tests for the LANraragi server.
 Covers behavior of the category editor at /config/categories.
 """
 
-import asyncio
 import logging
 
 import playwright.async_api
@@ -24,6 +23,7 @@ from aio_lanraragi_tests.deployment.base import (
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
+    assert_toasts_ok,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -107,25 +107,15 @@ async def test_category_editor(
             # <<<<< READ PIN CHECKBOX <<<<<
 
             # >>>>> RENAME >>>>>
-            put_future: asyncio.Future = asyncio.get_event_loop().create_future()
-
-            async def on_put(response: playwright.async_api._generated.Response) -> None:
-                if put_future.done():
-                    return
-                if f"/api/categories/{category_id}" in response.url and response.request.method == "PUT":
-                    put_future.set_result(response.status)
-
-            page.on("response", on_put)
             await page.locator("#catname").fill(renamed)
             await page.locator("#catname").blur()
-            put_status = await asyncio.wait_for(put_future, timeout=10)
-            page.remove_listener("response", on_put)
-            assert put_status == 200, f"Category update PUT returned status {put_status}"
+            await page.wait_for_load_state("networkidle")
             await page.wait_for_timeout(500)
             # <<<<< RENAME <<<<<
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()

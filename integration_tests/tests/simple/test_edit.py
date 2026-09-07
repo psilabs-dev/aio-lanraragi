@@ -35,6 +35,7 @@ from aio_lanraragi_tests.utils.api_wrappers import (
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
+    assert_toasts_ok,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -206,6 +207,7 @@ async def test_tank_edit_archive_title_escape(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -229,7 +231,7 @@ async def test_tankoubon_edit_page_save(
     1. Upload 3 archives, create a tank, add archives to it.
     2. Open /edit?id=TANK_xxx in browser, wait for form.
     3. Change the title input, click Save Metadata.
-    4. Capture the PUT /api/tankoubons/{id} response: expect 200.
+    4. Expect the save success toast.
     5. Re-fetch the tank via API, assert new name persisted.
     6. Expect no HTTP errors, no console errors, no server error logs.
     """
@@ -291,23 +293,14 @@ async def test_tankoubon_edit_page_save(
                 await page.keyboard.press("Escape")
                 await asyncio.sleep(0.3)
 
-            put_future: asyncio.Future = asyncio.get_event_loop().create_future()
-            async def on_put(response: playwright.async_api._generated.Response) -> None:
-                if put_future.done():
-                    return
-                if response.request.method == "PUT" and f"/api/tankoubons/{tank_id}" in response.url:
-                    put_future.set_result(response)
-            page.on("response", on_put)
-
             await page.locator("#title").fill(new_name)
             await page.locator("#save-metadata").click()
-
-            put_response = await asyncio.wait_for(put_future, timeout=10)
-            assert put_response.status == 200, f"Tank PUT returned {put_response.status}: {await put_response.text()}"
-
+            # wait for the save toast before leaving the browser context
+            await page.locator(".Toastify__toast--success").first.wait_for(state="visible", timeout=10000)
             await page.wait_for_load_state("networkidle")
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -336,7 +329,7 @@ async def test_archive_edit_page_save(
        The button calls window.open, so the edit page arrives as a popup.
     3. Assert the filename, title, summary and tag fields carry the metadata the API reports.
     4. Change the title input, click Save Metadata.
-    5. Capture the PUT /api/archives/{id}/metadata response: expect 200.
+    5. Expect the save success toast.
     6. Re-fetch the archive via API, assert new title persisted.
     7. Expect no HTTP errors, no console errors, no server error logs.
     """
@@ -440,23 +433,14 @@ async def test_archive_edit_page_save(
                     f"Tag {tag.strip()!r} missing from tag field: got {actual_tags!r}"
                 )
 
-            put_future: asyncio.Future = asyncio.get_event_loop().create_future()
-            async def on_put(response: playwright.async_api._generated.Response) -> None:
-                if put_future.done():
-                    return
-                if response.request.method == "PUT" and f"/api/archives/{arcid}/metadata" in response.url:
-                    put_future.set_result(response)
-            edit_page.on("response", on_put)
-
             await edit_page.locator("#title").fill(new_title)
             await edit_page.locator("#save-metadata").click()
-
-            put_response = await asyncio.wait_for(put_future, timeout=10)
-            assert put_response.status == 200, f"Archive PUT returned {put_response.status}: {await put_response.text()}"
-
+            # wait for the save toast before leaving the browser context
+            await edit_page.locator(".Toastify__toast--success").first.wait_for(state="visible", timeout=10000)
             await edit_page.wait_for_load_state("networkidle")
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(edit_page)
         finally:
             await bc.close()
             await browser.close()

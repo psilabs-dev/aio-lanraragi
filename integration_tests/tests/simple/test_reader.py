@@ -5,7 +5,6 @@ such as page navigation and viewing, manga mode, slideshow, ToC, etc.
 
 import asyncio
 import http
-import json
 import logging
 import tempfile
 import zipfile
@@ -37,7 +36,10 @@ from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
     assert_no_spinner,
+    assert_toasts_ok,
     get_image_bytes_from_responses,
+    read_rendered_entries,
+    read_rendered_titles,
     switch_display_mode,
 )
 
@@ -165,6 +167,7 @@ async def test_slideshow(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -273,6 +276,7 @@ async def test_double_page_navigation(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -393,6 +397,8 @@ async def test_double_page_undecodable_page(
             )
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -466,22 +472,15 @@ async def test_archive_navigation(
                 LOGGER.info("Closing new releases overlay.")
                 await page.keyboard.press("Escape")
 
-            # Collect the datatables search response from the network waterfall
-            # to determine the display order of archives.
-            search_response_body = None
-            for resp in responses:
-                if "/search" not in resp.url or resp.request.method != "GET" or resp.status != 200:
-                    continue
-                body = json.loads(await resp.text())
-                if "data" in body and len(body["data"]) == 3:
-                    search_response_body = body
-                    break
-            assert search_response_body is not None, "Did not find datatables search response in network waterfall"
+            # Read the display order of archives as rendered on the index.
+            await assert_no_spinner(page)
+            dt_entries = await read_rendered_entries(page, 3)
+            assert len(dt_entries) == 3, f"Expected 3 archives rendered on the index, got {len(dt_entries)}"
             dt_arcids = []
             dt_titles = []
-            for entry in search_response_body["data"]:
-                dt_arcids.append(entry["arcid"])
-                dt_titles.append(entry["title"])
+            for title, arcid in dt_entries:
+                dt_arcids.append(arcid)
+                dt_titles.append(title)
             LOGGER.info(f"Datatables archive order: {list(zip(dt_titles, dt_arcids))}")
 
             # Assert and clear index page responses before navigating to reader.
@@ -648,6 +647,7 @@ async def test_archive_navigation(
                 await assert_console_logs_ok(console_evts2, lrr_client.lrr_base_url)
             finally:
                 await bc2.close()
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -713,22 +713,15 @@ async def test_slideshow_continue_navigation(
                 LOGGER.info("Closing new releases overlay.")
                 await page.keyboard.press("Escape")
 
-            # Collect the datatables search response from the network waterfall
-            # to determine the display order of archives.
-            search_response_body = None
-            for resp in responses:
-                if "/search" not in resp.url or resp.request.method != "GET" or resp.status != 200:
-                    continue
-                body = json.loads(await resp.text())
-                if "data" in body and len(body["data"]) == 3:
-                    search_response_body = body
-                    break
-            assert search_response_body is not None, "Did not find datatables search response in network waterfall"
+            # Read the display order of archives as rendered on the index.
+            await assert_no_spinner(page)
+            dt_entries = await read_rendered_entries(page, 3)
+            assert len(dt_entries) == 3, f"Expected 3 archives rendered on the index, got {len(dt_entries)}"
             dt_arcids = []
             dt_titles = []
-            for entry in search_response_body["data"]:
-                dt_arcids.append(entry["arcid"])
-                dt_titles.append(entry["title"])
+            for title, arcid in dt_entries:
+                dt_arcids.append(arcid)
+                dt_titles.append(title)
             LOGGER.info(f"Datatables archive order: {list(zip(dt_titles, dt_arcids))}")
 
             # Assert and clear index page responses before navigating to reader.
@@ -816,6 +809,7 @@ async def test_slideshow_continue_navigation(
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -1035,6 +1029,7 @@ async def test_toc_reader(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -1115,6 +1110,7 @@ async def test_tank_reader_renders(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -1186,6 +1182,10 @@ async def test_stamp_unauthorized_surfaces_error(
         try:
             page = await bc.new_page()
 
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
             await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}")
             await page.wait_for_load_state("networkidle")
             await assert_no_spinner(page)
@@ -1231,6 +1231,9 @@ async def test_stamp_unauthorized_surfaces_error(
             assert any("Unauthorized" in text for text in toast_texts), (
                 f"A failed call must surface the server's real error message; got toasts: {toast_texts!r}"
             )
+            # the 401 is deliberate: it drives the error toast asserted above, and the browser
+            # logs its own console error for it, so the console and toast sweeps do not apply
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
         finally:
             await bc.close()
             await browser.close()
@@ -1287,35 +1290,17 @@ async def test_return_to_index_preserves_namespace_sort(
     # <<<<< STAT REBUILD STAGE <<<<<
 
     async def capture_search_titles(page, action) -> list[str]:
-        """Run `action` (a DT redraw or a full index load) and return the title order from the
-        LAST DataTables /search response after the network settles.
+        """Run `action` (a DT redraw or a full index load) and return the title order as rendered.
 
         On a fresh index load the table draws twice: once with its hardcoded default order
-        (title), then again after consumeURLParameters() applies the URL's sort. The settled
-        order is therefore the LAST response, not the first. Only `draw=` requests are matched,
-        which excludes the carousel's /api/search* calls (they also return these archives, in a
-        different order)."""
-        captured: list[list[str]] = []
-
-        async def on_response(response: playwright.async_api._generated.Response) -> None:
-            if "draw=" not in response.url or response.request.method != "GET" or response.status != 200:
-                return
-            try:
-                body = json.loads(await response.text())
-            except Exception:  # noqa: BLE001 - response body may be gone after navigation
-                return
-            if "data" in body and len(body["data"]) == num_archives:
-                captured.append([entry["title"] for entry in body["data"]])
-
-        page.on("response", on_response)
-        try:
-            await action()
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(500)  # allow the post-URL-resolution redraw to land
-            assert captured, "no DataTables /search response was captured"
-            return captured[-1]
-        finally:
-            page.remove_listener("response", on_response)
+        (title), then again after consumeURLParameters() applies the URL's sort. Reading the
+        settled DOM after the network goes quiet therefore reflects the final order the user
+        sees, without needing to know which request produced it."""
+        await action()
+        await page.wait_for_load_state("networkidle")
+        await page.wait_for_timeout(500)  # allow the post-URL-resolution redraw to land
+        await assert_no_spinner(page)
+        return await read_rendered_titles(page, num_archives)
 
     # >>>>> UI STAGE >>>>>
     async with playwright.async_api.async_playwright() as p:
@@ -1324,6 +1309,10 @@ async def test_return_to_index_preserves_namespace_sort(
         try:
             page = await bc.new_page()
 
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
             await page.goto(lrr_client.lrr_base_url, timeout=60000)
             await page.wait_for_load_state("networkidle")
             if "New Version Release Notes" in await page.content():
@@ -1363,6 +1352,9 @@ async def test_return_to_index_preserves_namespace_sort(
                 f"got {returned_titles} (title order is {['Title 1', 'Title 2', 'Title 3']})"
             )
             assert "sort=artist" in page.url, f"Expected sort=artist in index URL after return, got {page.url}"
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()

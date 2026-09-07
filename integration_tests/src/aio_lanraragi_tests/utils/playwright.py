@@ -1,4 +1,6 @@
 import logging
+import re
+import time
 from urllib.parse import urlparse
 
 import aiohttp
@@ -130,3 +132,82 @@ async def get_image_bytes_from_responses(
         if resp.request.method == "GET" and resp.url == img_src and resp.status == 200:
             return await resp.body()
     raise AssertionError(f"Could not find browser response for img src={img_src!r}")
+
+
+async def read_rendered_titles(
+        page: playwright.async_api._generated.Page,
+        expected_count: int,
+        expected_titles: list[str] | None = None,
+        timeout_ms: int = 10000,
+) -> list[str]:
+    """
+    Read archive titles from the rendered rows, in display order.
+
+    Wraps `read_rendered_entries` and drops the arcid; the caller asserts on the titles.
+    """
+    entries = await read_rendered_entries(page, expected_count, expected_titles, timeout_ms)
+    titles: list[str] = []
+    for title, _ in entries:
+        titles.append(title)
+    return titles
+
+
+async def wait_for_input_value(
+        page: playwright.async_api._generated.Page,
+        locator: playwright.async_api._generated.Locator,
+        expected: str,
+        timeout_ms: int = 10000,
+) -> str:
+    """
+    Return the first `expected` observation or the last observation on timeout.
+    """
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    value = ""
+    while True:
+        try:
+            value = await locator.input_value(timeout=1000)
+        except Exception:  # noqa: BLE001 - element may be mid-rerender
+            value = ""
+        if value == expected or time.monotonic() >= deadline:
+            return value
+        await page.wait_for_timeout(200)
+
+
+async def read_rendered_entries(
+        page: playwright.async_api._generated.Page,
+        expected_count: int,
+        expected_titles: list[str] | None = None,
+        timeout_ms: int = 10000,
+) -> list[tuple[str, str]]:
+    """
+    Read (title, arcid) for each archive rendered in the current view, in display order.
+
+    Both come from the archive link a user clicks: its text is the title, its href carries the
+    id. Lets a test check rendered order and identity without reading the search response.
+
+    Polls until the view holds `expected_count` links and, when `expected_titles` is given,
+    until the rendered order matches it. When `expected_titles` is given it also supplies the
+    expected count. On timeout the entries actually rendered are returned, so the caller's
+    assertion reports the real mismatch.
+    """
+    if expected_titles is not None:
+        expected_count = len(expected_titles)
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    while True:
+        grid = page.locator('#thumbs_container .id2 a[href*="/reader?id="]')
+        links = grid if await grid.count() else page.locator('td.title a[href*="/reader?id="]')
+        count = await links.count()
+        expired = time.monotonic() >= deadline
+        if count == expected_count or expired:
+            entries: list[tuple[str, str]] = []
+            titles: list[str] = []
+            for i in range(count):
+                link = links.nth(i)
+                title = (await link.inner_text()).strip()
+                href = await link.get_attribute("href") or ""
+                match = re.search(r"[?&]id=([^&]+)", href)
+                entries.append((title, match.group(1) if match else ""))
+                titles.append(title)
+            if expired or expected_titles is None or titles == expected_titles:
+                return entries
+        await page.wait_for_timeout(200)

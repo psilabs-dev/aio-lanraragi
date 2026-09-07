@@ -33,6 +33,7 @@ from aio_lanraragi_tests.utils.api_wrappers import (
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
+    assert_toasts_ok,
     switch_display_mode,
 )
 
@@ -107,6 +108,7 @@ async def test_category_name_escape_index(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -184,6 +186,7 @@ async def test_category_name_escape_reader(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -252,6 +255,7 @@ async def test_category_name_escape_login_pages(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -317,6 +321,7 @@ async def test_tag_escape_reader(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -383,6 +388,7 @@ async def test_tag_escape_stats(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -451,6 +457,7 @@ async def test_tag_escape_index_compact(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -519,6 +526,7 @@ async def test_toc_name_escape_reader(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -568,7 +576,9 @@ async def test_edit_filename_escape(
         bc = await browser.new_context()
         try:
             page = await bc.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
             console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
             page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
@@ -582,6 +592,9 @@ async def test_edit_filename_escape(
 
             for evt in console_evts:
                 assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from edit filename: {evt.text}"
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -637,7 +650,9 @@ async def test_duplicates_metadata_escape(
         bc = await browser.new_context()
         try:
             page = await bc.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
             console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
             page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
@@ -656,6 +671,9 @@ async def test_duplicates_metadata_escape(
 
             for evt in console_evts:
                 assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from duplicates page: {evt.text}"
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -702,7 +720,9 @@ async def test_plugin_config_value_escape(
         bc = await browser.new_context()
         try:
             page = await bc.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
             console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
             page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
@@ -716,6 +736,9 @@ async def test_plugin_config_value_escape(
 
             for evt in console_evts:
                 assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from plugin config value: {evt.text}"
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -762,7 +785,9 @@ async def test_delete_toast_filename_escape(
         bc = await browser.new_context()
         try:
             page = await bc.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
             console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
             page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
@@ -781,6 +806,9 @@ async def test_delete_toast_filename_escape(
 
             for evt in console_evts:
                 assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from delete toast: {evt.text}"
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -819,7 +847,9 @@ async def test_upload_url_reflect_escape(
         bc = await browser.new_context()
         try:
             page = await bc.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
             console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
             page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
@@ -837,6 +867,9 @@ async def test_upload_url_reflect_escape(
 
             for evt in console_evts:
                 assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from upload URL result row: {evt.text}"
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -874,7 +907,9 @@ async def test_upload_filename_escape(
         bc = await browser.new_context()
         try:
             page = await bc.new_page()
+            responses: list[playwright.async_api._generated.Response] = []
             console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
             page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
@@ -895,6 +930,9 @@ async def test_upload_filename_escape(
 
             for evt in console_evts:
                 assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from upload filename result row: {evt.text}"
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
