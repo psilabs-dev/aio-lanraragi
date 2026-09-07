@@ -35,6 +35,7 @@ from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
+    assert_toasts_ok,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -190,7 +191,9 @@ async def sample_test_api_auth_matrix(
 
             # capture all network and console traffic
             responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
             page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
 
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("networkidle")
@@ -198,6 +201,8 @@ async def sample_test_api_auth_matrix(
 
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -231,6 +236,8 @@ async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploym
 
         try:
             page = await browser.new_page()
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("console", lambda console: console_evts.append(console))
 
             # capture all network and console traffic
             responses: list[playwright.async_api._generated.Response] = []
@@ -248,6 +255,8 @@ async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploym
 
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -289,6 +298,7 @@ async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploym
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -331,6 +341,7 @@ async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploym
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -397,6 +408,7 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -424,6 +436,7 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
