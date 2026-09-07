@@ -214,7 +214,6 @@ async def test_archive_upload_to_symlinked_dir(
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="requires LRR-side fix (PR #1600): replacing a same-named archive with different content erases the new metadata", strict=False)
 async def test_archive_replace(
     semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, is_lrr_debug_mode: bool,
     environment: AbstractLRRDeploymentContext
