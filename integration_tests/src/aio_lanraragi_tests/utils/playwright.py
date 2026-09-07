@@ -2,7 +2,8 @@ import contextlib
 import logging
 import re
 import time
-from typing import TypeVar
+from types import TracebackType
+from typing import TypeVar, override
 from urllib.parse import urlparse
 
 import aiohttp
@@ -36,21 +37,156 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
     User of this context manager gets:
 
     - `page`: the page with all this tracking enabled by default.
+    - `browser_context`: the owning browser context.
     - `assert_ok`: assert everything is OK.
     - `assert_requests_ok`: assert only requests are OK.
     - `assert_http_ok`: assert only browser HTTP responses are OK.
     - `assert_console_ok`: assert only console logs are OK.
     - `assert_toasts_ok`: assert only toasts are OK.
+    - `clear`: drop captured traffic, for tests that assert per stage.
+
+    User guide:
+
+    ```python
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
+        await page.do_stuff()
+        # ...
+        await pcm.assert_ok()
+    ```
     """
 
-async def assert_browser_responses_ok(responses: list[playwright.async_api._generated.Response], lrr_client: LRRClient, logger: logging.Logger=LOGGER):
+    @property
+    def logger(self) -> logging.Logger:
+        return self._logger
+
+    @logger.setter
+    def logger(self, logger: logging.Logger):
+        self._logger = logger
+
+    @property
+    def page(self) -> playwright.async_api._generated.Page:
+        """
+        The page under test, with response, console and failed-request tracking attached.
+        """
+        if self._page is None:
+            raise RuntimeError("page is only available inside the context manager.")
+        return self._page
+
+    @property
+    def browser_context(self) -> playwright.async_api._generated.BrowserContext:
+        """
+        The owning browser context.
+        """
+        if self._browser_context is None:
+            raise RuntimeError("browser_context is only available inside the context manager.")
+        return self._browser_context
+
+    def __init__(
+            self,
+            lrr_client: LRRClient,
+            browser_type: str="chromium",
+            logger: logging.Logger=LOGGER,
+    ):
+        """
+        `browser_type` selects the Playwright browser; use the chromium default unless the test
+        is browser-specific.
+        """
+        self.logger = logger
+        self._lrr_client: LRRClient = lrr_client
+        self._browser_type: str = browser_type
+
+        self._playwright: playwright.async_api._generated.Playwright | None = None
+        self._browser: playwright.async_api._generated.Browser | None = None
+        self._browser_context: playwright.async_api._generated.BrowserContext | None = None
+        self._page: playwright.async_api._generated.Page | None = None
+
+        self.responses: list[playwright.async_api._generated.Response] = []
+        self.console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+        self.failed_requests: list[playwright.async_api._generated.Request] = []
+
+    def clear(self) -> None:
+        """
+        Drop all captured traffic, so a later assertion only covers the stage that follows.
+        """
+        self.responses.clear()
+        self.console_evts.clear()
+        self.failed_requests.clear()
+
+    async def assert_requests_ok(self) -> None:
+        await assert_no_failed_requests(self.failed_requests, self._lrr_client, logger=self.logger)
+
+    async def assert_http_ok(self) -> None:
+        await assert_browser_responses_ok(self.responses, self._lrr_client, logger=self.logger)
+
+    async def assert_console_ok(self) -> None:
+        await assert_console_logs_ok(self.console_evts, self._lrr_client.lrr_base_url)
+
+    async def assert_toasts_ok(self) -> None:
+        await assert_toasts_ok(self.page)
+
+    async def assert_ok(self) -> None:
+        """
+        Assert no failed requests, no HTTP errors, no console errors and no error toasts.
+        """
+        await self.assert_requests_ok()
+        await self.assert_http_ok()
+        await self.assert_console_ok()
+        await self.assert_toasts_ok()
+
+    @override
+    async def __aenter__(self: _PlaywrightTestContextManagerLike) -> _PlaywrightTestContextManagerLike:
+        self._playwright = await playwright.async_api.async_playwright().start()
+        try:
+            browser_launcher: playwright.async_api._generated.BrowserType = getattr(self._playwright, self._browser_type)
+            self._browser = await browser_launcher.launch()
+            self._browser_context = await self._browser.new_context()
+            self._page = await self._browser_context.new_page()
+        except BaseException:
+            await self._teardown()
+            raise
+
+        self._page.on("response", lambda response: self.responses.append(response))
+        self._page.on("console", lambda console: self.console_evts.append(console))
+        self._page.on("requestfailed", lambda request: self.failed_requests.append(request))
+        return self
+
+    @override
+    async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_value: BaseException | None,
+            traceback: TracebackType | None,
+    ) -> bool:
+        if exc_type:
+            self.logger.error(f"Exception occurred: {exc_type.__name__}: {exc_value}")
+        await self._teardown()
+        return False
+
+    async def _teardown(self) -> None:
+        try:
+            if self._browser_context:
+                await self._browser_context.close()
+        finally:
+            try:
+                if self._browser:
+                    await self._browser.close()
+            finally:
+                if self._playwright:
+                    await self._playwright.stop()
+
+async def assert_browser_responses_ok(
+        responses: list[playwright.async_api._generated.Response],
+        lrr_client: LRRClient,
+        logger: logging.Logger=LOGGER
+):
     """
     Assert that all responses captured during a Playwright browser session were normal. This means:
 
     - Any LRR-side URL returned a 2xx, 3xx, or 401 (unauthenticated) status code.
     """
-    lrr_hostname = urlparse(lrr_client.lrr_host).hostname
-    hostnames = {lrr_hostname} if lrr_hostname != '127.0.0.1' else {'127.0.0.1', 'localhost'}
+    lrr_hostname: str = urlparse(lrr_client.lrr_host).hostname or ''
+    hostnames: set[str] = {'127.0.0.1', 'localhost'} if lrr_hostname == '127.0.0.1' else {lrr_hostname}
 
     for response in responses:
         url = response.url
@@ -78,6 +214,33 @@ async def assert_browser_responses_ok(responses: list[playwright.async_api._gene
             raise AssertionError(f"Status {status} with {response.request.method} {response.url}: {text}")
         elif status >= 400:
             logger.warning(f"Status {status} with {response.request.method} {response.url}")
+
+async def assert_no_failed_requests(requests: list[playwright.async_api._generated.Request], lrr_client: LRRClient, logger: logging.Logger=LOGGER):
+    """
+    Assert that no LRR-side request failed before it received a response. This means:
+
+    - Any LRR-side URL that never reached the server, e.g. net::ERR_CONNECTION_FAILED.
+
+    These never produce a response, so assert_browser_responses_ok cannot see them. Cancelled
+    requests (net::ERR_ABORTED) are tolerated.
+    """
+    lrr_hostname: str = urlparse(lrr_client.lrr_host).hostname or ''
+    hostnames: set[str] = {'127.0.0.1', 'localhost'} if lrr_hostname == '127.0.0.1' else {lrr_hostname}
+
+    for request in requests:
+        url = request.url
+        failure = request.failure
+
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+
+        if failure == "net::ERR_ABORTED":
+            logger.debug(f"Skipping cancelled request {url}")
+            continue
+
+        if hostname in hostnames:
+            raise AssertionError(f"Request failed with {failure}: {request.method} {url}")
+        logger.warning(f"Request failed with {failure}: {request.method} {url}")
 
 async def assert_console_logs_ok(
         console_evts: list[playwright.async_api._generated.ConsoleMessage],
@@ -148,9 +311,13 @@ async def assert_toasts_ok(page: playwright.async_api.Page):
     """
     error_toasts = page.locator(".Toastify__toast--error")
     count = await error_toasts.count()
-    if count:
-        messages = [(await error_toasts.nth(i).inner_text()).strip() for i in range(count)]
-        raise AssertionError(f"Expected no error toasts, found {count}: {messages}")
+    for i in range(count):
+        text = (await error_toasts.nth(i).inner_text()).strip()
+        if "github" in text.lower():
+            LOGGER.warning(f"Skipping external GitHub error toast: {text}")
+            continue
+
+        raise AssertionError(f"Expected no error toasts, found: {text}")
 
 async def get_image_bytes_from_responses(
         responses: list[playwright.async_api._generated.Response],
