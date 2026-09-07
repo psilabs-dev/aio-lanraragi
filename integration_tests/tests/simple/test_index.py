@@ -14,6 +14,7 @@ import playwright.async_api
 import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
+from lanraragi.models.archive import GetArchiveMetadataRequest
 from lanraragi.models.category import (
     AddArchiveToCategoryRequest,
     CreateCategoryRequest,
@@ -38,6 +39,9 @@ from aio_lanraragi_tests.utils.playwright import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+PIN_MARKER = "\U0001f4cc"  # 📌 symbol
+NEW_MARKER = "\U0001f195"  # 🆕 symbol
 
 
 @pytest.mark.asyncio
@@ -935,8 +939,10 @@ async def test_category_context_menu(
     1. Create 12 categories via API (1 static, 1 dynamic, 10 filler).
     2. Login via browser, navigate to index.
     3. Right-click static category, verify "Pin" label, click pin.
+       - Expect the category bar to mark the category as pinned.
     4. Right-click again, verify "Unpin" label, click unpin.
     5. Right-click again, verify "Pin" label restored (round-trip).
+       - Expect the pin marker to be gone.
     6. Right-click dynamic category, verify "Set as Bookmark" is absent.
     7. Right-click dropdown with no selection, verify no context menu appears.
     """
@@ -1027,6 +1033,11 @@ async def test_category_context_menu(
             await page.wait_for_load_state("networkidle")
             await page.wait_for_timeout(500)
 
+            pinned_label = await page.locator(f".favtag-btn#{static_cat_id}").input_value()
+            assert pinned_label == f"{PIN_MARKER}ctx-static", (
+                f"Expected '{PIN_MARKER}ctx-static' on the pinned category button, got {pinned_label!r}"
+            )
+
             # right-click again, verify "Unpin"
             static_btn = page.locator(f".favtag-btn#{static_cat_id}")
             await static_btn.wait_for(state="visible", timeout=5000)
@@ -1061,6 +1072,11 @@ async def test_category_context_menu(
             pin_item = menu.locator(".context-menu-item").first
             pin_text = await pin_item.locator("span").first.text_content()
             assert pin_text == "Pin", f"Expected 'Pin' after unpin round-trip, got {pin_text!r}"
+
+            unpinned_label = await page.locator(f".favtag-btn#{static_cat_id}").input_value()
+            assert unpinned_label == "ctx-static", (
+                f"Expected 'ctx-static' on the unpinned category button, got {unpinned_label!r}"
+            )
             # dismiss menu
             await page.keyboard.press("Escape")
             await page.wait_for_timeout(300)
@@ -1264,5 +1280,131 @@ async def test_multi_category_and_search(
             await bc.close()
             await browser.close()
     # <<<<< UI STAGE <<<<<
+
+    expect_no_error_logs(environment, LOGGER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.playwright
+@pytest.mark.failing
+async def test_new_archive(
+    lrr_client: LRRClient,
+    semaphore: asyncio.Semaphore,
+    environment: AbstractLRRDeploymentContext,
+) -> None:
+    """
+    Test that a newly uploaded archive is marked as new wherever archives are listed.
+
+    The three listings do not share a data source, and only /api/* is schema-validated
+    by OpenAPI, so each reads `isnew` back in a different form.
+
+    1. Upload an archive, rebuild stat hash, confirm the API flags it new.
+    2. Open the index with the carousel in "New Archives" mode.
+       - Expect the marker on the grid entry (grid reads /search).
+       - Expect the marker on the carousel slide (carousel reads /api/search).
+    3. Open the batch tagger.
+       - Expect the marker on the archive's list entry (batch reads /api/archives).
+    4. Expect no HTTP errors, no console errors, no server error logs.
+    """
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    _, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    title = "new archive"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        save_path = create_archive_file(tmpdir, "new-archive", 3)
+        response, error = await upload_archive(
+            lrr_client, save_path, save_path.name, semaphore, title=title, tags="",
+        )
+        assert not error, f"Upload failed (status {error.status}): {error.error}"
+        arcid = response.arcid
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> STAT REBUILD STAGE >>>>>
+    await trigger_stat_rebuild(lrr_client)
+    # <<<<< STAT REBUILD STAGE <<<<<
+
+    metadata, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
+    assert not error, f"Failed to read archive metadata (status {error.status}): {error.error}"
+    assert metadata.isnew, f"Uploaded archive {arcid} is not flagged new"
+
+    # Archive IDs are hex and may start with a digit, which no CSS id selector accepts.
+    arc_selector = f'[id="{arcid}"]'
+
+    # >>>>> UI STAGE >>>>>
+    async with playwright.async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        bc = await browser.new_context()
+        await bc.add_init_script("localStorage.setItem('carouselType', 'inbox');")
+
+        try:
+            page = await bc.new_page()
+
+            responses: list[playwright.async_api._generated.Response] = []
+            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+            page.on("response", lambda response: responses.append(response))
+            page.on("console", lambda console: console_evts.append(console))
+
+            # login to access the batch tagger
+            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+            await page.wait_for_load_state("networkidle")
+            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+            await page.get_by_role("button", name="Login").click()
+            await page.wait_for_load_state("networkidle")
+            responses.clear()
+            console_evts.clear()
+
+            await page.goto(lrr_client.lrr_base_url, timeout=60000)
+            await page.wait_for_load_state("domcontentloaded")
+            await page.wait_for_load_state("networkidle")
+
+            # dismiss new version overlay if present
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
+
+            await assert_no_spinner(page)
+
+            grid_entry = page.locator(f"#thumbs_container div.id1{arc_selector}")
+            await grid_entry.wait_for(state="attached", timeout=10000)
+            grid_text = await grid_entry.inner_text()
+
+            carousel_entry = page.locator(f".index-carousel-container div.id1{arc_selector}")
+            await carousel_entry.wait_for(state="attached", timeout=10000)
+            carousel_text = await carousel_entry.inner_text()
+
+            await page.goto(f"{lrr_client.lrr_base_url}/batch", timeout=60000)
+            await page.wait_for_load_state("networkidle")
+            batch_entry = page.locator(f"#archivelist label[for='{arcid}']")
+            await batch_entry.wait_for(state="visible", timeout=10000)
+            batch_text = await batch_entry.inner_text()
+
+            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
+            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+        finally:
+            await bc.close()
+            await browser.close()
+    # <<<<< UI STAGE <<<<<
+
+    # >>>>> VERIFY STAGE >>>>>
+    # Thumbnail entries render the status icons and the title on separate lines.
+    grid_lines = [line.strip() for line in grid_text.splitlines() if line.strip()]
+    assert grid_lines[:2] == [NEW_MARKER, title], (
+        f"Expected the grid entry to open with [{NEW_MARKER!r}, {title!r}], got {grid_lines[:2]!r}"
+    )
+
+    carousel_lines = [line.strip() for line in carousel_text.splitlines() if line.strip()]
+    assert carousel_lines[:2] == [NEW_MARKER, title], (
+        f"Expected the carousel slide to open with [{NEW_MARKER!r}, {title!r}], got {carousel_lines[:2]!r}"
+    )
+
+    assert batch_text == f"{title} {NEW_MARKER}", (
+        f"Expected the batch entry to read '{title} {NEW_MARKER}', got {batch_text!r}"
+    )
+    # <<<<< VERIFY STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)

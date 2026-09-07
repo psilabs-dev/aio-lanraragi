@@ -346,3 +346,61 @@ async def test_validation_carousel_search(request: pytest.FixtureRequest, resour
             await client.close()
     finally:
         env.teardown(remove_data=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    reason="openapi.yaml relaxed isnew to oneOf[boolean,string,null] in 3a014923, so any "
+           "string validates and corrupt values are no longer rejected.",
+    strict=False,
+)
+async def test_validation_rejects_corrupt_isnew(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int):
+    """
+    Verify response validation rejects an `isnew` value that is not a boolean.
+
+    This is the non-bypass counterpart to test_bypass_response_validation, whose docstring
+    already states the expected behaviour ("Without response bypass: 500 with
+    Expected boolean - got string") without exercising it.
+
+    1. Start LRR with validation enabled (no bypass).
+    2. Upload an archive, then corrupt its `isnew` Redis field to a non-boolean string.
+    3. Query the metadata endpoint.
+       - Expect 500 and an OpenAPI validation error naming the field.
+    """
+    env: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
+    try:
+        env.setup(with_api_key=True)
+        request.session.lrr_environments = {resource_prefix: env}
+
+        client = env.lrr_client()
+        try:
+            _, error = await client.misc_api.get_server_info()
+            assert not error, f"Failed to connect (status {error.status}): {error.error}"
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                archive_path = create_archive_file(Path(tmpdir), "test_corrupt_isnew", num_pages=1)
+                response, error = await upload_archive(
+                    client, archive_path, archive_path.name, asyncio.Semaphore(1),
+                    title="Corrupt Isnew Archive", tags="test:corrupt",
+                )
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+            arcid = response.arcid
+
+            r = env.redis_client
+            r.select(0)
+            r.hset(arcid, "isnew", "not_a_boolean")
+
+            status, content = await client.handle_request(
+                http.HTTPMethod.GET, client.build_url(f"/api/archives/{arcid}"), client.headers
+            )
+            body = json.loads(content)
+
+            assert status == 500, f"Expected 500 from response validation, got {status}. Body: {body}"
+            assert "errors" in body, f"Expected OpenAPI validation errors, got: {body}"
+            assert any("isnew" in str(e) for e in body["errors"]), (
+                f"Expected a validation error naming isnew, got: {body['errors']}"
+            )
+        finally:
+            await client.close()
+    finally:
+        env.teardown(remove_data=True)

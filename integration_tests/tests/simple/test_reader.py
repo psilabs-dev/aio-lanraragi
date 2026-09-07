@@ -43,6 +43,9 @@ from aio_lanraragi_tests.utils.playwright import (
 
 LOGGER = logging.getLogger(__name__)
 
+NEW_MARKER = "\U0001f195"  # 🆕 symbol
+READ_MARKER = "\U0001f451"  # 👑 symbol
+
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
@@ -59,6 +62,8 @@ async def test_slideshow(
     4. Wait 9 seconds
     5. Expect the final page (check page count + image bytes hash equal)
     6. Check reading progress is complete via API (slideshow affects reading progress)
+    7. Return to the index and check the archive renders as read, not as new.
+       - The reader clears the new flag on open, so only the read marker applies.
     """
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -135,6 +140,28 @@ async def test_slideshow(
 
             response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
             assert response.progress == 5, "Archive reading progress is not updated to last page after slideshow."
+            assert not response.isnew, "Opening the reader should have cleared the new flag."
+
+            # >>>>> INDEX STATUS MARKERS STAGE >>>>>
+            # Archive IDs are hex and may start with a digit, which no CSS id selector accepts.
+            arc_selector = f'[id="{arcid}"]'
+
+            await page.goto(lrr_client.lrr_base_url, timeout=60000)
+            await page.wait_for_load_state("networkidle")
+            if "New Version Release Notes" in await page.content():
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
+            await assert_no_spinner(page)
+
+            grid_status = page.locator(f"#thumbs_container div.id1{arc_selector} .status-icons")
+            await grid_status.wait_for(state="attached", timeout=10000)
+            grid_markers = (await grid_status.inner_text()).split()
+
+            assert grid_markers == [READ_MARKER], (
+                f"Expected only [{READ_MARKER!r}] on a fully-read archive, got {grid_markers!r}"
+            )
+            assert NEW_MARKER not in grid_markers, f"Read archive still marked new: {grid_markers!r}"
+            # <<<<< INDEX STATUS MARKERS STAGE <<<<<
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
@@ -374,7 +401,6 @@ async def test_double_page_undecodable_page(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.dev("navigation")
 async def test_archive_navigation(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 ):
@@ -630,7 +656,6 @@ async def test_archive_navigation(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.dev("navigation")
 async def test_slideshow_continue_navigation(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 ):
@@ -1097,7 +1122,6 @@ async def test_tank_reader_renders(
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("navigation")
 async def test_navigation_toasts_localized(lrr_client: LRRClient):
     """
     Archive-boundary toast strings must be localized via I18N, not hardcoded in reader.js.
