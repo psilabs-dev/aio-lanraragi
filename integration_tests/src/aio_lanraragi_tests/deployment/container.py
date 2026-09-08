@@ -42,11 +42,16 @@ LOGGER = logging.getLogger(__name__)
 class ContainerLRRCacheBackend(Enum):
     REDIS = "redis"
     VALKEY = "valkey"
+    VALKEY_7 = "valkey7"
     VALKEY_8 = "valkey8"
 
     @property
     def is_valkey(self) -> bool:
-        return self in (ContainerLRRCacheBackend.VALKEY, ContainerLRRCacheBackend.VALKEY_8)
+        return self in (
+            ContainerLRRCacheBackend.VALKEY,
+            ContainerLRRCacheBackend.VALKEY_7,
+            ContainerLRRCacheBackend.VALKEY_8,
+        )
 
     @property
     def image_tag(self): # Implicitly hinted
@@ -54,6 +59,8 @@ class ContainerLRRCacheBackend(Enum):
             case ContainerLRRCacheBackend.REDIS:
                 return "redis:7.2.4"
             case ContainerLRRCacheBackend.VALKEY:
+                return "valkey/valkey:9.1.2"
+            case ContainerLRRCacheBackend.VALKEY_7:
                 return "valkey/valkey:7.2"
             case ContainerLRRCacheBackend.VALKEY_8:
                 return "valkey/valkey:8.1"

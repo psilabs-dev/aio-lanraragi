@@ -16,7 +16,6 @@ import tempfile
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
-import playwright.async_api
 import playwright.async_api._generated
 import pytest
 import pytest_asyncio
@@ -31,8 +30,7 @@ from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.log_parse import parse_lrr_logs
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
 from aio_lanraragi_tests.utils.playwright import (
-    assert_browser_responses_ok,
-    assert_console_logs_ok,
+    PlaywrightTestContextManager,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -299,49 +297,94 @@ async def test_validation_carousel_search(request: pytest.FixtureRequest, resour
             _, error = await client.misc_api.get_server_info()
             assert not error, f"Failed to connect (status {error.status}): {error.error}"
 
-            async with playwright.async_api.async_playwright() as p:
-                browser = await p.chromium.launch()
-                bc = await browser.new_context()
-                await bc.add_init_script(
+            async with PlaywrightTestContextManager(client) as pcm:
+                page = pcm.page
+                await page.add_init_script(
                     "localStorage.setItem('carouselType', 'inbox');"
                     "localStorage.setItem('carouselOpen', '1');"
                 )
 
-                try:
-                    page = await bc.new_page()
-                    responses: list[playwright.async_api._generated.Response] = []
-                    console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+                await page.goto(f"{client.lrr_base_url}/")
+                await page.wait_for_load_state("networkidle")
 
-                    page.on("response", lambda r: responses.append(r))
-                    page.on("console", lambda m: console_evts.append(m))
+                search_responses: list[playwright.async_api._generated.Response] = []
+                for r in pcm.responses:
+                    if "/api/search" in r.url and "random" not in r.url and "cache" not in r.url:
+                        search_responses.append(r)
+                assert len(search_responses) > 0, "No /api/search response captured from carousel"
 
-                    await page.goto(f"{client.lrr_base_url}/")
-                    await page.wait_for_load_state("networkidle")
+                for r in search_responses:
+                    assert r.status in (200, 204), (
+                        f"Carousel search returned {r.status}, expected 200 or 204. URL: {r.url}"
+                    )
+                    assert "category=&" not in r.url and not r.url.endswith("category="), (
+                        f"Carousel URL contains empty category= param: {r.url}"
+                    )
+                    assert "filter=&" not in r.url and not r.url.endswith("filter="), (
+                        f"Carousel URL contains empty filter= param: {r.url}"
+                    )
 
-                    search_responses: list[playwright.async_api._generated.Response] = []
-                    for r in responses:
-                        if "/api/search" in r.url and "random" not in r.url and "cache" not in r.url:
-                            search_responses.append(r)
-                    assert len(search_responses) > 0, "No /api/search response captured from carousel"
-
-                    for r in search_responses:
-                        assert r.status in (200, 204), (
-                            f"Carousel search returned {r.status}, expected 200 or 204. URL: {r.url}"
-                        )
-                        assert "category=&" not in r.url and not r.url.endswith("category="), (
-                            f"Carousel URL contains empty category= param: {r.url}"
-                        )
-                        assert "filter=&" not in r.url and not r.url.endswith("filter="), (
-                            f"Carousel URL contains empty filter= param: {r.url}"
-                        )
-
-                    await assert_browser_responses_ok(responses, client, logger=LOGGER)
-                    await assert_console_logs_ok(console_evts, client.lrr_base_url)
-                finally:
-                    await bc.close()
-                    await browser.close()
+                await pcm.assert_ok()
 
             expect_no_error_logs(env, LOGGER)
+        finally:
+            await client.close()
+    finally:
+        env.teardown(remove_data=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    reason="openapi.yaml relaxed isnew to oneOf[boolean,string,null] in 3a014923, so any "
+           "string validates and corrupt values are no longer rejected.",
+    strict=False,
+)
+async def test_validation_rejects_corrupt_isnew(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int):
+    """
+    Verify response validation rejects an `isnew` value that is not a boolean.
+
+    This is the non-bypass counterpart to test_bypass_response_validation, whose docstring
+    already states the expected behaviour ("Without response bypass: 500 with
+    Expected boolean - got string") without exercising it.
+
+    1. Start LRR with validation enabled (no bypass).
+    2. Upload an archive, then corrupt its `isnew` Redis field to a non-boolean string.
+    3. Query the metadata endpoint.
+       - Expect 500 and an OpenAPI validation error naming the field.
+    """
+    env: AbstractLRRDeploymentContext = generate_deployment(request, resource_prefix, port_offset, logger=LOGGER)
+    try:
+        env.setup(with_api_key=True)
+        request.session.lrr_environments = {resource_prefix: env}
+
+        client = env.lrr_client()
+        try:
+            _, error = await client.misc_api.get_server_info()
+            assert not error, f"Failed to connect (status {error.status}): {error.error}"
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                archive_path = create_archive_file(Path(tmpdir), "test_corrupt_isnew", num_pages=1)
+                response, error = await upload_archive(
+                    client, archive_path, archive_path.name, asyncio.Semaphore(1),
+                    title="Corrupt Isnew Archive", tags="test:corrupt",
+                )
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+            arcid = response.arcid
+
+            r = env.redis_client
+            r.select(0)
+            r.hset(arcid, "isnew", "not_a_boolean")
+
+            status, content = await client.handle_request(
+                http.HTTPMethod.GET, client.build_url(f"/api/archives/{arcid}"), client.headers
+            )
+            body = json.loads(content)
+
+            assert status == 500, f"Expected 500 from response validation, got {status}. Body: {body}"
+            assert "errors" in body, f"Expected OpenAPI validation errors, got: {body}"
+            assert any("isnew" in str(e) for e in body["errors"]), (
+                f"Expected a validation error naming isnew, got: {body['errors']}"
+            )
         finally:
             await client.close()
     finally:
