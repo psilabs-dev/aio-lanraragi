@@ -4,10 +4,8 @@ Covers behavior of index page, datatables, custom column sorting, etc.
 """
 
 import asyncio
-import json
 import logging
 import tempfile
-from collections.abc import Callable
 from pathlib import Path
 
 import playwright.async_api
@@ -29,7 +27,11 @@ from aio_lanraragi_tests.utils.api_wrappers import (
 from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
+    assert_no_spinner,
+    assert_toasts_ok,
+    read_rendered_titles,
     switch_display_mode,
+    wait_for_input_value,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -49,12 +51,10 @@ async def test_header_click_sort(
     2. Open index page, switch to compact/table mode.
     3. Click the Title column header (default is already asc, so first click toggles to desc).
        - Expect the header gains sorting_desc class.
-       - Capture the search response triggered by the header click.
-       - Expect archives sorted by title descending.
+       - Expect the rendered archives sorted by title descending.
     4. Click the Title header again.
        - Expect the header gains sorting_asc class.
-       - Capture the search response.
-       - Expect archives sorted by title ascending.
+       - Expect the rendered archives sorted by title ascending.
     5. Expect no HTTP errors, no console errors, no server error logs.
     """
 
@@ -101,9 +101,12 @@ async def test_header_click_sort(
                 await page.keyboard.press("Escape")
                 await asyncio.sleep(0.3)
 
+            await assert_no_spinner(page)
+
             # switch to compact/table mode
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             responses.clear()
             console_evts.clear()
 
@@ -123,21 +126,9 @@ async def test_header_click_sort(
             await page.wait_for_timeout(200)
 
             # click title header to sort descending (default is already asc)
-            search_future: asyncio.Future = asyncio.get_event_loop().create_future()
-            async def on_desc_response(response: playwright.async_api._generated.Response) -> None:
-                if search_future.done():
-                    return
-                if "/search" not in response.url or response.request.method != "GET" or response.status != 200:
-                    return
-                body = json.loads(await response.text())
-                if "data" in body and len(body["data"]) == 3:
-                    search_future.set_result(body)
-            page.on("response", on_desc_response)
-
             await title_header.click()
-            search_response_body = await asyncio.wait_for(search_future, timeout=10)
-            page.remove_listener("response", on_desc_response)
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
 
             # verify header has sorting_desc class
             header_class = await title_header.get_attribute("class") or ""
@@ -145,11 +136,10 @@ async def test_header_click_sort(
                 f"Expected sorting_desc on title header after click, got class={header_class!r}"
             )
 
-            # verify title descending order: C, B, A
-            sorted_titles = []
-            for entry in search_response_body["data"]:
-                sorted_titles.append(entry["title"])
-            assert sorted_titles == ["archive C", "archive B", "archive A"], (
+            # verify title descending order as rendered: C, B, A
+            expected_desc = ["archive C", "archive B", "archive A"]
+            sorted_titles = await read_rendered_titles(page, 3, expected_desc)
+            assert sorted_titles == expected_desc, (
                 f"Expected descending title sort, got: {sorted_titles}"
             )
 
@@ -157,21 +147,9 @@ async def test_header_click_sort(
             responses.clear()
             console_evts.clear()
 
-            search_future = asyncio.get_event_loop().create_future()
-            async def on_asc_response(response: playwright.async_api._generated.Response) -> None:
-                if search_future.done():
-                    return
-                if "/search" not in response.url or response.request.method != "GET" or response.status != 200:
-                    return
-                body = json.loads(await response.text())
-                if "data" in body and len(body["data"]) == 3:
-                    search_future.set_result(body)
-            page.on("response", on_asc_response)
-
             await title_header.click()
-            search_response_body = await asyncio.wait_for(search_future, timeout=10)
-            page.remove_listener("response", on_asc_response)
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
 
             # verify header has sorting_asc class
             header_class = await title_header.get_attribute("class") or ""
@@ -179,16 +157,16 @@ async def test_header_click_sort(
                 f"Expected sorting_asc on title header after second click, got class={header_class!r}"
             )
 
-            # verify title ascending order: A, B, C
-            sorted_titles = []
-            for entry in search_response_body["data"]:
-                sorted_titles.append(entry["title"])
-            assert sorted_titles == ["archive A", "archive B", "archive C"], (
+            # verify title ascending order as rendered: A, B, C
+            expected_asc = ["archive A", "archive B", "archive C"]
+            sorted_titles = await read_rendered_titles(page, 3, expected_asc)
+            assert sorted_titles == expected_asc, (
                 f"Expected ascending title sort, got: {sorted_titles}"
             )
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -257,32 +235,17 @@ async def test_compact_column_sort_with_three_columns(
     await trigger_stat_rebuild(lrr_client)
     # <<<<< STAT REBUILD STAGE <<<<<
 
-    async def capture_search_response(page: playwright.async_api._generated.Page, num_expected: int) -> tuple[asyncio.Future, Callable]:
-        future: asyncio.Future = asyncio.get_event_loop().create_future()
-        async def on_response(response: playwright.async_api._generated.Response) -> None:
-            if future.done():
-                return
-            if "/search" not in response.url or response.request.method != "GET" or response.status != 200:
-                return
-            body = json.loads(await response.text())
-            if "data" in body and len(body["data"]) == num_expected:
-                future.set_result(body)
-        page.on("response", on_response)
-        return future, on_response
-
     async def assert_header_sort(page: playwright.async_api._generated.Page, header_locator: playwright.async_api._generated.Locator, expected_titles: list[str], expected_direction: str) -> None:
-        future, listener = await capture_search_response(page, num_archives)
         await header_locator.click()
-        body = await asyncio.wait_for(future, timeout=10)
-        page.remove_listener("response", listener)
         await page.wait_for_load_state("networkidle")
+        await assert_no_spinner(page)
 
         header_class = await header_locator.get_attribute("class") or ""
         assert f"sorting_{expected_direction}" in header_class, (
             f"Expected sorting_{expected_direction} on header, got class={header_class!r}"
         )
 
-        titles = [entry["title"] for entry in body["data"]]
+        titles = await read_rendered_titles(page, num_archives, expected_titles)
         assert titles == expected_titles, (
             f"Expected {expected_direction} order {expected_titles}, got {titles}"
         )
@@ -333,6 +296,7 @@ async def test_compact_column_sort_with_three_columns(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             responses.clear()
             console_evts.clear()
             # <<<<< 2 COLUMNS (DEFAULT: ARTIST, SERIES) <<<<<
@@ -371,6 +335,7 @@ async def test_compact_column_sort_with_three_columns(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             responses.clear()
             console_evts.clear()
             # <<<<< 3 COLUMNS (CHANGE COLUMN COUNT) <<<<<
@@ -435,6 +400,7 @@ async def test_compact_column_sort_with_three_columns(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             # <<<<< EDIT COLUMN 3 NAMESPACE <<<<<
         finally:
             await bc.close()
@@ -450,13 +416,20 @@ async def test_index_page(lrr_client: LRRClient) -> None:
     """
     Test that the index page loads without errors.
 
-    1. Navigate to index page.
-    2. Expect no HTTP errors and no console errors.
+    1. Verify the server has no archives.
+    2. Navigate to index page.
+    3. Expect the index to render no archive entries.
+    4. Expect no HTTP errors and no console errors.
     """
 
     # >>>>> TEST CONNECTION STAGE >>>>>
     _, error = await lrr_client.misc_api.get_server_info()
     assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+    assert len(response.data) == 0, "Server contains archives!"
+    del response, error
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
@@ -475,6 +448,12 @@ async def test_index_page(lrr_client: LRRClient) -> None:
             await page.goto(lrr_client.lrr_base_url)
             await page.wait_for_load_state("domcontentloaded")
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
+
+            rendered = await read_rendered_titles(page, 0, timeout_ms=2000)
+            assert rendered == [], (
+                f"Expected no archives rendered on an empty library, got: {rendered}"
+            )
 
             # dismiss new version overlay if present
             if "New Version Release Notes" in await page.content():
@@ -482,6 +461,7 @@ async def test_index_page(lrr_client: LRRClient) -> None:
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -501,9 +481,9 @@ async def test_custom_column_sort_display(
     1. Upload 3 archives with distinct artist/series tags, rebuild stat hash.
     2. Open index page, wait for stat-driven namespace options to populate the
        sort dropdown. Expect "title", "artist", "series" present.
-    3. Select "artist" from dropdown, capture the search response.
+    3. Select "artist" from dropdown.
        - Expect dropdown retains "artist" after DataTables re-draw.
-       - Expect archives sorted by artist namespace (artist:Bob last in asc).
+       - Expect the rendered archives sorted by artist namespace (artist:Bob last in asc).
     4. Switch to compact/table mode.
        - Expect custom column headers (#customheader1, #customheader2) visible.
     5. Switch back to thumbnail mode, select "series" from dropdown.
@@ -584,33 +564,18 @@ async def test_custom_column_sort_display(
             responses.clear()
             console_evts.clear()
 
-            # set up a future to capture the search response triggered by the sort change
-            search_future: asyncio.Future = asyncio.get_event_loop().create_future()
-            async def on_search_response(response: playwright.async_api._generated.Response) -> None:
-                if search_future.done():
-                    return
-                if "/search" not in response.url or response.request.method != "GET" or response.status != 200:
-                    return
-                body = json.loads(await response.text())
-                if "data" in body:
-                    search_future.set_result(body)
-            page.on("response", on_search_response)
-
             await sort_dropdown.select_option("artist")
-            search_response_body = await asyncio.wait_for(search_future, timeout=10)
-            page.remove_listener("response", on_search_response)
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
 
             sort_value = await sort_dropdown.input_value()
             assert sort_value == "artist", (
                 f"Sort dropdown should show 'artist' after selecting it. Got '{sort_value}'."
             )
 
-            # verify the search response reflects artist-sorted order
-            sorted_titles = []
-            for entry in search_response_body["data"]:
-                sorted_titles.append(entry["title"])
-            assert len(sorted_titles) == 3, f"Expected 3 archives in search response, got {len(sorted_titles)}"
+            # verify the rendered order reflects artist-sorted order
+            sorted_titles = await read_rendered_titles(page, 3)
+            assert len(sorted_titles) == 3, f"Expected 3 archives rendered, got {len(sorted_titles)}"
             # archives 0,1 have artist:Alice, archive 2 has artist:Bob; asc order => Alice first
             assert sorted_titles[-1] == "test archive 2", (
                 f"Expected 'test archive 2' (artist:Bob) last in ascending artist sort, got order: {sorted_titles}"
@@ -619,6 +584,7 @@ async def test_custom_column_sort_display(
             # switch to compact/table mode and verify custom column headers are visible
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             responses.clear()
             console_evts.clear()
 
@@ -633,6 +599,7 @@ async def test_custom_column_sort_display(
             # switch back to thumbnail mode and select series sort
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             responses.clear()
             console_evts.clear()
 
@@ -641,32 +608,18 @@ async def test_custom_column_sort_display(
             await page.wait_for_timeout(500)
 
             # select series from dropdown and verify sort order
-            search_future = asyncio.get_event_loop().create_future()
-            async def on_series_search_response(response: playwright.async_api._generated.Response) -> None:
-                if search_future.done():
-                    return
-                if "/search" not in response.url or response.request.method != "GET" or response.status != 200:
-                    return
-                body = json.loads(await response.text())
-                if "data" in body and len(body["data"]) == 3:
-                    search_future.set_result(body)
-            page.on("response", on_series_search_response)
-
             await sort_dropdown.select_option("series")
-            search_response_body = await asyncio.wait_for(search_future, timeout=10)
-            page.remove_listener("response", on_series_search_response)
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
 
             sort_value = await sort_dropdown.input_value()
             assert sort_value == "series", (
                 f"Sort dropdown should show 'series' after selecting it. Got '{sort_value}'."
             )
 
-            # verify the search response reflects series-sorted order
-            sorted_titles = []
-            for entry in search_response_body["data"]:
-                sorted_titles.append(entry["title"])
-            assert len(sorted_titles) == 3, f"Expected 3 archives in search response, got {len(sorted_titles)}"
+            # verify the rendered order reflects series-sorted order
+            sorted_titles = await read_rendered_titles(page, 3)
+            assert len(sorted_titles) == 3, f"Expected 3 archives rendered, got {len(sorted_titles)}"
             # archive 2 has series:Another, archives 0,1 have series:Test; asc => Another first
             assert sorted_titles[0] == "test archive 2", (
                 f"Expected 'test archive 2' (series:Another) first in ascending series sort, got order: {sorted_titles}"
@@ -675,6 +628,7 @@ async def test_custom_column_sort_display(
             # switch back to title sort
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             responses.clear()
             console_evts.clear()
 
@@ -688,6 +642,7 @@ async def test_custom_column_sort_display(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -782,6 +737,7 @@ async def test_search_autocomplete_namespace_exclusion(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -858,6 +814,7 @@ async def test_search_autocomplete_namespace_exclusion(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -956,18 +913,8 @@ async def test_category_context_menu(
             pin_text = await pin_item.locator("span").first.text_content()
             assert pin_text == "Pin", f"Expected 'Pin', got {pin_text!r}"
 
-            # click pin, wait for PUT response
-            put_future: asyncio.Future = asyncio.get_event_loop().create_future()
-            async def on_pin_response(response: playwright.async_api._generated.Response) -> None:
-                if put_future.done():
-                    return
-                if f"/api/categories/{static_cat_id}" in response.url and response.request.method == "PUT":
-                    put_future.set_result(response.status)
-            page.on("response", on_pin_response)
+            # click pin, then wait for the button to re-render with the pin marker
             await pin_item.click()
-            pin_status = await asyncio.wait_for(put_future, timeout=10)
-            page.remove_listener("response", on_pin_response)
-            assert pin_status == 200, f"Pin PUT returned status {pin_status}"
             await page.wait_for_load_state("networkidle")
             await page.wait_for_timeout(500)
 
@@ -981,20 +928,12 @@ async def test_category_context_menu(
             pin_text = await pin_item.locator("span").first.text_content()
             assert pin_text == "Unpin", f"Expected 'Unpin' after pin, got {pin_text!r}"
 
-            # click unpin
-            put_future = asyncio.get_event_loop().create_future()
-            async def on_unpin_response(response: playwright.async_api._generated.Response) -> None:
-                if put_future.done():
-                    return
-                if f"/api/categories/{static_cat_id}" in response.url and response.request.method == "PUT":
-                    put_future.set_result(response.status)
-            page.on("response", on_unpin_response)
+            # click unpin, then wait for the pin marker to clear from the button
             await pin_item.click()
-            pin_status = await asyncio.wait_for(put_future, timeout=10)
-            page.remove_listener("response", on_unpin_response)
-            assert pin_status == 200, f"Unpin PUT returned status {pin_status}"
             await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(500)
+            await wait_for_input_value(
+                page, page.locator(f".favtag-btn#{static_cat_id}"), "ctx-static",
+            )
 
             # right-click again, verify "Pin" restored
             static_btn = page.locator(f".favtag-btn#{static_cat_id}")
@@ -1012,6 +951,7 @@ async def test_category_context_menu(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
             responses.clear()
             console_evts.clear()
 
@@ -1058,6 +998,7 @@ async def test_category_context_menu(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()

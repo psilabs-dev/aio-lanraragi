@@ -4,7 +4,6 @@ and cross-DT-page archive navigation.
 """
 
 import asyncio
-import json
 import logging
 import tempfile
 from collections.abc import AsyncGenerator, Generator
@@ -25,6 +24,8 @@ from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
     assert_no_spinner,
+    assert_toasts_ok,
+    read_rendered_entries,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -132,18 +133,15 @@ async def test_reader_to_index_cross_dt(
             if "New Version Release Notes" in await page.content():
                 await page.keyboard.press("Escape")
 
-            # Collect DT order (pagesize=3, so first page shows 3 archives).
-            search_response_body = None
-            for resp in responses:
-                if "/search" not in resp.url or resp.request.method != "GET" or resp.status != 200:
-                    continue
-                body = json.loads(await resp.text())
-                if "data" in body and len(body["data"]) == 3:
-                    search_response_body = body
-                    break
-            assert search_response_body is not None, "Did not find datatables search response with 3 archives"
-            dt_arcids = [entry["arcid"] for entry in search_response_body["data"]]
-            dt_titles = [entry["title"] for entry in search_response_body["data"]]
+            # Collect DT order as rendered (pagesize=3, so first page shows 3 archives).
+            await assert_no_spinner(page)
+            dt_entries = await read_rendered_entries(page, 3)
+            assert len(dt_entries) == 3, f"Expected 3 archives rendered on DT page 1, got {len(dt_entries)}"
+            dt_titles = []
+            dt_arcids = []
+            for title, arcid in dt_entries:
+                dt_titles.append(title)
+                dt_arcids.append(arcid)
             LOGGER.info(f"DT page 1 order: {list(zip(dt_titles, dt_arcids))}")
             responses.clear()
             console_evts.clear()
@@ -183,6 +181,7 @@ async def test_reader_to_index_cross_dt(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -238,17 +237,11 @@ async def test_forward_history_after_redraw(
             if "New Version Release Notes" in await page.content():
                 await page.keyboard.press("Escape")
 
-            # Find the archive in DT results.
-            search_response_body = None
-            for resp in responses:
-                if "/search" not in resp.url or resp.request.method != "GET" or resp.status != 200:
-                    continue
-                body = json.loads(await resp.text())
-                if "data" in body and len(body["data"]) == 1:
-                    search_response_body = body
-                    break
-            assert search_response_body is not None, "Did not find search response with 1 archive"
-            dt_title = search_response_body["data"][0]["title"]
+            # Find the archive as rendered in DT results.
+            await assert_no_spinner(page)
+            dt_entries = await read_rendered_entries(page, 1)
+            assert len(dt_entries) == 1, f"Expected 1 archive rendered, got {len(dt_entries)}"
+            dt_title = dt_entries[0][0]
             responses.clear()
             console_evts.clear()
 
@@ -281,6 +274,7 @@ async def test_forward_history_after_redraw(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -351,6 +345,7 @@ async def test_back_stack_no_growth_on_reload(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()

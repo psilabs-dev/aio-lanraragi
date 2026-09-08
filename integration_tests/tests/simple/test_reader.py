@@ -4,7 +4,6 @@ such as page navigation and viewing, manga mode, slideshow, ToC, etc.
 """
 
 import asyncio
-import json
 import logging
 import tempfile
 from pathlib import Path
@@ -27,7 +26,9 @@ from aio_lanraragi_tests.utils.playwright import (
     assert_browser_responses_ok,
     assert_console_logs_ok,
     assert_no_spinner,
+    assert_toasts_ok,
     get_image_bytes_from_responses,
+    read_rendered_entries,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -127,6 +128,7 @@ async def test_slideshow(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -235,6 +237,7 @@ async def test_double_page_navigation(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -306,22 +309,15 @@ async def test_archive_navigation(
                 LOGGER.info("Closing new releases overlay.")
                 await page.keyboard.press("Escape")
 
-            # Collect the datatables search response from the network waterfall
-            # to determine the display order of archives.
-            search_response_body = None
-            for resp in responses:
-                if "/search" not in resp.url or resp.request.method != "GET" or resp.status != 200:
-                    continue
-                body = json.loads(await resp.text())
-                if "data" in body and len(body["data"]) == 3:
-                    search_response_body = body
-                    break
-            assert search_response_body is not None, "Did not find datatables search response in network waterfall"
+            # Read the display order of archives as rendered on the index.
+            await assert_no_spinner(page)
+            dt_entries = await read_rendered_entries(page, 3)
+            assert len(dt_entries) == 3, f"Expected 3 archives rendered on the index, got {len(dt_entries)}"
             dt_arcids = []
             dt_titles = []
-            for entry in search_response_body["data"]:
-                dt_arcids.append(entry["arcid"])
-                dt_titles.append(entry["title"])
+            for title, arcid in dt_entries:
+                dt_arcids.append(arcid)
+                dt_titles.append(title)
             LOGGER.info(f"Datatables archive order: {list(zip(dt_titles, dt_arcids))}")
 
             # Assert and clear index page responses before navigating to reader.
@@ -447,6 +443,7 @@ async def test_archive_navigation(
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -513,22 +510,15 @@ async def test_slideshow_continue_navigation(
                 LOGGER.info("Closing new releases overlay.")
                 await page.keyboard.press("Escape")
 
-            # Collect the datatables search response from the network waterfall
-            # to determine the display order of archives.
-            search_response_body = None
-            for resp in responses:
-                if "/search" not in resp.url or resp.request.method != "GET" or resp.status != 200:
-                    continue
-                body = json.loads(await resp.text())
-                if "data" in body and len(body["data"]) == 3:
-                    search_response_body = body
-                    break
-            assert search_response_body is not None, "Did not find datatables search response in network waterfall"
+            # Read the display order of archives as rendered on the index.
+            await assert_no_spinner(page)
+            dt_entries = await read_rendered_entries(page, 3)
+            assert len(dt_entries) == 3, f"Expected 3 archives rendered on the index, got {len(dt_entries)}"
             dt_arcids = []
             dt_titles = []
-            for entry in search_response_body["data"]:
-                dt_arcids.append(entry["arcid"])
-                dt_titles.append(entry["title"])
+            for title, arcid in dt_entries:
+                dt_arcids.append(arcid)
+                dt_titles.append(title)
             LOGGER.info(f"Datatables archive order: {list(zip(dt_titles, dt_arcids))}")
 
             # Assert and clear index page responses before navigating to reader.
@@ -616,6 +606,7 @@ async def test_slideshow_continue_navigation(
             # check browser traffic is OK.
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
@@ -835,6 +826,7 @@ async def test_toc_reader(
 
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
+            await assert_toasts_ok(page)
         finally:
             await bc.close()
             await browser.close()
