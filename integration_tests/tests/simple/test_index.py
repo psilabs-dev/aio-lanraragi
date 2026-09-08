@@ -8,7 +8,6 @@ import logging
 import tempfile
 from pathlib import Path
 
-import playwright.async_api
 import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
@@ -29,10 +28,8 @@ from aio_lanraragi_tests.utils.api_wrappers import (
     upload_archive,
 )
 from aio_lanraragi_tests.utils.playwright import (
-    assert_browser_responses_ok,
-    assert_console_logs_ok,
+    PlaywrightTestContextManager,
     assert_no_spinner,
-    assert_toasts_ok,
     read_rendered_titles,
     switch_display_mode,
     wait_for_input_value,
@@ -87,100 +84,82 @@ async def test_header_click_sort(
     # <<<<< STAT REBUILD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-        try:
-            page = await bc.new_page()
+        await page.goto(lrr_client.lrr_base_url, timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+        # dismiss new version overlay if present
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
 
-            await page.goto(lrr_client.lrr_base_url, timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        # The index performs its initial DataTables draw on load; ensure the processing spinner
+        # clears (guards against a wedged index spinner, e.g. a throwing drawCallback).
+        await assert_no_spinner(page)
 
-            # dismiss new version overlay if present
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-                await asyncio.sleep(0.3)
+        # switch to compact/table mode
+        await pcm.assert_ok()
+        pcm.clear()
 
-            # The index performs its initial DataTables draw on load; ensure the processing spinner
-            # clears (guards against a wedged index spinner, e.g. a throwing drawCallback).
-            await assert_no_spinner(page)
+        await switch_display_mode(page, "compact")
+        await page.wait_for_load_state("networkidle")
+        await page.wait_for_timeout(500)
 
-            # switch to compact/table mode
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-            responses.clear()
-            console_evts.clear()
+        # drag-resize the title header to trigger resizableColumns mousedown
+        title_header = page.locator("th.title")
+        box = await title_header.bounding_box()
+        right_edge_x = box["x"] + box["width"] - 5
+        center_y = box["y"] + box["height"] / 2
+        await page.mouse.move(right_edge_x, center_y)
+        await page.mouse.down()
+        await page.mouse.move(right_edge_x + 20, center_y)
+        await page.mouse.up()
+        await page.wait_for_timeout(200)
 
-            await switch_display_mode(page, "compact")
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(500)
+        # click title header to sort descending (default is already asc)
+        await title_header.click()
+        await page.wait_for_load_state("networkidle")
+        # The header sort class is set during the (async) DataTables redraw, which can land after
+        # networkidle; wait for the index spinner to clear before reading post-draw DOM state.
+        await assert_no_spinner(page)
 
-            # drag-resize the title header to trigger resizableColumns mousedown
-            title_header = page.locator("th.title")
-            box = await title_header.bounding_box()
-            right_edge_x = box["x"] + box["width"] - 5
-            center_y = box["y"] + box["height"] / 2
-            await page.mouse.move(right_edge_x, center_y)
-            await page.mouse.down()
-            await page.mouse.move(right_edge_x + 20, center_y)
-            await page.mouse.up()
-            await page.wait_for_timeout(200)
+        # verify header has sorting_desc class
+        header_class = await title_header.get_attribute("class") or ""
+        assert "sorting_desc" in header_class, (
+            f"Expected sorting_desc on title header after click, got class={header_class!r}"
+        )
 
-            # click title header to sort descending (default is already asc)
-            await title_header.click()
-            await page.wait_for_load_state("networkidle")
-            # The header sort class is set during the (async) DataTables redraw, which can land after
-            # networkidle; wait for the index spinner to clear before reading post-draw DOM state.
-            await assert_no_spinner(page)
+        # verify title descending order as rendered: C, B, A
+        expected_desc = ["archive C", "archive B", "archive A"]
+        sorted_titles = await read_rendered_titles(page, 3, expected_desc)
+        assert sorted_titles == expected_desc, (
+            f"Expected descending title sort, got: {sorted_titles}"
+        )
 
-            # verify header has sorting_desc class
-            header_class = await title_header.get_attribute("class") or ""
-            assert "sorting_desc" in header_class, (
-                f"Expected sorting_desc on title header after click, got class={header_class!r}"
-            )
+        # click title header again to sort ascending
+        pcm.clear()
 
-            # verify title descending order as rendered: C, B, A
-            expected_desc = ["archive C", "archive B", "archive A"]
-            sorted_titles = await read_rendered_titles(page, 3, expected_desc)
-            assert sorted_titles == expected_desc, (
-                f"Expected descending title sort, got: {sorted_titles}"
-            )
+        await title_header.click()
+        await page.wait_for_load_state("networkidle")
+        await assert_no_spinner(page)
 
-            # click title header again to sort ascending
-            responses.clear()
-            console_evts.clear()
+        # verify header has sorting_asc class
+        header_class = await title_header.get_attribute("class") or ""
+        assert "sorting_asc" in header_class, (
+            f"Expected sorting_asc on title header after second click, got class={header_class!r}"
+        )
 
-            await title_header.click()
-            await page.wait_for_load_state("networkidle")
-            await assert_no_spinner(page)
+        # verify title ascending order as rendered: A, B, C
+        expected_asc = ["archive A", "archive B", "archive C"]
+        sorted_titles = await read_rendered_titles(page, 3, expected_asc)
+        assert sorted_titles == expected_asc, (
+            f"Expected ascending title sort, got: {sorted_titles}"
+        )
 
-            # verify header has sorting_asc class
-            header_class = await title_header.get_attribute("class") or ""
-            assert "sorting_asc" in header_class, (
-                f"Expected sorting_asc on title header after second click, got class={header_class!r}"
-            )
-
-            # verify title ascending order as rendered: A, B, C
-            expected_asc = ["archive A", "archive B", "archive C"]
-            sorted_titles = await read_rendered_titles(page, 3, expected_asc)
-            assert sorted_titles == expected_asc, (
-                f"Expected ascending title sort, got: {sorted_titles}"
-            )
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -262,160 +241,140 @@ async def test_compact_column_sort_with_three_columns(
         )
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-        try:
-            page = await bc.new_page()
+        await page.goto(lrr_client.lrr_base_url, timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
 
-            await page.goto(lrr_client.lrr_base_url, timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        # switch to compact mode
+        await switch_display_mode(page, "compact")
+        await page.wait_for_load_state("networkidle")
+        await page.wait_for_timeout(500)
 
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-                await asyncio.sleep(0.3)
+        # >>>>> 2 COLUMNS (DEFAULT: ARTIST, SERIES) >>>>>
+        LOGGER.debug("Testing sort with default 2 columns.")
 
-            # switch to compact mode
-            await switch_display_mode(page, "compact")
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(500)
+        artist_header = page.locator("#customheader1")
+        await artist_header.wait_for(state="visible", timeout=5000)
+        series_header = page.locator("#customheader2")
+        await series_header.wait_for(state="visible", timeout=5000)
 
-            # >>>>> 2 COLUMNS (DEFAULT: ARTIST, SERIES) >>>>>
-            LOGGER.debug("Testing sort with default 2 columns.")
+        asc_titles = expected_asc["artist"]
+        desc_titles = list(reversed(asc_titles))
+        await assert_header_sort(page, artist_header, asc_titles, "asc")
+        await assert_header_sort(page, artist_header, desc_titles, "desc")
 
-            artist_header = page.locator("#customheader1")
-            await artist_header.wait_for(state="visible", timeout=5000)
-            series_header = page.locator("#customheader2")
-            await series_header.wait_for(state="visible", timeout=5000)
+        asc_titles = expected_asc["series"]
+        desc_titles = list(reversed(asc_titles))
+        await assert_header_sort(page, series_header, asc_titles, "asc")
+        await assert_header_sort(page, series_header, desc_titles, "desc")
 
-            asc_titles = expected_asc["artist"]
-            desc_titles = list(reversed(asc_titles))
-            await assert_header_sort(page, artist_header, asc_titles, "asc")
-            await assert_header_sort(page, artist_header, desc_titles, "desc")
+        await pcm.assert_ok()
+        pcm.clear()
+        # <<<<< 2 COLUMNS (DEFAULT: ARTIST, SERIES) <<<<<
 
-            asc_titles = expected_asc["series"]
-            desc_titles = list(reversed(asc_titles))
-            await assert_header_sort(page, series_header, asc_titles, "asc")
-            await assert_header_sort(page, series_header, desc_titles, "desc")
+        # >>>>> 3 COLUMNS (CHANGE COLUMN COUNT) >>>>>
+        LOGGER.debug("Changing column count to 3.")
 
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-            responses.clear()
-            console_evts.clear()
-            # <<<<< 2 COLUMNS (DEFAULT: ARTIST, SERIES) <<<<<
+        column_count_select = page.locator("#columnCount")
+        async with page.expect_navigation(timeout=30000):
+            await column_count_select.select_option("3")
+        await page.wait_for_load_state("networkidle")
 
-            # >>>>> 3 COLUMNS (CHANGE COLUMN COUNT) >>>>>
-            LOGGER.debug("Changing column count to 3.")
+        # dismiss overlay if present after reload
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
+        await page.wait_for_timeout(500)
 
-            column_count_select = page.locator("#columnCount")
-            async with page.expect_navigation(timeout=30000):
-                await column_count_select.select_option("3")
-            await page.wait_for_load_state("networkidle")
+        artist_header = page.locator("#customheader1")
+        await artist_header.wait_for(state="visible", timeout=5000)
+        series_header = page.locator("#customheader2")
+        await series_header.wait_for(state="visible", timeout=5000)
+        header3 = page.locator("#customheader3")
+        await header3.wait_for(state="visible", timeout=5000)
 
-            # dismiss overlay if present after reload
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-                await asyncio.sleep(0.3)
-            await page.wait_for_timeout(500)
+        # verify columns 1 and 2 still sort correctly after column count change
+        asc_titles = expected_asc["artist"]
+        desc_titles = list(reversed(asc_titles))
+        await assert_header_sort(page, artist_header, asc_titles, "asc")
+        await assert_header_sort(page, artist_header, desc_titles, "desc")
 
-            artist_header = page.locator("#customheader1")
-            await artist_header.wait_for(state="visible", timeout=5000)
-            series_header = page.locator("#customheader2")
-            await series_header.wait_for(state="visible", timeout=5000)
-            header3 = page.locator("#customheader3")
-            await header3.wait_for(state="visible", timeout=5000)
+        asc_titles = expected_asc["series"]
+        desc_titles = list(reversed(asc_titles))
+        await assert_header_sort(page, series_header, asc_titles, "asc")
+        await assert_header_sort(page, series_header, desc_titles, "desc")
 
-            # verify columns 1 and 2 still sort correctly after column count change
-            asc_titles = expected_asc["artist"]
-            desc_titles = list(reversed(asc_titles))
-            await assert_header_sort(page, artist_header, asc_titles, "asc")
-            await assert_header_sort(page, artist_header, desc_titles, "desc")
+        await pcm.assert_ok()
+        pcm.clear()
+        # <<<<< 3 COLUMNS (CHANGE COLUMN COUNT) <<<<<
 
-            asc_titles = expected_asc["series"]
-            desc_titles = list(reversed(asc_titles))
-            await assert_header_sort(page, series_header, asc_titles, "asc")
-            await assert_header_sort(page, series_header, desc_titles, "desc")
+        # >>>>> EDIT COLUMN 3 NAMESPACE >>>>>
+        # Phase 3a: "Group" (capital G) — invalid namespace, cells must be empty
+        LOGGER.info("Phase 3a: editing column 3 to 'Group' (invalid namespace)")
 
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-            responses.clear()
-            console_evts.clear()
-            # <<<<< 3 COLUMNS (CHANGE COLUMN COUNT) <<<<<
+        edit_btn = page.locator("#edit-header-3")
+        await edit_btn.click()
 
-            # >>>>> EDIT COLUMN 3 NAMESPACE >>>>>
-            # Phase 3a: "Group" (capital G) — invalid namespace, cells must be empty
-            LOGGER.info("Phase 3a: editing column 3 to 'Group' (invalid namespace)")
+        swal_input = page.locator(".swal2-input")
+        await swal_input.wait_for(state="visible", timeout=5000)
+        await swal_input.fill("Group")
+        swal_confirm = page.locator(".swal2-confirm")
+        await swal_confirm.click()
+        await page.wait_for_load_state("networkidle")
+        await page.wait_for_timeout(500)
 
-            edit_btn = page.locator("#edit-header-3")
-            await edit_btn.click()
-
-            swal_input = page.locator(".swal2-input")
-            await swal_input.wait_for(state="visible", timeout=5000)
-            await swal_input.fill("Group")
-            swal_confirm = page.locator(".swal2-confirm")
-            await swal_confirm.click()
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(500)
-
-            # "Group" does not match "group:" tags — column 3 cells must be empty
-            col3_cells = page.locator("td.customheader3")
-            cell_count = await col3_cells.count()
-            assert cell_count == num_archives, (
-                f"Expected {num_archives} rows, got {cell_count}"
+        # "Group" does not match "group:" tags — column 3 cells must be empty
+        col3_cells = page.locator("td.customheader3")
+        cell_count = await col3_cells.count()
+        assert cell_count == num_archives, (
+            f"Expected {num_archives} rows, got {cell_count}"
+        )
+        for i in range(cell_count):
+            text = (await col3_cells.nth(i).inner_text()).strip()
+            assert text == "", (
+                f"Expected empty cell for invalid namespace 'Group', got: '{text}'"
             )
-            for i in range(cell_count):
-                text = (await col3_cells.nth(i).inner_text()).strip()
-                assert text == "", (
-                    f"Expected empty cell for invalid namespace 'Group', got: '{text}'"
-                )
 
-            # Phase 3b: "group" (lowercase) — valid namespace, cells populated + sort works
-            LOGGER.info("Phase 3b: editing column 3 to 'group' (valid namespace)")
+        # Phase 3b: "group" (lowercase) — valid namespace, cells populated + sort works
+        LOGGER.info("Phase 3b: editing column 3 to 'group' (valid namespace)")
 
-            edit_btn = page.locator("#edit-header-3")
-            await edit_btn.click()
+        edit_btn = page.locator("#edit-header-3")
+        await edit_btn.click()
 
-            swal_input = page.locator(".swal2-input")
-            await swal_input.wait_for(state="visible", timeout=5000)
-            await swal_input.fill("group")
-            swal_confirm = page.locator(".swal2-confirm")
-            await swal_confirm.click()
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(500)
+        swal_input = page.locator(".swal2-input")
+        await swal_input.wait_for(state="visible", timeout=5000)
+        await swal_input.fill("group")
+        swal_confirm = page.locator(".swal2-confirm")
+        await swal_confirm.click()
+        await page.wait_for_load_state("networkidle")
+        await page.wait_for_timeout(500)
 
-            # "group" matches "group:" tags — column 3 cells must be populated
-            col3_cells = page.locator("td.customheader3")
-            for i in range(await col3_cells.count()):
-                text = (await col3_cells.nth(i).inner_text()).strip()
-                assert text != "", (
-                    f"Expected non-empty cell for valid namespace 'group', got empty at row {i}"
-                )
+        # "group" matches "group:" tags — column 3 cells must be populated
+        col3_cells = page.locator("td.customheader3")
+        for i in range(await col3_cells.count()):
+            text = (await col3_cells.nth(i).inner_text()).strip()
+            assert text != "", (
+                f"Expected non-empty cell for valid namespace 'group', got empty at row {i}"
+            )
 
-            # Verify header click sort works correctly with valid namespace
-            header3 = page.locator("#customheader3")
-            await header3.wait_for(state="visible", timeout=5000)
+        # Verify header click sort works correctly with valid namespace
+        header3 = page.locator("#customheader3")
+        await header3.wait_for(state="visible", timeout=5000)
 
-            asc_titles = expected_asc["group"]
-            desc_titles = list(reversed(asc_titles))
-            await assert_header_sort(page, header3, asc_titles, "asc")
-            await assert_header_sort(page, header3, desc_titles, "desc")
+        asc_titles = expected_asc["group"]
+        desc_titles = list(reversed(asc_titles))
+        await assert_header_sort(page, header3, asc_titles, "asc")
+        await assert_header_sort(page, header3, desc_titles, "desc")
 
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-            # <<<<< EDIT COLUMN 3 NAMESPACE <<<<<
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
+        # <<<<< EDIT COLUMN 3 NAMESPACE <<<<<
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -444,38 +403,24 @@ async def test_index_page(lrr_client: LRRClient) -> None:
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-        try:
-            page = await bc.new_page()
+        await page.goto(lrr_client.lrr_base_url)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
+        await assert_no_spinner(page)
 
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+        rendered = await read_rendered_titles(page, 0, timeout_ms=2000)
+        assert rendered == [], (
+            f"Expected no archives rendered on an empty library, got: {rendered}"
+        )
 
-            await page.goto(lrr_client.lrr_base_url)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
-            await assert_no_spinner(page)
+        # dismiss new version overlay if present
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
 
-            rendered = await read_rendered_titles(page, 0, timeout_ms=2000)
-            assert rendered == [], (
-                f"Expected no archives rendered on an empty library, got: {rendered}"
-            )
-
-            # dismiss new version overlay if present
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
 
@@ -537,126 +482,102 @@ async def test_custom_column_sort_display(
     # <<<<< STAT REBUILD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-        try:
-            page = await bc.new_page()
+        await page.goto(lrr_client.lrr_base_url, timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+        # dismiss new version overlay if present
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
 
-            await page.goto(lrr_client.lrr_base_url, timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        # wait for stat-driven namespace options to populate the sort dropdown
+        sort_dropdown = page.locator("#namespace-sortby")
+        await sort_dropdown.locator("option[value='artist']").wait_for(state="attached", timeout=10000)
 
-            # dismiss new version overlay if present
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-                await asyncio.sleep(0.3)
+        # verify dropdown was populated with namespaces from stat hash
+        options = await sort_dropdown.locator("option").all()
+        option_values = []
+        for opt in options:
+            option_values.append(await opt.get_attribute("value"))
+        assert "title" in option_values, "Expected 'title' in sort dropdown options"
+        assert "artist" in option_values, "Expected 'artist' in sort dropdown options (from stat hash)"
+        assert "series" in option_values, "Expected 'series' in sort dropdown options (from stat hash)"
 
-            # wait for stat-driven namespace options to populate the sort dropdown
-            sort_dropdown = page.locator("#namespace-sortby")
-            await sort_dropdown.locator("option[value='artist']").wait_for(state="attached", timeout=10000)
+        # select artist namespace from dropdown and verify sort order
+        pcm.clear()
 
-            # verify dropdown was populated with namespaces from stat hash
-            options = await sort_dropdown.locator("option").all()
-            option_values = []
-            for opt in options:
-                option_values.append(await opt.get_attribute("value"))
-            assert "title" in option_values, "Expected 'title' in sort dropdown options"
-            assert "artist" in option_values, "Expected 'artist' in sort dropdown options (from stat hash)"
-            assert "series" in option_values, "Expected 'series' in sort dropdown options (from stat hash)"
+        await sort_dropdown.select_option("artist")
+        await page.wait_for_load_state("networkidle")
+        await assert_no_spinner(page)
 
-            # select artist namespace from dropdown and verify sort order
-            responses.clear()
-            console_evts.clear()
+        sort_value = await sort_dropdown.input_value()
+        assert sort_value == "artist", (
+            f"Sort dropdown should show 'artist' after selecting it. Got '{sort_value}'."
+        )
 
-            await sort_dropdown.select_option("artist")
-            await page.wait_for_load_state("networkidle")
-            await assert_no_spinner(page)
+        # verify the rendered order reflects artist-sorted order
+        sorted_titles = await read_rendered_titles(page, 3)
+        assert len(sorted_titles) == 3, f"Expected 3 archives rendered, got {len(sorted_titles)}"
+        # archives 0,1 have artist:Alice, archive 2 has artist:Bob; asc order => Alice first
+        assert sorted_titles[-1] == "test archive 2", (
+            f"Expected 'test archive 2' (artist:Bob) last in ascending artist sort, got order: {sorted_titles}"
+        )
 
-            sort_value = await sort_dropdown.input_value()
-            assert sort_value == "artist", (
-                f"Sort dropdown should show 'artist' after selecting it. Got '{sort_value}'."
-            )
+        # switch to compact/table mode and verify custom column headers are visible
+        await pcm.assert_ok()
+        pcm.clear()
 
-            # verify the rendered order reflects artist-sorted order
-            sorted_titles = await read_rendered_titles(page, 3)
-            assert len(sorted_titles) == 3, f"Expected 3 archives rendered, got {len(sorted_titles)}"
-            # archives 0,1 have artist:Alice, archive 2 has artist:Bob; asc order => Alice first
-            assert sorted_titles[-1] == "test archive 2", (
-                f"Expected 'test archive 2' (artist:Bob) last in ascending artist sort, got order: {sorted_titles}"
-            )
+        await switch_display_mode(page, "compact")
+        await page.wait_for_load_state("networkidle")
 
-            # switch to compact/table mode and verify custom column headers are visible
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-            responses.clear()
-            console_evts.clear()
+        artist_header = page.locator("#customheader1")
+        await artist_header.wait_for(state="visible", timeout=5000)
+        series_header = page.locator("#customheader2")
+        await series_header.wait_for(state="visible", timeout=5000)
 
-            await switch_display_mode(page, "compact")
-            await page.wait_for_load_state("networkidle")
+        # switch back to thumbnail mode and select series sort
+        await pcm.assert_ok()
+        pcm.clear()
 
-            artist_header = page.locator("#customheader1")
-            await artist_header.wait_for(state="visible", timeout=5000)
-            series_header = page.locator("#customheader2")
-            await series_header.wait_for(state="visible", timeout=5000)
+        await switch_display_mode(page, "thumbnail")
+        await page.wait_for_load_state("networkidle")
+        await page.wait_for_timeout(500)
 
-            # switch back to thumbnail mode and select series sort
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-            responses.clear()
-            console_evts.clear()
+        # select series from dropdown and verify sort order
+        await sort_dropdown.select_option("series")
+        await page.wait_for_load_state("networkidle")
+        await assert_no_spinner(page)
 
-            await switch_display_mode(page, "thumbnail")
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(500)
+        sort_value = await sort_dropdown.input_value()
+        assert sort_value == "series", (
+            f"Sort dropdown should show 'series' after selecting it. Got '{sort_value}'."
+        )
 
-            # select series from dropdown and verify sort order
-            await sort_dropdown.select_option("series")
-            await page.wait_for_load_state("networkidle")
-            await assert_no_spinner(page)
+        # verify the rendered order reflects series-sorted order
+        sorted_titles = await read_rendered_titles(page, 3)
+        assert len(sorted_titles) == 3, f"Expected 3 archives rendered, got {len(sorted_titles)}"
+        # archive 2 has series:Another, archives 0,1 have series:Test; asc => Another first
+        assert sorted_titles[0] == "test archive 2", (
+            f"Expected 'test archive 2' (series:Another) first in ascending series sort, got order: {sorted_titles}"
+        )
 
-            sort_value = await sort_dropdown.input_value()
-            assert sort_value == "series", (
-                f"Sort dropdown should show 'series' after selecting it. Got '{sort_value}'."
-            )
+        # switch back to title sort
+        await pcm.assert_ok()
+        pcm.clear()
 
-            # verify the rendered order reflects series-sorted order
-            sorted_titles = await read_rendered_titles(page, 3)
-            assert len(sorted_titles) == 3, f"Expected 3 archives rendered, got {len(sorted_titles)}"
-            # archive 2 has series:Another, archives 0,1 have series:Test; asc => Another first
-            assert sorted_titles[0] == "test archive 2", (
-                f"Expected 'test archive 2' (series:Another) first in ascending series sort, got order: {sorted_titles}"
-            )
+        await sort_dropdown.select_option("title")
+        await page.wait_for_load_state("networkidle")
 
-            # switch back to title sort
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-            responses.clear()
-            console_evts.clear()
+        sort_value = await sort_dropdown.input_value()
+        assert sort_value == "title", (
+            f"Sort dropdown should show 'title' after selecting it. Got '{sort_value}'."
+        )
 
-            await sort_dropdown.select_option("title")
-            await page.wait_for_load_state("networkidle")
-
-            sort_value = await sort_dropdown.input_value()
-            assert sort_value == "title", (
-                f"Sort dropdown should show 'title' after selecting it. Got '{sort_value}'."
-            )
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -709,49 +630,35 @@ async def test_search_autocomplete_namespace_exclusion(
 
     # >>>>> SETTINGS STAGE >>>>>
     # Navigate to settings UI, configure excluded namespaces, save.
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-        try:
-            page = await bc.new_page()
+        # login to access settings
+        await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+        await page.wait_for_load_state("networkidle")
+        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+        await page.get_by_role("button", name="Login").click()
+        await page.wait_for_load_state("networkidle")
 
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+        # navigate to settings
+        await page.goto(f"{lrr_client.lrr_base_url}/config", timeout=60000)
+        await page.wait_for_load_state("networkidle")
 
-            # login to access settings
-            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
-            await page.wait_for_load_state("networkidle")
-            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-            await page.get_by_role("button", name="Login").click()
-            await page.wait_for_load_state("networkidle")
+        # open "Tags and Thumbnails" section
+        await page.get_by_text("Tags and Thumbnails").click()
+        await page.wait_for_timeout(300)
 
-            # navigate to settings
-            await page.goto(f"{lrr_client.lrr_base_url}/config", timeout=60000)
-            await page.wait_for_load_state("networkidle")
+        # fill in excluded namespaces
+        excluded_input = page.locator("input[name='excludednamespaces']")
+        await excluded_input.wait_for(state="visible", timeout=5000)
+        await excluded_input.fill("source,date_added")
 
-            # open "Tags and Thumbnails" section
-            await page.get_by_text("Tags and Thumbnails").click()
-            await page.wait_for_timeout(300)
+        # save settings
+        await page.get_by_role("button", name="Save Settings").click()
+        await page.wait_for_load_state("networkidle")
+        await page.wait_for_timeout(500)
 
-            # fill in excluded namespaces
-            excluded_input = page.locator("input[name='excludednamespaces']")
-            await excluded_input.wait_for(state="visible", timeout=5000)
-            await excluded_input.fill("source,date_added")
-
-            # save settings
-            await page.get_by_role("button", name="Save Settings").click()
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(500)
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< SETTINGS STAGE <<<<<
 
     # verify /api/info returns the excluded namespaces
@@ -759,76 +666,62 @@ async def test_search_autocomplete_namespace_exclusion(
     assert not error, f"Failed to get server info (status {error.status}): {error.error}"
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-        try:
-            page = await bc.new_page()
+        await page.goto(lrr_client.lrr_base_url, timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+        # dismiss new version overlay if present
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
 
-            await page.goto(lrr_client.lrr_base_url, timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        # wait for stat-driven namespace options to populate the sort dropdown
+        sort_dropdown = page.locator("#namespace-sortby")
+        await sort_dropdown.locator("option[value='artist']").wait_for(state="attached", timeout=10000)
 
-            # dismiss new version overlay if present
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-                await asyncio.sleep(0.3)
+        # verify excluded namespaces are NOT in the sort dropdown
+        options = await sort_dropdown.locator("option").all()
+        option_values = []
+        for opt in options:
+            option_values.append(await opt.get_attribute("value"))
+        LOGGER.info(f"Sort dropdown options: {option_values}")
+        assert "source" not in option_values, "Expected 'source' to be excluded from sort dropdown"
+        assert "date_added" not in option_values, "Expected 'date_added' to be excluded from sort dropdown"
+        assert "artist" in option_values, "Expected 'artist' in sort dropdown options"
+        assert "series" in option_values, "Expected 'series' in sort dropdown options"
 
-            # wait for stat-driven namespace options to populate the sort dropdown
-            sort_dropdown = page.locator("#namespace-sortby")
-            await sort_dropdown.locator("option[value='artist']").wait_for(state="attached", timeout=10000)
+        # type a partial match for an excluded namespace tag into search bar
+        search_input = page.locator("#search-input")
+        await search_input.click()
+        await search_input.fill(".test")
+        await page.wait_for_timeout(500)
 
-            # verify excluded namespaces are NOT in the sort dropdown
-            options = await sort_dropdown.locator("option").all()
-            option_values = []
-            for opt in options:
-                option_values.append(await opt.get_attribute("value"))
-            LOGGER.info(f"Sort dropdown options: {option_values}")
-            assert "source" not in option_values, "Expected 'source' to be excluded from sort dropdown"
-            assert "date_added" not in option_values, "Expected 'date_added' to be excluded from sort dropdown"
-            assert "artist" in option_values, "Expected 'artist' in sort dropdown options"
-            assert "series" in option_values, "Expected 'series' in sort dropdown options"
+        # excluded tags must not appear in suggestions
+        suggestion_items = page.locator(".awesomplete > ul > li")
+        suggestions = []
+        for i in range(await suggestion_items.count()):
+            suggestions.append(await suggestion_items.nth(i).inner_text())
+        LOGGER.info(f"Awesomplete suggestions for '.test': {suggestions}")
+        assert len(suggestions) == 0, f"Expected no suggestions for excluded namespace, got: {suggestions}"
 
-            # type a partial match for an excluded namespace tag into search bar
-            search_input = page.locator("#search-input")
-            await search_input.click()
-            await search_input.fill(".test")
-            await page.wait_for_timeout(500)
+        # type a partial match for a non-excluded tag
+        await search_input.fill("")
+        await page.wait_for_timeout(200)
+        await search_input.fill("alice")
+        await page.wait_for_timeout(500)
 
-            # excluded tags must not appear in suggestions
-            suggestion_items = page.locator(".awesomplete > ul > li")
-            suggestions = []
-            for i in range(await suggestion_items.count()):
-                suggestions.append(await suggestion_items.nth(i).inner_text())
-            LOGGER.info(f"Awesomplete suggestions for '.test': {suggestions}")
-            assert len(suggestions) == 0, f"Expected no suggestions for excluded namespace, got: {suggestions}"
+        suggestion_items = page.locator(".awesomplete > ul > li")
+        suggestions = []
+        for i in range(await suggestion_items.count()):
+            suggestions.append(await suggestion_items.nth(i).inner_text())
+        LOGGER.info(f"Awesomplete suggestions for 'alice': {suggestions}")
+        assert len(suggestions) == 1, f"Expected exactly 1 suggestion, got: {suggestions}"
+        assert suggestions[0] == "artist:alice", f"Expected 'artist:alice', got: {suggestions[0]}"
 
-            # type a partial match for a non-excluded tag
-            await search_input.fill("")
-            await page.wait_for_timeout(200)
-            await search_input.fill("alice")
-            await page.wait_for_timeout(500)
-
-            suggestion_items = page.locator(".awesomplete > ul > li")
-            suggestions = []
-            for i in range(await suggestion_items.count()):
-                suggestions.append(await suggestion_items.nth(i).inner_text())
-            LOGGER.info(f"Awesomplete suggestions for 'alice': {suggestions}")
-            assert len(suggestions) == 1, f"Expected exactly 1 suggestion, got: {suggestions}"
-            assert suggestions[0] == "artist:alice", f"Expected 'artist:alice', got: {suggestions[0]}"
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -881,150 +774,132 @@ async def test_category_context_menu(
     # <<<<< CREATE CATEGORIES <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-        try:
-            page = await bc.new_page()
+        # login to access category context menu
+        await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+        await page.wait_for_load_state("networkidle")
+        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+        await page.get_by_role("button", name="Login").click()
+        await page.wait_for_load_state("networkidle")
+        pcm.clear()
 
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+        await page.goto(lrr_client.lrr_base_url, timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            # login to access category context menu
-            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
-            await page.wait_for_load_state("networkidle")
-            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-            await page.get_by_role("button", name="Login").click()
-            await page.wait_for_load_state("networkidle")
-            responses.clear()
-            console_evts.clear()
-
-            await page.goto(lrr_client.lrr_base_url, timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
-
-            # dismiss new version overlay if present
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-                await asyncio.sleep(0.3)
-
-            # >>>>> PIN TOGGLE >>>>>
-            LOGGER.debug("Testing pin toggle round-trip.")
-            static_btn = page.locator(f".favtag-btn#{static_cat_id}")
-            await static_btn.wait_for(state="visible", timeout=5000)
-
-            # right-click to open context menu
-            await static_btn.click(button="right")
-            menu = page.locator(".context-menu-list:visible")
-            await menu.wait_for(state="visible", timeout=3000)
-
-            # verify first item is "Pin"
-            pin_item = menu.locator(".context-menu-item").first
-            pin_text = await pin_item.locator("span").first.text_content()
-            assert pin_text == "Pin", f"Expected 'Pin', got {pin_text!r}"
-
-            # click pin, then wait for the button to re-render with the pin marker
-            await pin_item.click()
-            await page.wait_for_load_state("networkidle")
-            pinned_label = await wait_for_input_value(
-                page, page.locator(f".favtag-btn#{static_cat_id}"), f"{PIN_MARKER}ctx-static",
-            )
-            assert pinned_label == f"{PIN_MARKER}ctx-static", (
-                f"Expected '{PIN_MARKER}ctx-static' on the pinned category button, got {pinned_label!r}"
-            )
-
-            # right-click again, verify "Unpin"
-            static_btn = page.locator(f".favtag-btn#{static_cat_id}")
-            await static_btn.wait_for(state="visible", timeout=5000)
-            await static_btn.click(button="right")
-            menu = page.locator(".context-menu-list:visible")
-            await menu.wait_for(state="visible", timeout=3000)
-            pin_item = menu.locator(".context-menu-item").first
-            pin_text = await pin_item.locator("span").first.text_content()
-            assert pin_text == "Unpin", f"Expected 'Unpin' after pin, got {pin_text!r}"
-
-            # click unpin, then wait for the pin marker to clear from the button
-            await pin_item.click()
-            await page.wait_for_load_state("networkidle")
-            await wait_for_input_value(
-                page, page.locator(f".favtag-btn#{static_cat_id}"), "ctx-static",
-            )
-
-            # right-click again, verify "Pin" restored
-            static_btn = page.locator(f".favtag-btn#{static_cat_id}")
-            await static_btn.wait_for(state="visible", timeout=5000)
-            await static_btn.click(button="right")
-            menu = page.locator(".context-menu-list:visible")
-            await menu.wait_for(state="visible", timeout=3000)
-            pin_item = menu.locator(".context-menu-item").first
-            pin_text = await pin_item.locator("span").first.text_content()
-            assert pin_text == "Pin", f"Expected 'Pin' after unpin round-trip, got {pin_text!r}"
-
-            unpinned_label = await page.locator(f".favtag-btn#{static_cat_id}").input_value()
-            assert unpinned_label == "ctx-static", (
-                f"Expected 'ctx-static' on the unpinned category button, got {unpinned_label!r}"
-            )
-            # dismiss menu
+        # dismiss new version overlay if present
+        if "New Version Release Notes" in await page.content():
             await page.keyboard.press("Escape")
-            await page.wait_for_timeout(300)
-            # <<<<< PIN TOGGLE <<<<<
+            await asyncio.sleep(0.3)
 
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-            responses.clear()
-            console_evts.clear()
+        # >>>>> PIN TOGGLE >>>>>
+        LOGGER.debug("Testing pin toggle round-trip.")
+        static_btn = page.locator(f".favtag-btn#{static_cat_id}")
+        await static_btn.wait_for(state="visible", timeout=5000)
 
-            # >>>>> DYNAMIC BOOKMARK SUPPRESSION >>>>>
-            LOGGER.debug("Testing dynamic category bookmark suppression.")
-            dynamic_btn = page.locator(f".favtag-btn#{dynamic_cat_id}")
-            await dynamic_btn.wait_for(state="visible", timeout=5000)
-            await dynamic_btn.click(button="right")
-            menu = page.locator(".context-menu-list:visible")
-            await menu.wait_for(state="visible", timeout=3000)
+        # right-click to open context menu
+        await static_btn.click(button="right")
+        menu = page.locator(".context-menu-list:visible")
+        await menu.wait_for(state="visible", timeout=3000)
 
-            # collect all menu item labels
-            items = menu.locator(".context-menu-item span")
-            count = await items.count()
-            labels = []
-            for i in range(count):
-                text = await items.nth(i).text_content()
-                if text:
-                    labels.append(text.strip())
+        # verify first item is "Pin"
+        pin_item = menu.locator(".context-menu-item").first
+        pin_text = await pin_item.locator("span").first.text_content()
+        assert pin_text == "Pin", f"Expected 'Pin', got {pin_text!r}"
 
-            assert "Set as Bookmark" not in labels, f"Bookmark option should not appear for dynamic categories, got: {labels}"
-            assert "Pin" in labels, f"Pin option should be present for dynamic categories, got: {labels}"
-            assert "Delete" in labels, f"Delete option should be present for dynamic categories, got: {labels}"
+        # click pin, then wait for the button to re-render with the pin marker
+        await pin_item.click()
+        await page.wait_for_load_state("networkidle")
+        pinned_label = await wait_for_input_value(
+            page, page.locator(f".favtag-btn#{static_cat_id}"), f"{PIN_MARKER}ctx-static",
+        )
+        assert pinned_label == f"{PIN_MARKER}ctx-static", (
+            f"Expected '{PIN_MARKER}ctx-static' on the pinned category button, got {pinned_label!r}"
+        )
 
-            # dismiss menu
-            await page.keyboard.press("Escape")
-            await page.wait_for_timeout(300)
-            # <<<<< DYNAMIC BOOKMARK SUPPRESSION <<<<<
+        # right-click again, verify "Unpin"
+        static_btn = page.locator(f".favtag-btn#{static_cat_id}")
+        await static_btn.wait_for(state="visible", timeout=5000)
+        await static_btn.click(button="right")
+        menu = page.locator(".context-menu-list:visible")
+        await menu.wait_for(state="visible", timeout=3000)
+        pin_item = menu.locator(".context-menu-item").first
+        pin_text = await pin_item.locator("span").first.text_content()
+        assert pin_text == "Unpin", f"Expected 'Unpin' after pin, got {pin_text!r}"
 
-            # >>>>> DROPDOWN PLACEHOLDER >>>>>
-            LOGGER.debug("Testing dropdown placeholder right-click.")
-            dropdown = page.locator("#catdropdown")
-            await dropdown.wait_for(state="visible", timeout=5000)
+        # click unpin, then wait for the pin marker to clear from the button
+        await pin_item.click()
+        await page.wait_for_load_state("networkidle")
+        await wait_for_input_value(
+            page, page.locator(f".favtag-btn#{static_cat_id}"), "ctx-static",
+        )
 
-            # right-click without selecting any option
-            await dropdown.click(button="right")
-            await page.wait_for_timeout(500)
+        # right-click again, verify "Pin" restored
+        static_btn = page.locator(f".favtag-btn#{static_cat_id}")
+        await static_btn.wait_for(state="visible", timeout=5000)
+        await static_btn.click(button="right")
+        menu = page.locator(".context-menu-list:visible")
+        await menu.wait_for(state="visible", timeout=3000)
+        pin_item = menu.locator(".context-menu-item").first
+        pin_text = await pin_item.locator("span").first.text_content()
+        assert pin_text == "Pin", f"Expected 'Pin' after unpin round-trip, got {pin_text!r}"
 
-            # context menu should not appear
-            visible_menu = page.locator(".context-menu-list:visible")
-            menu_count = await visible_menu.count()
-            assert menu_count == 0, "Context menu should not appear when right-clicking dropdown placeholder"
-            # <<<<< DROPDOWN PLACEHOLDER <<<<<
+        unpinned_label = await page.locator(f".favtag-btn#{static_cat_id}").input_value()
+        assert unpinned_label == "ctx-static", (
+            f"Expected 'ctx-static' on the unpinned category button, got {unpinned_label!r}"
+        )
+        # dismiss menu
+        await page.keyboard.press("Escape")
+        await page.wait_for_timeout(300)
+        # <<<<< PIN TOGGLE <<<<<
 
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
+        pcm.clear()
+
+        # >>>>> DYNAMIC BOOKMARK SUPPRESSION >>>>>
+        LOGGER.debug("Testing dynamic category bookmark suppression.")
+        dynamic_btn = page.locator(f".favtag-btn#{dynamic_cat_id}")
+        await dynamic_btn.wait_for(state="visible", timeout=5000)
+        await dynamic_btn.click(button="right")
+        menu = page.locator(".context-menu-list:visible")
+        await menu.wait_for(state="visible", timeout=3000)
+
+        # collect all menu item labels
+        items = menu.locator(".context-menu-item span")
+        count = await items.count()
+        labels = []
+        for i in range(count):
+            text = await items.nth(i).text_content()
+            if text:
+                labels.append(text.strip())
+
+        assert "Set as Bookmark" not in labels, f"Bookmark option should not appear for dynamic categories, got: {labels}"
+        assert "Pin" in labels, f"Pin option should be present for dynamic categories, got: {labels}"
+        assert "Delete" in labels, f"Delete option should be present for dynamic categories, got: {labels}"
+
+        # dismiss menu
+        await page.keyboard.press("Escape")
+        await page.wait_for_timeout(300)
+        # <<<<< DYNAMIC BOOKMARK SUPPRESSION <<<<<
+
+        # >>>>> DROPDOWN PLACEHOLDER >>>>>
+        LOGGER.debug("Testing dropdown placeholder right-click.")
+        dropdown = page.locator("#catdropdown")
+        await dropdown.wait_for(state="visible", timeout=5000)
+
+        # right-click without selecting any option
+        await dropdown.click(button="right")
+        await page.wait_for_timeout(500)
+
+        # context menu should not appear
+        visible_menu = page.locator(".context-menu-list:visible")
+        menu_count = await visible_menu.count()
+        assert menu_count == 0, "Context menu should not appear when right-clicking dropdown placeholder"
+        # <<<<< DROPDOWN PLACEHOLDER <<<<<
+
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -1089,52 +964,35 @@ async def test_multi_category_and_search(
     # <<<<< STAT REBUILD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-        try:
-            page = await bc.new_page()
+        await page.goto(lrr_client.lrr_base_url, timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+        # dismiss new version overlay if present
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
 
-            await page.goto(lrr_client.lrr_base_url, timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        await pcm.assert_ok()
+        pcm.clear()
 
-            # dismiss new version overlay if present
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-                await asyncio.sleep(0.3)
+        # Toggle Alpha, let its search settle, then toggle Beta to AND them.
+        await page.locator(f".favtag-btn#{alpha_id}").click()
+        await page.wait_for_load_state("networkidle")
+        await page.locator(f".favtag-btn#{beta_id}").click()
+        await page.wait_for_load_state("networkidle")
+        await assert_no_spinner(page)
 
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-            responses.clear()
-            console_evts.clear()
+        # AND-ing both categories must render exactly the archive they share
+        result_titles = set(await read_rendered_titles(page, 1, ["archive B"]))
+        assert result_titles == {"archive B"}, (
+            f"Multi-category AND should render only the shared archive, got: {result_titles}"
+        )
 
-            # Toggle Alpha, let its search settle, then toggle Beta to AND them.
-            await page.locator(f".favtag-btn#{alpha_id}").click()
-            await page.wait_for_load_state("networkidle")
-            await page.locator(f".favtag-btn#{beta_id}").click()
-            await page.wait_for_load_state("networkidle")
-            await assert_no_spinner(page)
-
-            # AND-ing both categories must render exactly the archive they share
-            result_titles = set(await read_rendered_titles(page, 1, ["archive B"]))
-            assert result_titles == {"archive B"}, (
-                f"Multi-category AND should render only the shared archive, got: {result_titles}"
-            )
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -1192,59 +1050,44 @@ async def test_new_archive(
     arc_selector = f'[id="{arcid}"]'
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        await bc.add_init_script("localStorage.setItem('carouselType', 'inbox');")
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
+        await page.add_init_script("localStorage.setItem('carouselType', 'inbox');")
 
-        try:
-            page = await bc.new_page()
+        # login to access the batch tagger
+        await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+        await page.wait_for_load_state("networkidle")
+        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+        await page.get_by_role("button", name="Login").click()
+        await page.wait_for_load_state("networkidle")
+        pcm.clear()
 
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+        await page.goto(lrr_client.lrr_base_url, timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            # login to access the batch tagger
-            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
-            await page.wait_for_load_state("networkidle")
-            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-            await page.get_by_role("button", name="Login").click()
-            await page.wait_for_load_state("networkidle")
-            responses.clear()
-            console_evts.clear()
+        # dismiss new version overlay if present
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
 
-            await page.goto(lrr_client.lrr_base_url, timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        await assert_no_spinner(page)
 
-            # dismiss new version overlay if present
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-                await asyncio.sleep(0.3)
+        grid_entry = page.locator(f"#thumbs_container div.id1{arc_selector}")
+        await grid_entry.wait_for(state="attached", timeout=10000)
+        grid_text = await grid_entry.inner_text()
 
-            await assert_no_spinner(page)
+        carousel_entry = page.locator(f".index-carousel-container div.id1{arc_selector}")
+        await carousel_entry.wait_for(state="attached", timeout=10000)
+        carousel_text = await carousel_entry.inner_text()
 
-            grid_entry = page.locator(f"#thumbs_container div.id1{arc_selector}")
-            await grid_entry.wait_for(state="attached", timeout=10000)
-            grid_text = await grid_entry.inner_text()
+        await page.goto(f"{lrr_client.lrr_base_url}/batch", timeout=60000)
+        await page.wait_for_load_state("networkidle")
+        batch_entry = page.locator(f"#archivelist label[for='{arcid}']")
+        await batch_entry.wait_for(state="visible", timeout=10000)
+        batch_text = await batch_entry.inner_text()
 
-            carousel_entry = page.locator(f".index-carousel-container div.id1{arc_selector}")
-            await carousel_entry.wait_for(state="attached", timeout=10000)
-            carousel_text = await carousel_entry.inner_text()
-
-            await page.goto(f"{lrr_client.lrr_base_url}/batch", timeout=60000)
-            await page.wait_for_load_state("networkidle")
-            batch_entry = page.locator(f"#archivelist label[for='{arcid}']")
-            await batch_entry.wait_for(state="visible", timeout=10000)
-            batch_text = await batch_entry.inner_text()
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     # >>>>> VERIFY STAGE >>>>>

@@ -12,8 +12,6 @@ import logging
 import tempfile
 from pathlib import Path
 
-import playwright.async_api
-import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import AddTocEntryRequest
@@ -31,9 +29,7 @@ from aio_lanraragi_tests.utils.api_wrappers import (
     upload_archive,
 )
 from aio_lanraragi_tests.utils.playwright import (
-    assert_browser_responses_ok,
-    assert_console_logs_ok,
-    assert_toasts_ok,
+    PlaywrightTestContextManager,
     switch_display_mode,
 )
 
@@ -84,34 +80,22 @@ async def test_category_name_escape_index(
     # <<<<< CREATE CATEGORY STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            canary_requests: list[str] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
-            page.on("request", lambda request: canary_requests.append(request.url) if CANARY_HOST in request.url else None)
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
+        canary_requests: list[str] = []
+        page.on("request", lambda request: canary_requests.append(request.url) if CANARY_HOST in request.url else None)
 
-            await page.goto(lrr_client.lrr_base_url, timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        await page.goto(lrr_client.lrr_base_url, timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            assert not canary_requests, f"Canary request fired from index catList: {canary_requests}"
-            for evt in console_evts:
-                assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console: {evt.text}"
-            assert await page.locator("[onerror]").count() == 0, "Live onerror attribute injected on index page"
-            assert await page.locator("[onload]").count() == 0, "Live onload attribute injected on index page"
+        assert not canary_requests, f"Canary request fired from index catList: {canary_requests}"
+        for evt in pcm.console_evts:
+            assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console: {evt.text}"
+        assert await page.locator("[onerror]").count() == 0, "Live onerror attribute injected on index page"
+        assert await page.locator("[onload]").count() == 0, "Live onload attribute injected on index page"
 
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -157,39 +141,27 @@ async def test_category_name_escape_reader(
     # <<<<< CREATE & UPLOAD ARCHIVES <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            canary_requests: list[str] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
-            page.on("request", lambda request: canary_requests.append(request.url) if CANARY_HOST in request.url else None)
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
+        canary_requests: list[str] = []
+        page.on("request", lambda request: canary_requests.append(request.url) if CANARY_HOST in request.url else None)
 
-            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
-            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-            await page.get_by_role("button", name="Login").click()
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+        await page.get_by_role("button", name="Login").click()
+        await page.wait_for_load_state("networkidle")
 
-            await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}", timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}", timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            assert not canary_requests, f"Canary request fired on reader page: {canary_requests}"
-            for evt in console_evts:
-                assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console: {evt.text}"
-            assert await page.locator("[onerror]").count() == 0, "Live onerror attribute injected on reader page"
-            assert await page.locator("[onload]").count() == 0, "Live onload attribute injected on reader page"
+        assert not canary_requests, f"Canary request fired on reader page: {canary_requests}"
+        for evt in pcm.console_evts:
+            assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console: {evt.text}"
+        assert await page.locator("[onerror]").count() == 0, "Live onerror attribute injected on reader page"
+        assert await page.locator("[onload]").count() == 0, "Live onload attribute injected on reader page"
 
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -225,40 +197,28 @@ async def test_category_name_escape_login_pages(
     # <<<<< CREATE CATEGORY STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            canary_requests: list[str] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
-            page.on("request", lambda request: canary_requests.append(request.url) if CANARY_HOST in request.url else None)
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
+        canary_requests: list[str] = []
+        page.on("request", lambda request: canary_requests.append(request.url) if CANARY_HOST in request.url else None)
 
-            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
-            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-            await page.get_by_role("button", name="Login").click()
+        await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+        await page.get_by_role("button", name="Login").click()
+        await page.wait_for_load_state("networkidle")
+
+        for path in ("/upload", "/batch"):
+            await page.goto(f"{lrr_client.lrr_base_url}{path}", timeout=60000)
+            await page.wait_for_load_state("domcontentloaded")
             await page.wait_for_load_state("networkidle")
 
-            for path in ("/upload", "/batch"):
-                await page.goto(f"{lrr_client.lrr_base_url}{path}", timeout=60000)
-                await page.wait_for_load_state("domcontentloaded")
-                await page.wait_for_load_state("networkidle")
+            assert not canary_requests, f"Canary request fired on {path}: {canary_requests}"
+            for evt in pcm.console_evts:
+                assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console on {path}: {evt.text}"
+            assert await page.locator("[onerror]").count() == 0, f"Live onerror attribute injected on {path}"
+            assert await page.locator("[onload]").count() == 0, f"Live onload attribute injected on {path}"
 
-                assert not canary_requests, f"Canary request fired on {path}: {canary_requests}"
-                for evt in console_evts:
-                    assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console on {path}: {evt.text}"
-                assert await page.locator("[onerror]").count() == 0, f"Live onerror attribute injected on {path}"
-                assert await page.locator("[onload]").count() == 0, f"Live onload attribute injected on {path}"
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -298,33 +258,21 @@ async def test_tag_escape_reader(
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            canary_requests: list[str] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
-            page.on("request", lambda request: canary_requests.append(request.url) if CANARY_HOST in request.url else None)
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
+        canary_requests: list[str] = []
+        page.on("request", lambda request: canary_requests.append(request.url) if CANARY_HOST in request.url else None)
 
-            await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}", timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}", timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            assert not canary_requests, f"Canary request fired from reader tag list: {canary_requests}"
-            for evt in console_evts:
-                assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console: {evt.text}"
-            assert await page.locator("[onerror]").count() == 0, "Live onerror attribute injected from tag list"
+        assert not canary_requests, f"Canary request fired from reader tag list: {canary_requests}"
+        for evt in pcm.console_evts:
+            assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console: {evt.text}"
+        assert await page.locator("[onerror]").count() == 0, "Live onerror attribute injected from tag list"
 
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -365,33 +313,21 @@ async def test_tag_escape_stats(
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            canary_requests: list[str] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
-            page.on("request", lambda request: canary_requests.append(request.url) if CANARY_HOST in request.url else None)
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
+        canary_requests: list[str] = []
+        page.on("request", lambda request: canary_requests.append(request.url) if CANARY_HOST in request.url else None)
 
-            await page.goto(f"{lrr_client.lrr_base_url}/stats", timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/stats", timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            assert not canary_requests, f"Canary request fired from stats tag cloud: {canary_requests}"
-            for evt in console_evts:
-                assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console: {evt.text}"
-            assert await page.locator("[onerror]").count() == 0, "Live onerror attribute injected from tag cloud"
+        assert not canary_requests, f"Canary request fired from stats tag cloud: {canary_requests}"
+        for evt in pcm.console_evts:
+            assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console: {evt.text}"
+        assert await page.locator("[onerror]").count() == 0, "Live onerror attribute injected from tag cloud"
 
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -431,36 +367,24 @@ async def test_tag_escape_index_compact(
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            canary_requests: list[str] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
-            page.on("request", lambda request: canary_requests.append(request.url) if CANARY_HOST in request.url else None)
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
+        canary_requests: list[str] = []
+        page.on("request", lambda request: canary_requests.append(request.url) if CANARY_HOST in request.url else None)
 
-            await page.goto(lrr_client.lrr_base_url, timeout=60000)
-            await page.wait_for_load_state("networkidle")
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-            await switch_display_mode(page, "compact")
-            await page.wait_for_load_state("networkidle")
+        await page.goto(lrr_client.lrr_base_url, timeout=60000)
+        await page.wait_for_load_state("networkidle")
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
+        await switch_display_mode(page, "compact")
+        await page.wait_for_load_state("networkidle")
 
-            assert not canary_requests, f"Canary request fired from index tag column/namespace dropdown: {canary_requests}"
-            for evt in console_evts:
-                assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console: {evt.text}"
-            assert await page.locator(f"[onerror*='{CANARY_MARKER}']").count() == 0, "Live onerror attribute injected on compact index"
+        assert not canary_requests, f"Canary request fired from index tag column/namespace dropdown: {canary_requests}"
+        for evt in pcm.console_evts:
+            assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console: {evt.text}"
+        assert await page.locator(f"[onerror*='{CANARY_MARKER}']").count() == 0, "Live onerror attribute injected on compact index"
 
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -502,34 +426,22 @@ async def test_toc_name_escape_reader(
     # <<<<< UPLOAD & TOC STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            canary_requests: list[str] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
-            page.on("request", lambda request: canary_requests.append(request.url) if CANARY_HOST in request.url else None)
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
+        canary_requests: list[str] = []
+        page.on("request", lambda request: canary_requests.append(request.url) if CANARY_HOST in request.url else None)
 
-            await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}", timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}", timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            assert not canary_requests, f"Canary request fired from reader chapter selector: {canary_requests}"
-            for evt in console_evts:
-                assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console: {evt.text}"
-            assert await page.locator("[onerror]").count() == 0, "Live onerror attribute injected from chapter selector"
-            assert await page.locator("[onload]").count() == 0, "Live onload attribute injected from chapter selector"
+        assert not canary_requests, f"Canary request fired from reader chapter selector: {canary_requests}"
+        for evt in pcm.console_evts:
+            assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired in console: {evt.text}"
+        assert await page.locator("[onerror]").count() == 0, "Live onerror attribute injected from chapter selector"
+        assert await page.locator("[onload]").count() == 0, "Live onload attribute injected from chapter selector"
 
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -571,33 +483,21 @@ async def test_edit_filename_escape(
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
-            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-            await page.get_by_role("button", name="Login").click()
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+        await page.get_by_role("button", name="Login").click()
+        await page.wait_for_load_state("networkidle")
 
-            await page.goto(f"{lrr_client.lrr_base_url}/edit?id={arcid}", timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/edit?id={arcid}", timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            for evt in console_evts:
-                assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from edit filename: {evt.text}"
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        for evt in pcm.console_evts:
+            assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from edit filename: {evt.text}"
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -645,38 +545,26 @@ async def test_duplicates_metadata_escape(
     # <<<<< DUPLICATE GROUP STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
-            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-            await page.get_by_role("button", name="Login").click()
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+        await page.get_by_role("button", name="Login").click()
+        await page.wait_for_load_state("networkidle")
 
-            await page.goto(f"{lrr_client.lrr_base_url}/duplicates", timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/duplicates", timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            tooltip = page.locator(".tag-tooltip").first
-            if await tooltip.count() > 0:
-                await tooltip.hover()
-                await page.wait_for_timeout(500)
+        tooltip = page.locator(".tag-tooltip").first
+        if await tooltip.count() > 0:
+            await tooltip.hover()
+            await page.wait_for_timeout(500)
 
-            for evt in console_evts:
-                assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from duplicates page: {evt.text}"
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        for evt in pcm.console_evts:
+            assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from duplicates page: {evt.text}"
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -715,33 +603,21 @@ async def test_plugin_config_value_escape(
     # <<<<< PLUGIN CONFIG STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
-            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-            await page.get_by_role("button", name="Login").click()
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+        await page.get_by_role("button", name="Login").click()
+        await page.wait_for_load_state("networkidle")
 
-            await page.goto(f"{lrr_client.lrr_base_url}/config/plugins", timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/config/plugins", timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            for evt in console_evts:
-                assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from plugin config value: {evt.text}"
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        for evt in pcm.console_evts:
+            assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from plugin config value: {evt.text}"
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -780,38 +656,26 @@ async def test_delete_toast_filename_escape(
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
-            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-            await page.get_by_role("button", name="Login").click()
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+        await page.get_by_role("button", name="Login").click()
+        await page.wait_for_load_state("networkidle")
 
-            await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}", timeout=60000)
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}", timeout=60000)
+        await page.wait_for_load_state("networkidle")
 
-            # The delete button lives inside the archive overview overlay, which is hidden until opened.
-            await page.locator("#toggle-archive-overlay").first.click()
-            await page.locator("#delete-archive").click()
-            await page.locator(".swal2-confirm").click()
-            await page.wait_for_timeout(1000)
+        # The delete button lives inside the archive overview overlay, which is hidden until opened.
+        await page.locator("#toggle-archive-overlay").first.click()
+        await page.locator("#delete-archive").click()
+        await page.locator(".swal2-confirm").click()
+        await page.wait_for_timeout(1000)
 
-            for evt in console_evts:
-                assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from delete toast: {evt.text}"
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        for evt in pcm.console_evts:
+            assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from delete toast: {evt.text}"
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -842,37 +706,25 @@ async def test_upload_url_reflect_escape(
 
     # >>>>> UI STAGE >>>>>
     url_payload = f"<img src=x onerror=console.error('{CANARY_MARKER}')>"
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
-            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-            await page.get_by_role("button", name="Login").click()
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+        await page.get_by_role("button", name="Login").click()
+        await page.wait_for_load_state("networkidle")
 
-            await page.goto(f"{lrr_client.lrr_base_url}/upload", timeout=60000)
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/upload", timeout=60000)
+        await page.wait_for_load_state("networkidle")
 
-            await page.locator("#urlForm").fill(url_payload)
-            await page.locator("#download-url").click()
-            await page.locator("#files > *").first.wait_for(state="attached", timeout=20000)
-            await page.wait_for_timeout(1000)
+        await page.locator("#urlForm").fill(url_payload)
+        await page.locator("#download-url").click()
+        await page.locator("#files > *").first.wait_for(state="attached", timeout=20000)
+        await page.wait_for_timeout(1000)
 
-            for evt in console_evts:
-                assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from upload URL result row: {evt.text}"
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        for evt in pcm.console_evts:
+            assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from upload URL result row: {evt.text}"
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -902,40 +754,28 @@ async def test_upload_filename_escape(
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
-            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-            await page.get_by_role("button", name="Login").click()
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+        await page.get_by_role("button", name="Login").click()
+        await page.wait_for_load_state("networkidle")
 
-            await page.goto(f"{lrr_client.lrr_base_url}/upload", timeout=60000)
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/upload", timeout=60000)
+        await page.wait_for_load_state("networkidle")
 
-            with tempfile.TemporaryDirectory() as tmpdir:
-                save_path = create_archive_file(Path(tmpdir), "archive_1", 3)
-                payload_path = Path(tmpdir) / f"<img src=x onerror=console.error('{CANARY_MARKER}')>.zip"
-                save_path.rename(payload_path)
-                await page.locator("#fileupload").set_input_files(str(payload_path))
-                await page.locator("#files > *").first.wait_for(state="attached", timeout=20000)
-                await page.wait_for_timeout(1000)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = create_archive_file(Path(tmpdir), "archive_1", 3)
+            payload_path = Path(tmpdir) / f"<img src=x onerror=console.error('{CANARY_MARKER}')>.zip"
+            save_path.rename(payload_path)
+            await page.locator("#fileupload").set_input_files(str(payload_path))
+            await page.locator("#files > *").first.wait_for(state="attached", timeout=20000)
+            await page.wait_for_timeout(1000)
 
-            for evt in console_evts:
-                assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from upload filename result row: {evt.text}"
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        for evt in pcm.console_evts:
+            assert CANARY_MARKER not in (evt.text or ""), f"Canary marker fired from upload filename result row: {evt.text}"
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)

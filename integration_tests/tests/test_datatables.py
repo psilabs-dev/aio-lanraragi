@@ -9,9 +9,6 @@ import tempfile
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
-import playwright
-import playwright.async_api
-import playwright.async_api._generated
 import pytest
 import pytest_asyncio
 from lanraragi.clients.client import LRRClient
@@ -27,10 +24,8 @@ from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
 from aio_lanraragi_tests.utils.concurrency import get_bounded_sem, retry_on_lock
 from aio_lanraragi_tests.utils.playwright import (
-    assert_browser_responses_ok,
-    assert_console_logs_ok,
+    PlaywrightTestContextManager,
     assert_no_spinner,
-    assert_toasts_ok,
     read_rendered_entries,
 )
 
@@ -135,79 +130,63 @@ async def test_reader_to_index_cross_dt(
     # <<<<< EXPECTED ORDER STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+        # Navigate to index page.
+        await page.goto(lrr_client.lrr_base_url)
+        await page.wait_for_load_state("networkidle")
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
 
-            # Navigate to index page.
-            await page.goto(lrr_client.lrr_base_url)
+        # Collect DT order as rendered (pagesize=3, so first page shows 3 archives).
+        await assert_no_spinner(page)
+        dt_entries = await read_rendered_entries(page, 3)
+        assert len(dt_entries) == 3, f"Expected 3 archives rendered on DT page 1, got {len(dt_entries)}"
+        dt_titles = []
+        dt_arcids = []
+        for title, arcid in dt_entries:
+            dt_titles.append(title)
+            dt_arcids.append(arcid)
+        LOGGER.info(f"DT page 1 order: {list(zip(dt_titles, dt_arcids))}")
+        assert dt_arcids[2] == full_order[2], "Index DT order disagrees with search API order at the page boundary"
+        pcm.clear()
+
+        # Open last archive on DT page 1 (3rd of 3).
+        LOGGER.info(f"Opening last archive on DT page 1: {dt_titles[2]}")
+        await page.locator("#thumbs_container a", has_text=dt_titles[2]).first.click()
+        await page.wait_for_load_state("networkidle")
+        await assert_no_spinner(page)
+        assert f"id={dt_arcids[2]}" in page.url
+
+        # Navigate forward through 3 pages to cross into DT page 2.
+        LOGGER.info("Navigating forward to cross DT boundary.")
+        pcm.clear()
+        for i in range(3):
+            await page.keyboard.press("ArrowRight")
             await page.wait_for_load_state("networkidle")
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-
-            # Collect DT order as rendered (pagesize=3, so first page shows 3 archives).
             await assert_no_spinner(page)
-            dt_entries = await read_rendered_entries(page, 3)
-            assert len(dt_entries) == 3, f"Expected 3 archives rendered on DT page 1, got {len(dt_entries)}"
-            dt_titles = []
-            dt_arcids = []
-            for title, arcid in dt_entries:
-                dt_titles.append(title)
-                dt_arcids.append(arcid)
-            LOGGER.info(f"DT page 1 order: {list(zip(dt_titles, dt_arcids))}")
-            assert dt_arcids[2] == full_order[2], "Index DT order disagrees with search API order at the page boundary"
-            responses.clear()
-            console_evts.clear()
+            await page.wait_for_timeout(500)
 
-            # Open last archive on DT page 1 (3rd of 3).
-            LOGGER.info(f"Opening last archive on DT page 1: {dt_titles[2]}")
-            await page.locator("#thumbs_container a", has_text=dt_titles[2]).first.click()
-            await page.wait_for_load_state("networkidle")
-            await assert_no_spinner(page)
-            assert f"id={dt_arcids[2]}" in page.url
+        # After 3 ArrowRight presses from page 1 of archive 3 (last on DT page 1),
+        # we should have crossed into the next archive (first on DT page 2).
+        cross_dt_url = page.url
+        LOGGER.info(f"After cross-DT navigation: {cross_dt_url}")
+        assert f"id={dt_arcids[2]}" not in cross_dt_url, "Expected to have crossed DT boundary"
+        assert f"id={expected_next_arcid}" in cross_dt_url, (
+            f"Expected to land on DT page 2's first archive {expected_next_arcid}, got {cross_dt_url}"
+        )
 
-            # Navigate forward through 3 pages to cross into DT page 2.
-            LOGGER.info("Navigating forward to cross DT boundary.")
-            responses.clear()
-            console_evts.clear()
-            for i in range(3):
-                await page.keyboard.press("ArrowRight")
-                await page.wait_for_load_state("networkidle")
-                await assert_no_spinner(page)
-                await page.wait_for_timeout(500)
+        # Return-to-index icon should navigate to index.
+        LOGGER.info("Clicking return-to-index icon.")
+        pcm.clear()
+        await page.locator("#return-to-index").click()
+        await page.wait_for_load_state("networkidle")
+        index_url = page.url
+        LOGGER.info(f"After return-to-index: {index_url}")
+        assert "/reader" not in index_url, f"Expected index page after icon click, got {index_url}"
 
-            # After 3 ArrowRight presses from page 1 of archive 3 (last on DT page 1),
-            # we should have crossed into the next archive (first on DT page 2).
-            cross_dt_url = page.url
-            LOGGER.info(f"After cross-DT navigation: {cross_dt_url}")
-            assert f"id={dt_arcids[2]}" not in cross_dt_url, "Expected to have crossed DT boundary"
-            assert f"id={expected_next_arcid}" in cross_dt_url, (
-                f"Expected to land on DT page 2's first archive {expected_next_arcid}, got {cross_dt_url}"
-            )
-
-            # Return-to-index icon should navigate to index.
-            LOGGER.info("Clicking return-to-index icon.")
-            responses.clear()
-            console_evts.clear()
-            await page.locator("#return-to-index").click()
-            await page.wait_for_load_state("networkidle")
-            index_url = page.url
-            LOGGER.info(f"After return-to-index: {index_url}")
-            assert "/reader" not in index_url, f"Expected index page after icon click, got {index_url}"
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
 
@@ -292,71 +271,56 @@ async def test_navigation_new_category_cross_dt(
     # <<<<< EXPECTED ORDER STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+        await page.goto(lrr_client.lrr_base_url)
+        await page.wait_for_load_state("networkidle")
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
 
-            await page.goto(lrr_client.lrr_base_url)
-            await page.wait_for_load_state("networkidle")
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
+        # Toggle the "New Archives" special category and wait for the DT redraw.
+        LOGGER.info("Toggling New Archives category.")
+        pcm.clear()
+        await page.locator("#NEW_ONLY").click()
+        await page.wait_for_load_state("networkidle")
+        await assert_no_spinner(page)
+        await page.wait_for_timeout(500)
 
-            # Toggle the "New Archives" special category and wait for the DT redraw.
-            LOGGER.info("Toggling New Archives category.")
-            responses.clear()
-            console_evts.clear()
-            await page.locator("#NEW_ONLY").click()
+        # The New page 1 must contain the boundary archive, and must NOT contain the non-new one.
+        new_page1_visible = await page.locator(f"#thumbs_container a[href*='id={page1_last_arcid}']").count()
+        assert new_page1_visible > 0, f"Expected New DT page 1 to contain {page1_last_title!r}"
+        non_new_visible = await page.locator(f"#thumbs_container a[href*='id={non_new_arcid}']").count()
+        assert non_new_visible == 0, "Non-new archive unexpectedly present in the New Archives lineup"
+
+        # Open the last archive on New DT page 1.
+        LOGGER.info(f"Opening last archive on New DT page 1: {page1_last_title}")
+        await page.locator(f"#thumbs_container a[href*='id={page1_last_arcid}']").first.click()
+        await page.wait_for_load_state("networkidle")
+        await assert_no_spinner(page)
+        assert f"id={page1_last_arcid}" in page.url
+
+        # Read past the last page (3 pages -> 3 presses) to cross the DT boundary.
+        LOGGER.info("Navigating forward across the New DT boundary.")
+        pcm.clear()
+        for _ in range(3):
+            await page.keyboard.press("ArrowRight")
             await page.wait_for_load_state("networkidle")
             await assert_no_spinner(page)
             await page.wait_for_timeout(500)
 
-            # The New page 1 must contain the boundary archive, and must NOT contain the non-new one.
-            new_page1_visible = await page.locator(f"#thumbs_container a[href*='id={page1_last_arcid}']").count()
-            assert new_page1_visible > 0, f"Expected New DT page 1 to contain {page1_last_title!r}"
-            non_new_visible = await page.locator(f"#thumbs_container a[href*='id={non_new_arcid}']").count()
-            assert non_new_visible == 0, "Non-new archive unexpectedly present in the New Archives lineup"
+        cross_dt_url = page.url
+        LOGGER.info(f"After cross-DT navigation: {cross_dt_url}")
+        assert f"id={page1_last_arcid}" not in cross_dt_url, "Expected to have crossed the DT boundary"
+        assert f"id={buggy_landing_arcid}" not in cross_dt_url, (
+            "Crossed into the unfiltered library: landed on the non-new archive "
+            f"{buggy_landing_arcid} (NEW_ONLY neighbor-prefetch drift regression)"
+        )
+        assert f"id={expected_landing_arcid}" in cross_dt_url, (
+            f"Expected to land on the New set's next archive {expected_landing_arcid}, got {cross_dt_url}"
+        )
 
-            # Open the last archive on New DT page 1.
-            LOGGER.info(f"Opening last archive on New DT page 1: {page1_last_title}")
-            await page.locator(f"#thumbs_container a[href*='id={page1_last_arcid}']").first.click()
-            await page.wait_for_load_state("networkidle")
-            await assert_no_spinner(page)
-            assert f"id={page1_last_arcid}" in page.url
-
-            # Read past the last page (3 pages -> 3 presses) to cross the DT boundary.
-            LOGGER.info("Navigating forward across the New DT boundary.")
-            responses.clear()
-            console_evts.clear()
-            for _ in range(3):
-                await page.keyboard.press("ArrowRight")
-                await page.wait_for_load_state("networkidle")
-                await assert_no_spinner(page)
-                await page.wait_for_timeout(500)
-
-            cross_dt_url = page.url
-            LOGGER.info(f"After cross-DT navigation: {cross_dt_url}")
-            assert f"id={page1_last_arcid}" not in cross_dt_url, "Expected to have crossed the DT boundary"
-            assert f"id={buggy_landing_arcid}" not in cross_dt_url, (
-                "Crossed into the unfiltered library: landed on the non-new archive "
-                f"{buggy_landing_arcid} (NEW_ONLY neighbor-prefetch drift regression)"
-            )
-            assert f"id={expected_landing_arcid}" in cross_dt_url, (
-                f"Expected to land on the New set's next archive {expected_landing_arcid}, got {cross_dt_url}"
-            )
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
 
@@ -392,64 +356,47 @@ async def test_forward_history_after_redraw(
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+        # Navigate to index with search filter.
+        await page.goto(f"{lrr_client.lrr_base_url}/?q=History")
+        await page.wait_for_load_state("networkidle")
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
 
-            # Navigate to index with search filter.
-            await page.goto(f"{lrr_client.lrr_base_url}/?q=History")
-            await page.wait_for_load_state("networkidle")
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
+        # Find the archive as rendered in DT results.
+        await assert_no_spinner(page)
+        dt_entries = await read_rendered_entries(page, 1)
+        assert len(dt_entries) == 1, f"Expected 1 archive rendered, got {len(dt_entries)}"
+        dt_title = dt_entries[0][0]
+        pcm.clear()
 
-            # Find the archive as rendered in DT results.
-            await assert_no_spinner(page)
-            dt_entries = await read_rendered_entries(page, 1)
-            assert len(dt_entries) == 1, f"Expected 1 archive rendered, got {len(dt_entries)}"
-            dt_title = dt_entries[0][0]
-            responses.clear()
-            console_evts.clear()
+        # Click archive to enter reader.
+        await page.locator("#thumbs_container a", has_text=dt_title).first.click()
+        await page.wait_for_load_state("networkidle")
+        assert "/reader" in page.url
+        LOGGER.debug(f"Entered reader: {page.url}")
 
-            # Click archive to enter reader.
-            await page.locator("#thumbs_container a", has_text=dt_title).first.click()
-            await page.wait_for_load_state("networkidle")
-            assert "/reader" in page.url
-            LOGGER.debug(f"Entered reader: {page.url}")
+        # Browser back to index (popstate-guarded, pushState skipped).
+        pcm.clear()
+        await page.go_back(wait_until="networkidle")
+        LOGGER.debug(f"After back: {page.url}")
+        assert "/reader" not in page.url
 
-            # Browser back to index (popstate-guarded, pushState skipped).
-            responses.clear()
-            console_evts.clear()
-            await page.go_back(wait_until="networkidle")
-            LOGGER.debug(f"After back: {page.url}")
-            assert "/reader" not in page.url
+        # Reload triggers a fresh drawCallback (not popstate-guarded).
+        pcm.clear()
+        await page.reload(wait_until="networkidle")
+        LOGGER.debug(f"After reload: {page.url}")
 
-            # Reload triggers a fresh drawCallback (not popstate-guarded).
-            responses.clear()
-            console_evts.clear()
-            await page.reload(wait_until="networkidle")
-            LOGGER.debug(f"After reload: {page.url}")
+        # Browser forward should return to reader.
+        pcm.clear()
+        await page.go_forward(wait_until="networkidle")
+        forward_url = page.url
+        LOGGER.debug(f"After forward: {forward_url}")
+        assert "/reader" in forward_url, f"Forward history was wiped by drawCallback pushState, got {forward_url}"
 
-            # Browser forward should return to reader.
-            responses.clear()
-            console_evts.clear()
-            await page.go_forward(wait_until="networkidle")
-            forward_url = page.url
-            LOGGER.debug(f"After forward: {forward_url}")
-            assert "/reader" in forward_url, f"Forward history was wiped by drawCallback pushState, got {forward_url}"
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
 
@@ -473,54 +420,38 @@ async def test_back_stack_no_growth_on_reload(
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+        # Navigate to login page as anchor.
+        await page.goto(f"{lrr_client.lrr_base_url}/login")
+        await page.wait_for_load_state("networkidle")
+        pcm.clear()
 
-            # Navigate to login page as anchor.
-            await page.goto(f"{lrr_client.lrr_base_url}/login")
-            await page.wait_for_load_state("networkidle")
-            responses.clear()
-            console_evts.clear()
+        # Navigate to index with search filter.
+        await page.goto(f"{lrr_client.lrr_base_url}/?q=test")
+        await page.wait_for_load_state("networkidle")
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
+        pcm.clear()
 
-            # Navigate to index with search filter.
-            await page.goto(f"{lrr_client.lrr_base_url}/?q=test")
-            await page.wait_for_load_state("networkidle")
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-            responses.clear()
-            console_evts.clear()
+        # Reload (drawCallback fires with non-popstate pushState).
+        await page.reload(wait_until="networkidle")
+        LOGGER.debug(f"After reload: {page.url}")
+        pcm.clear()
 
-            # Reload (drawCallback fires with non-popstate pushState).
-            await page.reload(wait_until="networkidle")
-            LOGGER.debug(f"After reload: {page.url}")
-            responses.clear()
-            console_evts.clear()
+        # Back twice should reach the login anchor.
+        # Without fix: reload added a duplicate, so 2 backs only reaches
+        # the goto entry (still index).
+        # With fix: reload pushState was skipped, so 2 backs reaches login.
+        await page.go_back(wait_until="networkidle")
+        LOGGER.debug(f"After first back: {page.url}")
+        await page.go_back(wait_until="networkidle")
+        back_url = page.url
+        LOGGER.debug(f"After second back: {back_url}")
+        assert "/login" in back_url, f"Back stack has duplicate entries from reload, got {back_url}"
 
-            # Back twice should reach the login anchor.
-            # Without fix: reload added a duplicate, so 2 backs only reaches
-            # the goto entry (still index).
-            # With fix: reload pushState was skipped, so 2 backs reaches login.
-            await page.go_back(wait_until="networkidle")
-            LOGGER.debug(f"After first back: {page.url}")
-            await page.go_back(wait_until="networkidle")
-            back_url = page.url
-            LOGGER.debug(f"After second back: {back_url}")
-            assert "/login" in back_url, f"Back stack has duplicate entries from reload, got {back_url}"
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
 
@@ -621,47 +552,34 @@ async def test_navigation_grouptanks(
             break
     assert last_title is not None, "Could not resolve title for last archive on ungrouped page 1"
 
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        await bc.add_init_script("localStorage.setItem('grouptanks', 'false');")
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
+        await page.add_init_script("localStorage.setItem('grouptanks', 'false');")
 
-            await page.goto(lrr_client.lrr_base_url)
-            await page.wait_for_load_state("networkidle")
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
+        await page.goto(lrr_client.lrr_base_url)
+        await page.wait_for_load_state("networkidle")
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
 
-            LOGGER.debug(f"Opening last archive on ungrouped DT page 1: {last_title}")
-            await page.locator("#thumbs_container a", has_text=last_title).first.click()
+        LOGGER.debug(f"Opening last archive on ungrouped DT page 1: {last_title}")
+        await page.locator("#thumbs_container a", has_text=last_title).first.click()
+        await page.wait_for_load_state("networkidle")
+        await assert_no_spinner(page)
+        assert f"id={last_arc_page1}" in page.url, f"Expected last page-1 archive in URL, got {page.url}"
+
+        # Navigate forward across the DT page boundary (3 pages per archive).
+        pcm.clear()
+        LOGGER.debug("Navigating forward across the ungrouped DT boundary.")
+        for _ in range(3):
+            await page.keyboard.press("ArrowRight")
             await page.wait_for_load_state("networkidle")
             await assert_no_spinner(page)
-            assert f"id={last_arc_page1}" in page.url, f"Expected last page-1 archive in URL, got {page.url}"
+            await page.wait_for_timeout(500)
 
-            # Navigate forward across the DT page boundary (3 pages per archive).
-            responses.clear()
-            console_evts.clear()
-            LOGGER.debug("Navigating forward across the ungrouped DT boundary.")
-            for _ in range(3):
-                await page.keyboard.press("ArrowRight")
-                await page.wait_for_load_state("networkidle")
-                await assert_no_spinner(page)
-                await page.wait_for_timeout(500)
+        assert f"id={expected_neighbor}" in page.url, f"Expected ungrouped neighbor {expected_neighbor} after crossing DT boundary, got {page.url}"
+        assert "TANK_" not in page.url, f"Ungrouped navigation should not land on a tank, got {page.url}"
 
-            assert f"id={expected_neighbor}" in page.url, f"Expected ungrouped neighbor {expected_neighbor} after crossing DT boundary, got {page.url}"
-            assert "TANK_" not in page.url, f"Ungrouped navigation should not land on a tank, got {page.url}"
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE: UNGROUPED MODE <<<<<
 
 
@@ -733,88 +651,75 @@ async def test_navigation_sort_by_namespace(
     # <<<<< GROUND TRUTH STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
         # Bind a display column to the `chapter` namespace before the index loads. The
         # name-based ?sort= reader resolves a namespace to a column already bound to it; it
         # does not auto-bind an arbitrary namespace to a column. Seeding customColumn1 is how a
         # real user who wants to sort by chapter has it configured.
-        await bc.add_init_script("localStorage.setItem('customColumn1', 'chapter');")
+        await page.add_init_script("localStorage.setItem('customColumn1', 'chapter');")
 
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page_errors: list[str] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
-            page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        page_errors: list[str] = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
 
-            # Open the index already sorted by the chapter namespace via the URL.
-            await page.goto(f"{lrr_client.lrr_base_url}/?q=series%3AManga%24&sort=chapter")
+        # Open the index already sorted by the chapter namespace via the URL.
+        await page.goto(f"{lrr_client.lrr_base_url}/?q=series%3AManga%24&sort=chapter")
+        await page.wait_for_load_state("networkidle")
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
+        await assert_no_spinner(page)
+        await page.wait_for_timeout(500)
+
+        # The URL must round-trip as the namespace name, not a column index.
+        assert "sort=chapter" in page.url, f"Expected namespace sort to persist in URL, got {page.url}"
+        assert "sort=1" not in page.url, f"URL should not collapse the namespace to a column index, got {page.url}"
+
+        # The index page must be JS-error-free. A throwing drawCallback (e.g. a bad
+        # column accessor in buildURLParameters) is an *uncaught* exception, not a
+        # console.error, so it surfaces via pageerror rather than console_evts; it
+        # leaves the spinner stuck and silently breaks the URL writer. Assert here,
+        # before the reader stage clears the console.
+        assert not page_errors, f"Uncaught JS error(s) on the index page: {page_errors}"
+        await pcm.assert_http_ok()
+        await pcm.assert_console_ok()
+
+        # Writer isolation: the round-trip check above is partly satisfied by the URL we
+        # navigated to, so it doesn't prove the app *generated* the name. Toggle the sort
+        # direction to force buildURLParameters to regenerate the URL from scratch: the new
+        # sortdir=desc is the witness that the writer ran, and sort=chapter (not sort=1)
+        # proves it emitted the namespace name rather than the column index.
+        await page.click("#order-sortby")
+        # buildURLParameters rewrites the URL via pushState inside the (async) DataTables draw
+        # callback, which can land after networkidle -- wait on the URL itself, not the network.
+        # (assert_no_spinner watches the reader's #i3 spinner, which never exists on the index.)
+        await page.wait_for_function("() => location.search.includes('sortdir=desc')", timeout=5000)
+        assert "sortdir=desc" in page.url, f"Sort-direction toggle must regenerate the URL, got {page.url}"
+        assert "sort=chapter" in page.url, f"Writer must regenerate the namespace name, got {page.url}"
+        assert "sort=1" not in page.url, f"Writer must not regenerate a column index, got {page.url}"
+        # Restore ascending order for the reader-navigation stage below.
+        await page.click("#order-sortby")
+        await page.wait_for_function("() => !location.search.includes('sortdir=desc')", timeout=5000)
+        assert "sortdir=desc" not in page.url, f"Expected ascending order restored, got {page.url}"
+
+        # Enter the reader on the first chapter-sorted archive.
+        first_title = arcid_to_title[chapter_order[0]]
+        LOGGER.info(f"Opening first chapter-sorted archive: {first_title}")
+        pcm.clear()
+        await page.locator("#thumbs_container a", has_text=first_title).first.click()
+        await page.wait_for_load_state("networkidle")
+        await assert_no_spinner(page)
+        assert f"id={chapter_order[0]}" in page.url, f"Expected first chapter archive in URL, got {page.url}"
+
+        # Step forward with "." across the lineup; each landing must follow chapter order.
+        for expected_arcid in chapter_order[1:]:
+            await page.keyboard.press(".")
             await page.wait_for_load_state("networkidle")
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
             await assert_no_spinner(page)
             await page.wait_for_timeout(500)
+            assert f"id={expected_arcid}" in page.url, (
+                f"Expected next archive {arcid_to_title[expected_arcid]} in chapter order, got {page.url}"
+            )
 
-            # The URL must round-trip as the namespace name, not a column index.
-            assert "sort=chapter" in page.url, f"Expected namespace sort to persist in URL, got {page.url}"
-            assert "sort=1" not in page.url, f"URL should not collapse the namespace to a column index, got {page.url}"
-
-            # The index page must be JS-error-free. A throwing drawCallback (e.g. a bad
-            # column accessor in buildURLParameters) is an *uncaught* exception, not a
-            # console.error, so it surfaces via pageerror rather than console_evts; it
-            # leaves the spinner stuck and silently breaks the URL writer. Assert here,
-            # before the reader stage clears the console.
-            assert not page_errors, f"Uncaught JS error(s) on the index page: {page_errors}"
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-
-            # Writer isolation: the round-trip check above is partly satisfied by the URL we
-            # navigated to, so it doesn't prove the app *generated* the name. Toggle the sort
-            # direction to force buildURLParameters to regenerate the URL from scratch: the new
-            # sortdir=desc is the witness that the writer ran, and sort=chapter (not sort=1)
-            # proves it emitted the namespace name rather than the column index.
-            await page.click("#order-sortby")
-            # buildURLParameters rewrites the URL via pushState inside the (async) DataTables draw
-            # callback, which can land after networkidle -- wait on the URL itself, not the network.
-            # (assert_no_spinner watches the reader's #i3 spinner, which never exists on the index.)
-            await page.wait_for_function("() => location.search.includes('sortdir=desc')", timeout=5000)
-            assert "sortdir=desc" in page.url, f"Sort-direction toggle must regenerate the URL, got {page.url}"
-            assert "sort=chapter" in page.url, f"Writer must regenerate the namespace name, got {page.url}"
-            assert "sort=1" not in page.url, f"Writer must not regenerate a column index, got {page.url}"
-            # Restore ascending order for the reader-navigation stage below.
-            await page.click("#order-sortby")
-            await page.wait_for_function("() => !location.search.includes('sortdir=desc')", timeout=5000)
-            assert "sortdir=desc" not in page.url, f"Expected ascending order restored, got {page.url}"
-
-            # Enter the reader on the first chapter-sorted archive.
-            first_title = arcid_to_title[chapter_order[0]]
-            LOGGER.info(f"Opening first chapter-sorted archive: {first_title}")
-            responses.clear()
-            console_evts.clear()
-            await page.locator("#thumbs_container a", has_text=first_title).first.click()
-            await page.wait_for_load_state("networkidle")
-            await assert_no_spinner(page)
-            assert f"id={chapter_order[0]}" in page.url, f"Expected first chapter archive in URL, got {page.url}"
-
-            # Step forward with "." across the lineup; each landing must follow chapter order.
-            for expected_arcid in chapter_order[1:]:
-                await page.keyboard.press(".")
-                await page.wait_for_load_state("networkidle")
-                await assert_no_spinner(page)
-                await page.wait_for_timeout(500)
-                assert f"id={expected_arcid}" in page.url, (
-                    f"Expected next archive {arcid_to_title[expected_arcid]} in chapter order, got {page.url}"
-                )
-
-            assert not page_errors, f"Uncaught JS error(s) during reader navigation: {page_errors}"
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        assert not page_errors, f"Uncaught JS error(s) during reader navigation: {page_errors}"
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<

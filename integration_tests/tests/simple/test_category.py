@@ -5,8 +5,6 @@ Covers behavior of the category editor at /config/categories.
 
 import logging
 
-import playwright.async_api
-import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.category import (
@@ -21,9 +19,7 @@ from aio_lanraragi_tests.deployment.base import (
     expect_no_error_logs,
 )
 from aio_lanraragi_tests.utils.playwright import (
-    assert_browser_responses_ok,
-    assert_console_logs_ok,
-    assert_toasts_ok,
+    PlaywrightTestContextManager,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -74,51 +70,38 @@ async def test_category_editor(
     # <<<<< CREATE PINNED CATEGORY <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-            # login; category management requires a logged-in user
-            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
-            await page.wait_for_load_state("networkidle")
-            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-            await page.get_by_role("button", name="Login").click()
-            await page.wait_for_load_state("networkidle")
-            responses.clear()
-            console_evts.clear()
+        # login; category management requires a logged-in user
+        await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+        await page.wait_for_load_state("networkidle")
+        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+        await page.get_by_role("button", name="Login").click()
+        await page.wait_for_load_state("networkidle")
+        pcm.clear()
 
-            await page.goto(f"{lrr_client.lrr_base_url}/config/categories", timeout=60000)
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/config/categories", timeout=60000)
+        await page.wait_for_load_state("networkidle")
 
-            await page.locator(f"#category option[value='{category_id}']").wait_for(state="attached", timeout=5000)
-            await page.select_option("#category", category_id)
-            await page.wait_for_timeout(300)
+        await page.locator(f"#category option[value='{category_id}']").wait_for(state="attached", timeout=5000)
+        await page.select_option("#category", category_id)
+        await page.wait_for_timeout(300)
 
-            # >>>>> READ PIN CHECKBOX >>>>>
-            checkbox = page.locator("#pinned")
-            await checkbox.wait_for(state="attached", timeout=5000)
-            checkbox_state = await checkbox.is_checked()
-            # <<<<< READ PIN CHECKBOX <<<<<
+        # >>>>> READ PIN CHECKBOX >>>>>
+        checkbox = page.locator("#pinned")
+        await checkbox.wait_for(state="attached", timeout=5000)
+        checkbox_state = await checkbox.is_checked()
+        # <<<<< READ PIN CHECKBOX <<<<<
 
-            # >>>>> RENAME >>>>>
-            await page.locator("#catname").fill(renamed)
-            await page.locator("#catname").blur()
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(500)
-            # <<<<< RENAME <<<<<
+        # >>>>> RENAME >>>>>
+        await page.locator("#catname").fill(renamed)
+        await page.locator("#catname").blur()
+        await page.wait_for_load_state("networkidle")
+        await page.wait_for_timeout(500)
+        # <<<<< RENAME <<<<<
 
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     # >>>>> VERIFY STAGE >>>>>

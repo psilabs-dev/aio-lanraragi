@@ -16,7 +16,6 @@ import tempfile
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
-import playwright.async_api
 import playwright.async_api._generated
 import pytest
 import pytest_asyncio
@@ -31,9 +30,7 @@ from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.log_parse import parse_lrr_logs
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
 from aio_lanraragi_tests.utils.playwright import (
-    assert_browser_responses_ok,
-    assert_console_logs_ok,
-    assert_toasts_ok,
+    PlaywrightTestContextManager,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -300,48 +297,34 @@ async def test_validation_carousel_search(request: pytest.FixtureRequest, resour
             _, error = await client.misc_api.get_server_info()
             assert not error, f"Failed to connect (status {error.status}): {error.error}"
 
-            async with playwright.async_api.async_playwright() as p:
-                browser = await p.chromium.launch()
-                bc = await browser.new_context()
-                await bc.add_init_script(
+            async with PlaywrightTestContextManager(client) as pcm:
+                page = pcm.page
+                await page.add_init_script(
                     "localStorage.setItem('carouselType', 'inbox');"
                     "localStorage.setItem('carouselOpen', '1');"
                 )
 
-                try:
-                    page = await bc.new_page()
-                    responses: list[playwright.async_api._generated.Response] = []
-                    console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
+                await page.goto(f"{client.lrr_base_url}/")
+                await page.wait_for_load_state("networkidle")
 
-                    page.on("response", lambda r: responses.append(r))
-                    page.on("console", lambda m: console_evts.append(m))
+                search_responses: list[playwright.async_api._generated.Response] = []
+                for r in pcm.responses:
+                    if "/api/search" in r.url and "random" not in r.url and "cache" not in r.url:
+                        search_responses.append(r)
+                assert len(search_responses) > 0, "No /api/search response captured from carousel"
 
-                    await page.goto(f"{client.lrr_base_url}/")
-                    await page.wait_for_load_state("networkidle")
+                for r in search_responses:
+                    assert r.status in (200, 204), (
+                        f"Carousel search returned {r.status}, expected 200 or 204. URL: {r.url}"
+                    )
+                    assert "category=&" not in r.url and not r.url.endswith("category="), (
+                        f"Carousel URL contains empty category= param: {r.url}"
+                    )
+                    assert "filter=&" not in r.url and not r.url.endswith("filter="), (
+                        f"Carousel URL contains empty filter= param: {r.url}"
+                    )
 
-                    search_responses: list[playwright.async_api._generated.Response] = []
-                    for r in responses:
-                        if "/api/search" in r.url and "random" not in r.url and "cache" not in r.url:
-                            search_responses.append(r)
-                    assert len(search_responses) > 0, "No /api/search response captured from carousel"
-
-                    for r in search_responses:
-                        assert r.status in (200, 204), (
-                            f"Carousel search returned {r.status}, expected 200 or 204. URL: {r.url}"
-                        )
-                        assert "category=&" not in r.url and not r.url.endswith("category="), (
-                            f"Carousel URL contains empty category= param: {r.url}"
-                        )
-                        assert "filter=&" not in r.url and not r.url.endswith("filter="), (
-                            f"Carousel URL contains empty filter= param: {r.url}"
-                        )
-
-                    await assert_browser_responses_ok(responses, client, logger=LOGGER)
-                    await assert_console_logs_ok(console_evts, client.lrr_base_url)
-                    await assert_toasts_ok(page)
-                finally:
-                    await bc.close()
-                    await browser.close()
+                await pcm.assert_ok()
 
             expect_no_error_logs(env, LOGGER)
         finally:
