@@ -101,6 +101,8 @@ async def test_header_click_sort(
                 await page.keyboard.press("Escape")
                 await asyncio.sleep(0.3)
 
+            await assert_no_spinner(page)
+
             # switch to compact/table mode
             await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
             await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
@@ -126,6 +128,7 @@ async def test_header_click_sort(
             # click title header to sort descending (default is already asc)
             await title_header.click()
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
 
             # verify header has sorting_desc class
             header_class = await title_header.get_attribute("class") or ""
@@ -146,6 +149,7 @@ async def test_header_click_sort(
 
             await title_header.click()
             await page.wait_for_load_state("networkidle")
+            await assert_no_spinner(page)
 
             # verify header has sorting_asc class
             header_class = await title_header.get_attribute("class") or ""
