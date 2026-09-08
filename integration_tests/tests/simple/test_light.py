@@ -13,7 +13,6 @@ from pathlib import Path
 import aiohttp
 import numpy as np
 import playwright.async_api
-import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import (
@@ -41,8 +40,7 @@ from aio_lanraragi_tests.utils.api_wrappers import (
     upload_archive,
 )
 from aio_lanraragi_tests.utils.playwright import (
-    assert_browser_responses_ok,
-    assert_console_logs_ok,
+    PlaywrightTestContextManager,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -445,55 +443,41 @@ async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semap
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.webkit.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client, browser_type="webkit") as pcm:
+        page = pcm.page
 
-        try:
-            page = await browser.new_page()
+        await page.goto(lrr_client.lrr_base_url)
+        await page.wait_for_load_state("networkidle")
+        assert await page.title() == LRR_INDEX_TITLE
 
-            # capture all network and console traffic
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+        # enter admin portal
+        # exit overlay
+        if "New Version Release Notes" in await page.content():
+            LOGGER.info("Closing new releases overlay.")
+            await page.keyboard.press("Escape")
 
-            await page.goto(lrr_client.lrr_base_url)
-            await page.wait_for_load_state("networkidle")
-            assert await page.title() == LRR_INDEX_TITLE
+        # click search bar
+        LOGGER.info("Applying search filter: \"tag-1\"...")
+        await page.get_by_role("combobox", name="Search Title, Artist, Series").click()
+        await page.get_by_role("combobox", name="Search Title, Artist, Series").fill("tag-1")
+        await page.get_by_role("button", name="Apply Filter").click()
+        await page.wait_for_load_state("networkidle")
 
-            # enter admin portal
-            # exit overlay
-            if "New Version Release Notes" in await page.content():
-                LOGGER.info("Closing new releases overlay.")
-                await page.keyboard.press("Escape")
+        LOGGER.info("Opening reader for \"Test Archive\"...")
+        test_archive_link = page.get_by_role("link", name="Test Archive").nth(1)
+        await test_archive_link.wait_for(state="visible", timeout=5000)
+        await test_archive_link.click()
+        await page.wait_for_load_state("networkidle")
 
-            # click search bar
-            LOGGER.info("Applying search filter: \"tag-1\"...")
-            await page.get_by_role("combobox", name="Search Title, Artist, Series").click()
-            await page.get_by_role("combobox", name="Search Title, Artist, Series").fill("tag-1")
-            await page.get_by_role("button", name="Apply Filter").click()
-            await page.wait_for_load_state("networkidle")
+        LOGGER.info("Going back to index page and checking search bar...")
+        back_link = page.get_by_role("link", name="")
+        await back_link.wait_for(state="visible", timeout=5000)
+        await back_link.click()
+        await page.wait_for_load_state("networkidle")
+        await playwright.async_api.expect(
+            page.get_by_role("combobox", name="Search Title, Artist, Series")
+        ).to_have_value("tag-1")
 
-            LOGGER.info("Opening reader for \"Test Archive\"...")
-            test_archive_link = page.get_by_role("link", name="Test Archive").nth(1)
-            await test_archive_link.wait_for(state="visible", timeout=5000)
-            await test_archive_link.click()
-            await page.wait_for_load_state("networkidle")
-
-            LOGGER.info("Going back to index page and checking search bar...")
-            back_link = page.get_by_role("link", name="")
-            await back_link.wait_for(state="visible", timeout=5000)
-            await back_link.click()
-            await page.wait_for_load_state("networkidle")
-            await playwright.async_api.expect(
-                page.get_by_role("combobox", name="Search Title, Artist, Series")
-            ).to_have_value("tag-1")
-
-            # check browser traffic is OK.
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-        finally:
-            await bc.close()
-            await browser.close()
+        # check browser traffic is OK.
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
