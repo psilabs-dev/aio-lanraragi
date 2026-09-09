@@ -19,8 +19,10 @@ from lanraragi.models.archive import (
     GetArchiveCategoriesRequest,
     GetArchiveMetadataRequest,
     GetArchiveThumbnailRequest,
+    UpdateArchiveMetadataRequest,
     UpdateArchiveThumbnailRequest,
     UpdateReadingProgressionRequest,
+    UploadArchiveResponse,
 )
 from lanraragi.models.base import LanraragiErrorResponse, LanraragiResponse
 from lanraragi.models.category import (
@@ -44,6 +46,7 @@ from lanraragi.models.tankoubon import (
     UpdateTankoubonRequest,
 )
 
+from aio_lanraragi_tests.common import compute_upload_checksum
 from aio_lanraragi_tests.deployment.base import (
     AbstractLRRDeploymentContext,
     expect_no_error_logs,
@@ -159,6 +162,125 @@ async def test_archive_upload(lrr_client: LRRClient, semaphore: asyncio.Semaphor
     assert len(response.data) == num_archives-50, "Incorrect number of archives in server!"
     assert len(list(environment.archives_dir.iterdir())) == num_archives-50, "Incorrect number of archives on disk!"
     # <<<<< DELETE ARCHIVE ASYNC STAGE <<<<<
+
+    # no error logs
+    expect_no_error_logs(environment, LOGGER)
+
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
+@pytest.mark.asyncio
+@pytest.mark.xfail(reason="requires LRR-side fix: see https://github.com/Difegue/LANraragi/blob/ffeccf8788454c2343a0a09e416207b3c5cef4a1/lib/LANraragi/Model/Archive.pm#L431", strict=False)
+async def test_untagged_archives(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
+    """
+    Tests untagged archive APIs.
+
+    1. Upload 100 untagged archives (assert untagged = 100)
+    2. Tag 50 archives (assert untagged 50)
+    3. Delete 25 tagged archives (assert untagged 50)
+    4. Delete 25 untagged archives (assert untagged 25)
+    5. Delete remaining 25 untagged archives (assert untagged 0)
+    6. Remove all tags from 10 tagged archives (assert untagged 10)
+    """
+    num_archives = 100
+
+    # >>>>> TEST CONNECTION STAGE >>>>>
+    response, error = await lrr_client.misc_api.get_server_info()
+    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.archive_api.get_all_archives()
+    assert not error, f"Failed to get all archives (status {error.status}): {error.error}"
+    assert len(response.data) == 0, "Server contains archives!"
+    del response, error
+    # <<<<< TEST CONNECTION STAGE <<<<<
+
+    # >>>>> UPLOAD STAGE >>>>>
+    arcids: list[str] = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        LOGGER.debug(f"Creating {num_archives} archives to upload.")
+        write_responses = save_archives(num_archives, tmpdir, npgenerator)
+        assert len(write_responses) == num_archives, f"Number of archives written does not equal {num_archives}!"
+
+        LOGGER.debug("Uploading archives to server without tags.")
+        tasks = []
+        for write_response in write_responses:
+            tasks.append(asyncio.create_task(upload_archive(
+                lrr_client, write_response.save_path, write_response.save_path.name, semaphore,
+                checksum=compute_upload_checksum(write_response.save_path),
+            )))
+        gathered: list[tuple[UploadArchiveResponse, LanraragiErrorResponse]] = await asyncio.gather(*tasks)
+        for response, error in gathered:
+            assert not error, f"Upload failed (status {error.status}): {error.error}"
+            arcids.append(response.arcid)
+    assert len(arcids) == num_archives, "Number of uploaded archives does not equal number written!"
+    # <<<<< UPLOAD STAGE <<<<<
+
+    # >>>>> STAT REBUILD STAGE >>>>>
+    await trigger_stat_rebuild(lrr_client)
+    LOGGER.debug("Stat hash rebuild completed.")
+    # <<<<< STAT REBUILD STAGE <<<<<
+
+    # >>>>> VALIDATE UNTAGGED UPLOADS STAGE >>>>>
+    response, error = await lrr_client.archive_api.get_untagged_archives()
+    assert not error, f"Failed to get untagged archives (status {error.status}): {error.error}"
+    assert set(response.data) == set(arcids), f"Expected all {num_archives} uploads to be untagged, got {len(response.data)}!"
+    del response, error
+    # <<<<< VALIDATE UNTAGGED UPLOADS STAGE <<<<<
+
+    # >>>>> TAG STAGE >>>>>
+    tagged_arcids = arcids[:50]
+    untagged_arcids = arcids[50:]
+    for arcid in tagged_arcids:
+        response, error = await retry_on_lock(lambda: lrr_client.archive_api.update_archive_metadata(UpdateArchiveMetadataRequest(arcid=arcid, tags="test")))
+        assert not error, f"Failed to tag archive {arcid} (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.archive_api.get_untagged_archives()
+    assert not error, f"Failed to get untagged archives (status {error.status}): {error.error}"
+    assert set(response.data) == set(untagged_arcids), f"Expected 50 untagged archives after tagging, got {len(response.data)}!"
+    del response, error
+    # <<<<< TAG STAGE <<<<<
+
+    # >>>>> DELETE TAGGED ARCHIVES STAGE >>>>>
+    for arcid in tagged_arcids[:25]:
+        response, error = await delete_archive(lrr_client, arcid, semaphore)
+        assert not error, f"Failed to delete archive {arcid} (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.archive_api.get_untagged_archives()
+    assert not error, f"Failed to get untagged archives (status {error.status}): {error.error}"
+    assert set(response.data) == set(untagged_arcids), f"Deleting tagged archives changed the untagged set: expected 50, got {len(response.data)}!"
+    del response, error
+    # <<<<< DELETE TAGGED ARCHIVES STAGE <<<<<
+
+    # >>>>> DELETE UNTAGGED ARCHIVES STAGE >>>>>
+    for arcid in untagged_arcids[:25]:
+        response, error = await delete_archive(lrr_client, arcid, semaphore)
+        assert not error, f"Failed to delete archive {arcid} (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.archive_api.get_untagged_archives()
+    assert not error, f"Failed to get untagged archives (status {error.status}): {error.error}"
+    assert set(response.data) == set(untagged_arcids[25:]), f"Expected 25 untagged archives after deletion, got {len(response.data)}!"
+    del response, error
+
+    for arcid in untagged_arcids[25:]:
+        response, error = await delete_archive(lrr_client, arcid, semaphore)
+        assert not error, f"Failed to delete archive {arcid} (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.archive_api.get_untagged_archives()
+    assert not error, f"Failed to get untagged archives (status {error.status}): {error.error}"
+    assert not response.data, f"Expected no untagged archives after deleting all of them, got {len(response.data)}!"
+    del response, error
+    # <<<<< DELETE UNTAGGED ARCHIVES STAGE <<<<<
+
+    # >>>>> REMOVE TAGS STAGE >>>>>
+    cleared_arcids = tagged_arcids[25:35]
+    for arcid in cleared_arcids:
+        response, error = await retry_on_lock(lambda: lrr_client.archive_api.update_archive_metadata(UpdateArchiveMetadataRequest(arcid=arcid, tags="")))
+        assert not error, f"Failed to clear tags on archive {arcid} (status {error.status}): {error.error}"
+
+    response, error = await lrr_client.archive_api.get_untagged_archives()
+    assert not error, f"Failed to get untagged archives (status {error.status}): {error.error}"
+    assert set(response.data) == set(cleared_arcids), f"Expected 10 untagged archives after clearing tags, got {len(response.data)}!"
+    del response, error
+    # <<<<< REMOVE TAGS STAGE <<<<<
 
     # no error logs
     expect_no_error_logs(environment, LOGGER)
