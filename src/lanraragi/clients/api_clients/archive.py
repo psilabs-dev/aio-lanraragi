@@ -257,7 +257,7 @@ class _ArchiveApiClient(_ApiClient):
         form_data = aiohttp.FormData(quote_fields=False)
         if request.title:
             form_data.add_field('title', request.title)
-        if request.tags:
+        if request.tags is not None:
             form_data.add_field('tags', request.tags)
         if request.summary:
             form_data.add_field('summary', request.summary)
