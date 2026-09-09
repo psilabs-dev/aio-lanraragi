@@ -165,6 +165,20 @@ async def test_archive_upload(lrr_client: LRRClient, semaphore: asyncio.Semaphor
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
 @pytest.mark.asyncio
+async def test_untagged_archives(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
+    """
+    Tests untagged archive APIs.
+
+    1. Upload 100 untagged archives (assert untagged = 100)
+    2. Tag 50 archives (assert untagged 50)
+    3. Delete 25 tagged archives (assert untagged 50)
+    4. Delete 25 untagged archives (assert untagged 25)
+    5. Delete remaining 25 untagged archives (assert untagged 0)
+    6. Remove all tags from 10 tagged archives (assert untagged 10)
+    """
+
+@pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
+@pytest.mark.asyncio
 async def test_archive_read(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, environment: AbstractLRRDeploymentContext):
     """
     Simulates a read archive operation.
