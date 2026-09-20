@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 jobs:
 
@@ -24,7 +25,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Build
-        run: uv build
+        run: uv build --package aio-lanraragi
 
       - name: Store the distribution packages
         uses: actions/upload-artifact@v4
