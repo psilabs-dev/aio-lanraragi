@@ -1,5 +1,5 @@
 """
-Integration tests for the Stamps API (PR #1493).
+Integration tests for the Stamps API.
 """
 
 import asyncio
@@ -32,7 +32,6 @@ LOGGER = logging.getLogger(__name__)
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("stamps")
 async def test_stamp_crud(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext, semaphore: asyncio.BoundedSemaphore):
     """
     Happy-path lifecycle for a single stamp on one archive.
@@ -121,7 +120,6 @@ async def test_stamp_crud(lrr_client: LRRClient, environment: AbstractLRRDeploym
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("stamps")
 async def test_stamp_get_update_delete_missing_stamp_id(
     lrr_client: LRRClient, environment: AbstractLRRDeploymentContext,
 ):
@@ -158,7 +156,6 @@ async def test_stamp_get_update_delete_missing_stamp_id(
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("stamps")
 async def test_stamp_add_missing_archive(lrr_client: LRRClient):
     """
     Pin the contract that add_stamp on a non-existent archive returns 4xx.
@@ -174,7 +171,6 @@ async def test_stamp_add_missing_archive(lrr_client: LRRClient):
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("stamps")
 async def test_stamps_missing_archive_returns_4xx(lrr_client: LRRClient):
     """
     Pin the contract that page-scoped queries on a non-existent archive return 4xx.
@@ -200,7 +196,6 @@ async def test_stamps_missing_archive_returns_4xx(lrr_client: LRRClient):
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("stamps")
 async def test_stamps_multi_page_invariants(
     lrr_client: LRRClient, environment: AbstractLRRDeploymentContext, semaphore: asyncio.BoundedSemaphore,
 ):
@@ -288,7 +283,6 @@ async def test_stamps_multi_page_invariants(
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("stamps")
 async def test_stamps_cleared_on_archive_delete(
     lrr_client: LRRClient, semaphore: asyncio.BoundedSemaphore,
 ):
@@ -335,7 +329,6 @@ async def test_stamps_cleared_on_archive_delete(
 
 
 @pytest.mark.asyncio
-@pytest.mark.dev("stamps")
 async def test_stamps_require_api_key(
     lrr_client: LRRClient, environment: AbstractLRRDeploymentContext, semaphore: asyncio.BoundedSemaphore,
 ):

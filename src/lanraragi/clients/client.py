@@ -126,11 +126,12 @@ class LRRClient(ApiContextManager):
 
     @property
     def stamp_api(self) -> _StampApiClient:
-        # PR: https://github.com/Difegue/LANraragi/pull/1493
+        """
+        https://sugoi.gitbook.io/lanraragi/api-documentation/stamp-api
+        """
         return self._stamp_api
     @stamp_api.setter
     def stamp_api(self, value: _StampApiClient):
-        # PR: https://github.com/Difegue/LANraragi/pull/1493
         self._stamp_api = value
 
     @property
