@@ -177,6 +177,22 @@ class AbstractLRRDeploymentContext(abc.ABC):
         return self.staging_dir / redis_dirname
 
     @property
+    def shared_dir(self) -> Path:
+        """
+        Host directory bind-mounted into LRR, for test fixtures that LRR must be
+        able to read. Contents are visible to LRR at
+        ``lrr_mount_path``.
+        """
+        return self.staging_dir / (self.resource_prefix + "shared")
+
+    @abc.abstractmethod
+    def lrr_mount_path(self, host_path: Path) -> str:
+        """
+        Map a host path under ``shared_dir`` to the path at which LRR reads it
+        (a container path under Docker, the host path itself on native runs).
+        """
+
+    @property
     def redis_client(self) -> redis.Redis:
         """
         Redis client for this LRR deployment
