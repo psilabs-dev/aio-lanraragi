@@ -353,27 +353,6 @@ async def read_rendered_titles(
     return titles
 
 
-async def wait_for_input_value(
-        page: playwright.async_api._generated.Page,
-        locator: playwright.async_api._generated.Locator,
-        expected: str,
-        timeout_ms: int = 10000,
-) -> str:
-    """
-    Return the first `expected` observation or the last observation on timeout.
-    """
-    deadline = time.monotonic() + (timeout_ms / 1000)
-    value = ""
-    while True:
-        try:
-            value = await locator.input_value(timeout=1000)
-        except Exception:  # noqa: BLE001 - element may be mid-rerender
-            value = ""
-        if value == expected or time.monotonic() >= deadline:
-            return value
-        await page.wait_for_timeout(200)
-
-
 async def read_rendered_entries(
         page: playwright.async_api._generated.Page,
         expected_count: int,
