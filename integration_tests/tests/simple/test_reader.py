@@ -27,7 +27,6 @@ from lanraragi.models.tankoubon import (
 from aio_lanraragi_tests.common import DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE
 from aio_lanraragi_tests.utils.api_wrappers import (
     create_archive_file,
-    trigger_stat_rebuild,
     upload_archive,
 )
 from aio_lanraragi_tests.utils.playwright import (
@@ -37,8 +36,6 @@ from aio_lanraragi_tests.utils.playwright import (
     assert_no_spinner,
     get_image_bytes_from_responses,
     read_rendered_entries,
-    read_rendered_titles,
-    switch_display_mode,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -1126,113 +1123,4 @@ async def test_stamp_unauthorized_surfaces_error(
         # the 401 is deliberate: it drives the error toast asserted above, and the browser
         # logs its own console error for it, so the console and toast sweeps do not apply
         await pcm.assert_http_ok()
-    # <<<<< UI STAGE <<<<<
-
-
-@pytest.mark.asyncio
-@pytest.mark.playwright
-@pytest.mark.dev("navigation")
-async def test_return_to_index_preserves_namespace_sort(
-    lrr_client: LRRClient, semaphore: asyncio.Semaphore,
-):
-    """
-    Regression: returning from the reader to the index must preserve a non-title sort.
-
-    The index reads/writes the ?sort= URL param by tag-namespace NAME (e.g. ?sort=artist),
-    but reader.js returnToIndex() derives the return URL from localStorage.indexSort, which
-    is a numeric column index. If returnToIndex emits the bare number (?sort=1), the index's
-    name-based reader cannot resolve it and silently falls back to title order. returnToIndex
-    must resolve the index to the column's namespace name so the sort survives the round-trip.
-
-    Flow: sort the index by artist (a non-title namespace whose order differs from title
-    order) -> open an archive in the reader -> return to the index -> assert the index is
-    still sorted by artist, not reset to title.
-    """
-
-    # >>>>> TEST CONNECTION STAGE >>>>>
-    _, error = await lrr_client.misc_api.get_server_info()
-    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-    # <<<<< TEST CONNECTION STAGE <<<<<
-
-    # >>>>> UPLOAD STAGE >>>>>
-    # artist tags (c, a, b) are deliberately misaligned with title order, so artist-asc
-    # order differs from title order and a silent reset to title is detectable.
-    archive_specs = [
-        {"name": "archive_1", "title": "Title 1", "tags": "artist:c"},
-        {"name": "archive_2", "title": "Title 2", "tags": "artist:a"},
-        {"name": "archive_3", "title": "Title 3", "tags": "artist:b"},
-    ]
-    artist_asc_titles = ["Title 2", "Title 3", "Title 1"]  # a, b, c
-    num_archives = len(archive_specs)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        for spec in archive_specs:
-            archive_path = create_archive_file(Path(tmpdir), spec["name"], num_pages=1)
-            response, error = await upload_archive(
-                lrr_client, archive_path, archive_path.name, semaphore,
-                title=spec["title"], tags=spec["tags"],
-            )
-            assert not error, f"Upload failed (status {error.status}): {error.error}"
-    # <<<<< UPLOAD STAGE <<<<<
-
-    # >>>>> STAT REBUILD STAGE >>>>>
-    await trigger_stat_rebuild(lrr_client)
-    # <<<<< STAT REBUILD STAGE <<<<<
-
-    async def capture_search_titles(page, action) -> list[str]:
-        """Run `action` (a DT redraw or a full index load) and return the title order as rendered.
-
-        On a fresh index load the table draws twice: once with its hardcoded default order
-        (title), then again after consumeURLParameters() applies the URL's sort. Reading the
-        settled DOM after the network goes quiet therefore reflects the final order the user
-        sees, without needing to know which request produced it."""
-        await action()
-        await page.wait_for_load_state("networkidle")
-        await page.wait_for_timeout(500)  # allow the post-URL-resolution redraw to land
-        await assert_no_spinner(page)
-        return await read_rendered_titles(page, num_archives)
-
-    # >>>>> UI STAGE >>>>>
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
-        page = pcm.page
-
-        await page.goto(lrr_client.lrr_base_url, timeout=60000)
-        await page.wait_for_load_state("networkidle")
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
-
-        # Sort the index by the artist column (compact mode exposes the column header,
-        # avoiding the namespace dropdown). This sets localStorage.indexSort and pushes
-        # ?sort=artist into the URL.
-        await switch_display_mode(page, "compact")
-        await page.wait_for_load_state("networkidle")
-        artist_header = page.locator("#customheader1")
-        await artist_header.wait_for(state="visible", timeout=5000)
-
-        sorted_titles = await capture_search_titles(page, artist_header.click)
-        assert sorted_titles == artist_asc_titles, (
-            f"Precondition failed: expected artist-asc {artist_asc_titles}, got {sorted_titles}"
-        )
-        assert "sort=artist" in page.url, f"Expected sort=artist in index URL after sorting, got {page.url}"
-
-        # Open the first archive (in artist order) in the reader.
-        first_archive = page.locator("td.title.itd a").first
-        await first_archive.wait_for(state="visible", timeout=5000)
-        async with page.expect_navigation(timeout=30000):
-            await first_archive.click()
-        await page.wait_for_load_state("networkidle")
-        assert "/reader" in page.url, f"Expected reader page, got {page.url}"
-
-        # Return to the index via the "done reading" button and confirm the sort survived.
-        return_button = page.locator("#return-to-index")
-        await return_button.wait_for(state="visible", timeout=5000)
-        returned_titles = await capture_search_titles(page, return_button.click)
-        await page.wait_for_load_state("networkidle")
-
-        assert returned_titles == artist_asc_titles, (
-            f"Sort not preserved on return to index: expected artist-asc {artist_asc_titles}, "
-            f"got {returned_titles} (title order is {['Title 1', 'Title 2', 'Title 3']})"
-        )
-        assert "sort=artist" in page.url, f"Expected sort=artist in index URL after return, got {page.url}"
-        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<

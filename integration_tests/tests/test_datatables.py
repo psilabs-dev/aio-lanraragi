@@ -601,6 +601,8 @@ async def test_navigation_sort_by_namespace(
        (sort=chapter, not a column index) on round-trip.
     3. Enter the reader on the first archive and step forward with "." across the
        whole lineup, verifying each landing matches the chapter-sorted order.
+    4. Return to the index from the reader.
+       - Expect the index to still be sorted by chapter, with sort=chapter in the URL.
     """
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -719,6 +721,17 @@ async def test_navigation_sort_by_namespace(
             assert f"id={expected_arcid}" in page.url, (
                 f"Expected next archive {arcid_to_title[expected_arcid]} in chapter order, got {page.url}"
             )
+
+        # Return to the index from the reader; the chapter sort must survive.
+        async with page.expect_navigation():
+            await page.locator("#return-to-index").click()
+        chapter_titles = [arcid_to_title[arcid] for arcid in chapter_order]
+        returned_entries = await read_rendered_entries(page, len(chapter_order), chapter_titles)
+        returned_titles = [title for title, _ in returned_entries]
+        assert returned_titles == chapter_titles, (
+            f"Expected chapter order {chapter_titles} after returning to the index, got {returned_titles}"
+        )
+        assert "sort=chapter" in page.url, f"Expected sort=chapter in the index URL after return, got {page.url}"
 
         assert not page_errors, f"Uncaught JS error(s) during reader navigation: {page_errors}"
         await pcm.assert_ok()
