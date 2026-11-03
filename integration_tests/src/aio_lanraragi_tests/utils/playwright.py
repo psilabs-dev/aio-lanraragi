@@ -26,9 +26,11 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
             responses: list[playwright.async_api._generated.Response] = []
             console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
             failed_requests: list[playwright.async_api._generated.Request] = []
+            page_errors: list[playwright.async_api.Error] = []
             page.on("response", lambda response: responses.append(response))
             page.on("console", lambda console: console_evts.append(console))
             page.on("requestfailed", lambda request: failed_requests.append(request))
+            page.on("pageerror", lambda error: page_errors.append(error))
         finally:
             await bc.close()
             await browser.close()
@@ -42,6 +44,7 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
     - `assert_requests_ok`: assert only requests are OK.
     - `assert_http_ok`: assert only browser HTTP responses are OK.
     - `assert_console_ok`: assert only console logs are OK.
+    - `assert_page_errors_ok`: assert only that no uncaught page errors occurred.
     - `assert_toasts_ok`: assert only toasts are OK.
     - `clear`: drop captured traffic, for tests that assert per stage.
 
@@ -67,7 +70,7 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
     @property
     def page(self) -> playwright.async_api._generated.Page:
         """
-        The page under test, with response, console and failed-request tracking attached.
+        The page under test, with response, console, failed-request and page-error tracking attached.
         """
         if self._page is None:
             raise RuntimeError("page is only available inside the context manager.")
@@ -104,6 +107,7 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self.responses: list[playwright.async_api._generated.Response] = []
         self.console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
         self.failed_requests: list[playwright.async_api._generated.Request] = []
+        self.page_errors: list[playwright.async_api.Error] = []
 
     def clear(self) -> None:
         """
@@ -112,6 +116,7 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self.responses.clear()
         self.console_evts.clear()
         self.failed_requests.clear()
+        self.page_errors.clear()
 
     async def assert_requests_ok(self) -> None:
         await assert_no_failed_requests(self.failed_requests, self._lrr_client, logger=self.logger)
@@ -122,16 +127,21 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
     async def assert_console_ok(self) -> None:
         await assert_console_logs_ok(self.console_evts, self._lrr_client.lrr_base_url)
 
+    async def assert_page_errors_ok(self) -> None:
+        messages = [str(error) for error in self.page_errors]
+        assert not messages, f"Uncaught page error(s): {messages}"
+
     async def assert_toasts_ok(self) -> None:
         await assert_toasts_ok(self.page)
 
     async def assert_ok(self) -> None:
         """
-        Assert no failed requests, no HTTP errors, no console errors and no error toasts.
+        Assert no failed requests, no HTTP errors, no console errors, no uncaught page errors and no error toasts.
         """
         await self.assert_requests_ok()
         await self.assert_http_ok()
         await self.assert_console_ok()
+        await self.assert_page_errors_ok()
         await self.assert_toasts_ok()
 
     @override
@@ -149,6 +159,7 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self._page.on("response", lambda response: self.responses.append(response))
         self._page.on("console", lambda console: self.console_evts.append(console))
         self._page.on("requestfailed", lambda request: self.failed_requests.append(request))
+        self._page.on("pageerror", lambda error: self.page_errors.append(error))
         return self
 
     @override
