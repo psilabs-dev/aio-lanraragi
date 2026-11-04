@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+
+    outputs:
+      client: ${{ steps.plan.outputs.client }}
+      client_tag: ${{ steps.plan.outputs.client_tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Plan release
+        id: plan
+        run: uv run --script scripts/ci/release_plan.py
+
+  client:
+    name: Release aio-lanraragi
+    needs: plan
+    if: needs.plan.outputs.client == 'true'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tag
+        run: ./scripts/ci/push_tag.sh "${{ needs.plan.outputs.client_tag }}"
+
+      - name: Publish and wait
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/dispatch_wait.sh publish.yml "${{ needs.plan.outputs.client_tag }}" "${{ github.sha }}"

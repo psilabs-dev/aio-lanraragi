@@ -10,7 +10,7 @@ from lanraragi.clients.client import LRRClient
 
 from aio_lanraragi_tests.benchmarking import BenchmarkCollector
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.deployment.docker import DockerLRRDeploymentContext
+from aio_lanraragi_tests.deployment.container import ContainerLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from tests.conftest import _sanitize_nodeid, _save_server_logs
 
@@ -52,7 +52,7 @@ def environment(request: pytest.FixtureRequest, port_offset: int, resource_prefi
     # High-volume benchmark uploads can exhaust container disk, causing
     # Redis to enter MISCONF state and reject all writes.
     original_test_redis = None
-    if isinstance(environment, DockerLRRDeploymentContext):
+    if isinstance(environment, ContainerLRRDeploymentContext):
         original_test_redis = environment.test_redis_connection
         def _test_redis_then_disable_bgsave_error(*args, **kwargs):
             original_test_redis(*args, **kwargs)

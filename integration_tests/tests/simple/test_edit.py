@@ -9,8 +9,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import playwright.async_api
-import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.tankoubon import (
@@ -28,11 +26,7 @@ from aio_lanraragi_tests.utils.api_wrappers import (
     create_archive_file,
     upload_archive,
 )
-from aio_lanraragi_tests.utils.playwright import (
-    assert_browser_responses_ok,
-    assert_console_logs_ok,
-    assert_toasts_ok,
-)
+from aio_lanraragi_tests.utils.playwright import PlaywrightTestContextManager
 
 LOGGER = logging.getLogger(__name__)
 
@@ -111,102 +105,89 @@ async def test_tank_edit_archive_title_escape(
     # <<<<< CREATE TANKOUBON STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-        try:
-            page = await bc.new_page()
+        canary_requests: list[str] = []
+        page.on("request", lambda request: canary_requests.append(request.url) if "xss-canary.invalid" in request.url else None)
 
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            canary_requests: list[str] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
-            page.on("request", lambda request: canary_requests.append(request.url) if "xss-canary.invalid" in request.url else None)
+        # >>> SERVER-RENDER PATH (finding #7) >>>
+        await page.goto(f"{lrr_client.lrr_base_url}/edit?id={tank_id}", timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            # >>> SERVER-RENDER PATH (finding #7) >>>
-            await page.goto(f"{lrr_client.lrr_base_url}/edit?id={tank_id}", timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        # dismiss new version overlay if present
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
 
-            # dismiss new version overlay if present
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-                await asyncio.sleep(0.3)
+        tank_list = page.locator("#tank-archive-list")
+        await tank_list.wait_for(state="attached", timeout=10000)
 
-            tank_list = page.locator("#tank-archive-list")
-            await tank_list.wait_for(state="attached", timeout=10000)
+        script_count = await tank_list.locator("script").count()
+        assert script_count == 0, f"Live <script> tag found in #tank-archive-list (server render) — count={script_count}"
 
-            script_count = await tank_list.locator("script").count()
-            assert script_count == 0, f"Live <script> tag found in #tank-archive-list (server render) — count={script_count}"
+        onerror_count = await tank_list.locator("[onerror]").count()
+        onload_count = await tank_list.locator("[onload]").count()
+        assert onerror_count == 0, f"Live onerror attribute found in #tank-archive-list (server render) — count={onerror_count}"
+        assert onload_count == 0, f"Live onload attribute found in #tank-archive-list (server render) — count={onload_count}"
 
-            onerror_count = await tank_list.locator("[onerror]").count()
-            onload_count = await tank_list.locator("[onload]").count()
-            assert onerror_count == 0, f"Live onerror attribute found in #tank-archive-list (server render) — count={onerror_count}"
-            assert onload_count == 0, f"Live onload attribute found in #tank-archive-list (server render) — count={onload_count}"
+        for evt in pcm.console_evts:
+            assert canary_marker not in (evt.text or ""), f"Canary marker fired in console (server render): {evt.text}"
 
-            for evt in console_evts:
-                assert canary_marker not in (evt.text or ""), f"Canary marker fired in console (server render): {evt.text}"
+        assert not canary_requests, f"Canary network request fired (server render): {canary_requests}"
 
-            assert not canary_requests, f"Canary network request fired (server render): {canary_requests}"
+        # Sanity: the escaped title should appear as text in the list.
+        list_text = await tank_list.inner_text()
+        assert "<script>" in list_text or "&lt;script&gt;" not in list_text, (
+            f"Expected escaped script literal in list text; got: {list_text!r}"
+        )
+        # <<< SERVER-RENDER PATH <<<
 
-            # Sanity: the escaped title should appear as text in the list.
-            list_text = await tank_list.inner_text()
-            assert "<script>" in list_text or "&lt;script&gt;" not in list_text, (
-                f"Expected escaped script literal in list text; got: {list_text!r}"
-            )
-            # <<< SERVER-RENDER PATH <<<
+        # >>> CLIENT-RENDER PATH (finding #8) >>>
+        await page.locator("#add-archive-id").fill(archive_ids[1])
+        await page.locator("#add-archive-btn").click()
+        await page.locator(f"#tank-archive-list li[data-id='{archive_ids[1]}']").wait_for(state="attached", timeout=10000)
 
-            # >>> CLIENT-RENDER PATH (finding #8) >>>
-            await page.locator("#add-archive-id").fill(archive_ids[1])
-            await page.locator("#add-archive-btn").click()
-            await page.locator(f"#tank-archive-list li[data-id='{archive_ids[1]}']").wait_for(state="attached", timeout=10000)
+        script_count = await tank_list.locator("script").count()
+        assert script_count == 0, f"Live <script> tag found after Add Archive (client render) — count={script_count}"
 
-            script_count = await tank_list.locator("script").count()
-            assert script_count == 0, f"Live <script> tag found after Add Archive (client render) — count={script_count}"
+        onerror_count = await tank_list.locator("[onerror]").count()
+        onload_count = await tank_list.locator("[onload]").count()
+        assert onerror_count == 0, f"Live onerror attribute found after Add Archive (client render) — count={onerror_count}"
+        assert onload_count == 0, f"Live onload attribute found after Add Archive (client render) — count={onload_count}"
 
-            onerror_count = await tank_list.locator("[onerror]").count()
-            onload_count = await tank_list.locator("[onload]").count()
-            assert onerror_count == 0, f"Live onerror attribute found after Add Archive (client render) — count={onerror_count}"
-            assert onload_count == 0, f"Live onload attribute found after Add Archive (client render) — count={onload_count}"
+        for evt in pcm.console_evts:
+            assert canary_marker not in (evt.text or ""), f"Canary marker fired in console (client render): {evt.text}"
 
-            for evt in console_evts:
-                assert canary_marker not in (evt.text or ""), f"Canary marker fired in console (client render): {evt.text}"
+        assert not canary_requests, f"Canary network request fired (client render): {canary_requests}"
+        # <<< CLIENT-RENDER PATH <<<
 
-            assert not canary_requests, f"Canary network request fired (client render): {canary_requests}"
-            # <<< CLIENT-RENDER PATH <<<
+        # >>> SAVE + RELOAD (server-render after persist) >>>
+        await page.locator("#save-metadata").click()
+        await page.wait_for_load_state("networkidle")
+        await page.reload()
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            # >>> SAVE + RELOAD (server-render after persist) >>>
-            await page.locator("#save-metadata").click()
-            await page.wait_for_load_state("networkidle")
-            await page.reload()
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        tank_list = page.locator("#tank-archive-list")
+        await tank_list.wait_for(state="attached", timeout=10000)
 
-            tank_list = page.locator("#tank-archive-list")
-            await tank_list.wait_for(state="attached", timeout=10000)
+        script_count = await tank_list.locator("script").count()
+        assert script_count == 0, f"Live <script> tag found after save+reload — count={script_count}"
 
-            script_count = await tank_list.locator("script").count()
-            assert script_count == 0, f"Live <script> tag found after save+reload — count={script_count}"
+        onerror_count = await tank_list.locator("[onerror]").count()
+        onload_count = await tank_list.locator("[onload]").count()
+        assert onerror_count == 0, f"Live onerror attribute found after save+reload — count={onerror_count}"
+        assert onload_count == 0, f"Live onload attribute found after save+reload — count={onload_count}"
 
-            onerror_count = await tank_list.locator("[onerror]").count()
-            onload_count = await tank_list.locator("[onload]").count()
-            assert onerror_count == 0, f"Live onerror attribute found after save+reload — count={onerror_count}"
-            assert onload_count == 0, f"Live onload attribute found after save+reload — count={onload_count}"
+        for evt in pcm.console_evts:
+            assert canary_marker not in (evt.text or ""), f"Canary marker fired in console (after save+reload): {evt.text}"
 
-            for evt in console_evts:
-                assert canary_marker not in (evt.text or ""), f"Canary marker fired in console (after save+reload): {evt.text}"
+        assert not canary_requests, f"Canary network request fired (after save+reload): {canary_requests}"
+        # <<< SAVE + RELOAD <<<
 
-            assert not canary_requests, f"Canary network request fired (after save+reload): {canary_requests}"
-            # <<< SAVE + RELOAD <<<
-
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
     expect_no_error_logs(environment, LOGGER)
@@ -263,43 +244,31 @@ async def test_tankoubon_edit_page_save(
         del response, error
 
     new_name = "Tank Edit Test Renamed"
-    async with playwright.async_api.async_playwright() as p:
-        browser = await p.chromium.launch()
-        bc = await browser.new_context()
-        try:
-            page = await bc.new_page()
-            responses: list[playwright.async_api._generated.Response] = []
-            console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
-            page.on("response", lambda response: responses.append(response))
-            page.on("console", lambda console: console_evts.append(console))
+    async with PlaywrightTestContextManager(lrr_client) as pcm:
+        page = pcm.page
 
-            # log in (edit page requires session auth since enable_pass defaults to 1)
-            await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
-            await page.wait_for_load_state("networkidle")
-            await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
-            await page.get_by_role("button", name="Login").click()
-            await page.wait_for_load_state("networkidle")
+        # log in (edit page requires session auth since enable_pass defaults to 1)
+        await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
+        await page.wait_for_load_state("networkidle")
+        await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)
+        await page.get_by_role("button", name="Login").click()
+        await page.wait_for_load_state("networkidle")
 
-            await page.goto(f"{lrr_client.lrr_base_url}/edit?id={tank_id}", timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_load_state("networkidle")
+        await page.goto(f"{lrr_client.lrr_base_url}/edit?id={tank_id}", timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
 
-            # dismiss new version overlay if present
-            if "New Version Release Notes" in await page.content():
-                await page.keyboard.press("Escape")
-                await asyncio.sleep(0.3)
+        # dismiss new version overlay if present
+        if "New Version Release Notes" in await page.content():
+            await page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
 
-            await page.locator("#title").fill(new_name)
-            await page.locator("#save-metadata").click()
-            # wait for the save toast before leaving the browser context
-            await page.locator(".Toastify__toast--success").first.wait_for(state="visible", timeout=10000)
-            await page.wait_for_load_state("networkidle")
-            await assert_browser_responses_ok(responses, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts, lrr_client.lrr_base_url)
-            await assert_toasts_ok(page)
-        finally:
-            await bc.close()
-            await browser.close()
+        await page.locator("#title").fill(new_name)
+        await page.locator("#save-metadata").click()
+        # wait for the save toast before leaving the browser context
+        await page.locator(".Toastify__toast--success").first.wait_for(state="visible", timeout=10000)
+        await page.wait_for_load_state("networkidle")
+        await pcm.assert_ok()
 
     response, error = await lrr_client.tankoubon_api.get_tankoubon(GetTankoubonRequest(tank_id=tank_id))
     assert not error, f"Failed to get tank: {error.error}"

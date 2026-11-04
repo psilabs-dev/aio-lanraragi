@@ -37,6 +37,8 @@ from lanraragi.models.archive import (
     QueueArchiveThumbnailExtractionRequest,
     QueueArchiveThumbnailExtractionResponse,
     RemoveTocEntryRequest,
+    SetNewArchiveFlagRequest,
+    SetNewArchiveFlagResponse,
     UpdateArchiveMetadataRequest,
     UpdateArchiveThumbnailRequest,
     UpdateArchiveThumbnailResponse,
@@ -174,6 +176,16 @@ class _ArchiveApiClient(_ApiClient):
             pages = response_j.get("pages") if 'pages' in response_j else []
             return (ExtractArchiveResponse(job=job, pages=pages), None)
         return (None, _build_err_response(data, status))
+
+    async def set_new_archive_flag(self, request: SetNewArchiveFlagRequest) -> _LRRClientResponse[SetNewArchiveFlagResponse]:
+        """
+        PUT /api/archives/:id/isnew
+        """
+        url = self.api_context.build_url(f"/api/archives/{request.arcid}/isnew")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers)
+        if status == 200:
+            return (SetNewArchiveFlagResponse(arcid=request.arcid), None)
+        return (None, _build_err_response(content, status))
 
     async def clear_new_archive_flag(self, request: ClearNewArchiveFlagRequest) -> _LRRClientResponse[ClearNewArchiveFlagResponse]:
         """
