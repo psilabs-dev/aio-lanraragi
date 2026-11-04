@@ -25,7 +25,6 @@ LOGGER = logging.getLogger(__name__)
 
 NATURAL_ASCENDING = ["Title 2", "Title 9", "Title 10", "Title 99", "Title 100", "Title 1000"]
 NATURAL_DESCENDING = ["Title 1000", "Title 100", "Title 99", "Title 10", "Title 9", "Title 2"]
-LEXICOGRAPHIC_ASCENDING = ["Title 10", "Title 100", "Title 1000", "Title 2", "Title 9", "Title 99"]
 
 
 @pytest.mark.flaky(reruns=2, condition=sys.platform == "win32", only_rerun=r"^ClientConnectorError")
@@ -36,12 +35,14 @@ async def test_natural_sort(
     environment: AbstractLRRDeploymentContext
 ):
     """
-    Values embedding unpadded numbers must order by numeric value, so 9 precedes
-    10, when sorting by a tag namespace (both directions) and by title.
+    Test that values with unpadded numbers sort by numeric value, so 9 precedes 10.
 
-    Elsewhere the suite pads its numeric tag values, which makes lexicographic
-    and natural ordering identical and hides the difference. Archives are
-    uploaded scrambled so insertion order cannot pass by accident.
+    1. Upload 6 archives out of order, with titles and bookmarks tags holding 2, 9, 10, 99, 100 and 1000.
+    2. Sort by the bookmarks namespace ascending, then descending.
+       - Expect numeric order in both directions.
+    3. Sort by title ascending.
+       - Expect numeric order.
+    4. Expect no server error logs.
     """
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -89,8 +90,7 @@ async def test_natural_sort(
     assert ascending == NATURAL_ASCENDING, (
         f"Ascending sort by 'bookmarks' is not natural.\n"
         f"  expected: {NATURAL_ASCENDING}\n"
-        f"  actual:   {ascending}\n"
-        f"  a result of {LEXICOGRAPHIC_ASCENDING} means values are compared as text"
+        f"  actual:   {ascending}"
     )
     LOGGER.debug(f"Ascending namespace sort: {ascending}")
     # <<<<< ASCENDING NAMESPACE SORT <<<<<
