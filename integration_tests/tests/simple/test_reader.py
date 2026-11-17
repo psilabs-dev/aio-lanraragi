@@ -274,10 +274,7 @@ async def test_archive_navigation(
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_INDEX_TITLE
 
-        # exit overlay
-        if "New Version Release Notes" in await page.content():
-            LOGGER.info("Closing new releases overlay.")
-            await page.keyboard.press("Escape")
+        await pcm.close_release_notes()
 
         # Read the display order of archives as rendered on the index.
         await assert_no_spinner(page)
@@ -499,10 +496,7 @@ async def test_slideshow_continue_navigation(
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_INDEX_TITLE
 
-        # exit overlay
-        if "New Version Release Notes" in await page.content():
-            LOGGER.info("Closing new releases overlay.")
-            await page.keyboard.press("Escape")
+        await pcm.close_release_notes()
 
         # Read the display order of archives as rendered on the index.
         await assert_no_spinner(page)

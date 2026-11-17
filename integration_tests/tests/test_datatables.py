@@ -131,8 +131,7 @@ async def test_reader_to_index_cross_dt(
         # Navigate to index page.
         await page.goto(lrr_client.lrr_base_url)
         await page.wait_for_load_state("networkidle")
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
+        await pcm.close_release_notes()
 
         # Collect DT order as rendered (pagesize=3, so first page shows 3 archives).
         await assert_no_spinner(page)
@@ -223,8 +222,7 @@ async def test_forward_history_after_redraw(
         # Navigate to index with search filter.
         await page.goto(f"{lrr_client.lrr_base_url}/?q=History")
         await page.wait_for_load_state("networkidle")
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
+        await pcm.close_release_notes()
 
         # Find the archive as rendered in DT results.
         await assert_no_spinner(page)
@@ -292,8 +290,7 @@ async def test_back_stack_no_growth_on_reload(
         # Navigate to index with search filter.
         await page.goto(f"{lrr_client.lrr_base_url}/?q=test")
         await page.wait_for_load_state("networkidle")
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
+        await pcm.close_release_notes()
         pcm.clear()
 
         # Reload (drawCallback fires with non-popstate pushState).

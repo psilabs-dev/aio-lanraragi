@@ -300,10 +300,7 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
         assert await page.title() == LRR_INDEX_TITLE
 
         # enter admin portal
-        # exit overlay
-        if "New Version Release Notes" in await page.content():
-            LOGGER.info("Closing new releases overlay.")
-            await page.keyboard.press("Escape")
+        await pcm.close_release_notes()
 
         assert "Admin Login" in await page.content(), "Admin Login not found!"
 

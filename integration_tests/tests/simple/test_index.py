@@ -82,10 +82,7 @@ async def test_header_click_sort(
         await page.wait_for_load_state("domcontentloaded")
         await page.wait_for_load_state("networkidle")
 
-        # dismiss new version overlay if present
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
+        await pcm.close_release_notes()
 
         # The index performs its initial DataTables draw on load; ensure the processing spinner
         # clears (guards against a wedged index spinner, e.g. a throwing drawCallback).
@@ -239,9 +236,7 @@ async def test_compact_column_sort_with_three_columns(
         await page.wait_for_load_state("domcontentloaded")
         await page.wait_for_load_state("networkidle")
 
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
+        await pcm.close_release_notes()
 
         # switch to compact mode
         await switch_display_mode(page, "compact")
@@ -278,10 +273,7 @@ async def test_compact_column_sort_with_three_columns(
             await column_count_select.select_option("3")
         await page.wait_for_load_state("networkidle")
 
-        # dismiss overlay if present after reload
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
+        await pcm.close_release_notes()
         await page.wait_for_timeout(500)
 
         artist_header = page.locator("#customheader1")
@@ -407,9 +399,7 @@ async def test_index_page(lrr_client: LRRClient) -> None:
             f"Expected no archives rendered on an empty library, got: {rendered}"
         )
 
-        # dismiss new version overlay if present
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
+        await pcm.close_release_notes()
 
         await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
@@ -480,10 +470,7 @@ async def test_custom_column_sort_display(
         await page.wait_for_load_state("domcontentloaded")
         await page.wait_for_load_state("networkidle")
 
-        # dismiss new version overlay if present
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
+        await pcm.close_release_notes()
 
         # wait for stat-driven namespace options to populate the sort dropdown
         sort_dropdown = page.locator("#namespace-sortby")
@@ -664,10 +651,7 @@ async def test_search_autocomplete_namespace_exclusion(
         await page.wait_for_load_state("domcontentloaded")
         await page.wait_for_load_state("networkidle")
 
-        # dismiss new version overlay if present
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
+        await pcm.close_release_notes()
 
         # wait for stat-driven namespace options to populate the sort dropdown
         sort_dropdown = page.locator("#namespace-sortby")

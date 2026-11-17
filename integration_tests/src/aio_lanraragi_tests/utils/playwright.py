@@ -47,6 +47,7 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
     - `assert_page_errors_ok`: assert only that no uncaught page errors occurred.
     - `assert_toasts_ok`: assert only toasts are OK.
     - `clear`: drop captured traffic, for tests that assert per stage.
+    - `close_release_notes`: close the index's release notes overlay if it opens.
 
     User guide:
 
@@ -108,6 +109,7 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self.console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
         self.failed_requests: list[playwright.async_api._generated.Request] = []
         self.page_errors: list[playwright.async_api.Error] = []
+        self._changelog_requests: list[playwright.async_api._generated.Request] = []
 
     def clear(self) -> None:
         """
@@ -144,6 +146,30 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         await self.assert_page_errors_ok()
         await self.assert_toasts_ok()
 
+    async def close_release_notes(self, timeout_ms: int = 10000) -> None:
+        """
+        Close the index's release notes overlay if it opens; does nothing on other pages.
+        """
+        page = self.page
+        if not await page.locator("#updateOverlay").count():
+            return
+        await page.wait_for_function(
+            "() => localStorage.getItem('lrrVersion') !== null || document.querySelector('.fa-bug') !== null",
+            timeout=timeout_ms,
+        )
+        while self._changelog_requests:
+            response = await self._changelog_requests.pop(0).response()
+            if response is None or not response.ok:
+                continue
+            self.logger.info("Closing release notes overlay.")
+            await page.locator("#updateOverlay").wait_for(state="visible", timeout=timeout_ms)
+            await page.keyboard.press("Escape")
+            await page.locator("#overlay-shade").wait_for(state="hidden", timeout=timeout_ms)
+
+    def _track_changelog_request(self, request: playwright.async_api._generated.Request) -> None:
+        if request.url.startswith("https://api.github.com/repos/difegue/lanraragi/releases/latest"):
+            self._changelog_requests.append(request)
+
     @override
     async def __aenter__(self: _PlaywrightTestContextManagerLike) -> _PlaywrightTestContextManagerLike:
         self._playwright = await playwright.async_api.async_playwright().start()
@@ -160,6 +186,7 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self._page.on("console", lambda console: self.console_evts.append(console))
         self._page.on("requestfailed", lambda request: self.failed_requests.append(request))
         self._page.on("pageerror", lambda error: self.page_errors.append(error))
+        self._page.on("request", self._track_changelog_request)
         return self
 
     @override

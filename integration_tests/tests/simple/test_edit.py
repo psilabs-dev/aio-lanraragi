@@ -116,10 +116,7 @@ async def test_tank_edit_archive_title_escape(
         await page.wait_for_load_state("domcontentloaded")
         await page.wait_for_load_state("networkidle")
 
-        # dismiss new version overlay if present
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
+        await pcm.close_release_notes()
 
         tank_list = page.locator("#tank-archive-list")
         await tank_list.wait_for(state="attached", timeout=10000)
@@ -258,10 +255,7 @@ async def test_tankoubon_edit_page_save(
         await page.wait_for_load_state("domcontentloaded")
         await page.wait_for_load_state("networkidle")
 
-        # dismiss new version overlay if present
-        if "New Version Release Notes" in await page.content():
-            await page.keyboard.press("Escape")
-            await asyncio.sleep(0.3)
+        await pcm.close_release_notes()
 
         await page.locator("#title").fill(new_name)
         await page.locator("#save-metadata").click()
