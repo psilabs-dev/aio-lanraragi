@@ -299,9 +299,9 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_INDEX_TITLE
 
-        # enter admin portal
         await pcm.close_release_notes()
 
+        # enter admin portal
         assert "Admin Login" in await page.content(), "Admin Login not found!"
 
         LOGGER.info("Click Admin Login button")

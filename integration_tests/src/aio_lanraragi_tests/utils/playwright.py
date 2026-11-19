@@ -109,7 +109,6 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self.console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
         self.failed_requests: list[playwright.async_api._generated.Request] = []
         self.page_errors: list[playwright.async_api.Error] = []
-        self._changelog_requests: list[playwright.async_api._generated.Request] = []
 
     def clear(self) -> None:
         """
@@ -148,27 +147,26 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
 
     async def close_release_notes(self, timeout_ms: int = 10000) -> None:
         """
-        Close the index's release notes overlay if it opens; does nothing on other pages.
+        Wait up to `timeout_ms` for the index's release notes overlay, and close it with Escape.
+
+        Returns early on pages without the overlay, and when LRR shows a changelog error or debug mode toast instead.
         """
         page = self.page
-        if not await page.locator("#updateOverlay").count():
+        overlay = page.locator("#updateOverlay")
+        if not await overlay.count():
             return
-        await page.wait_for_function(
-            "() => localStorage.getItem('lrrVersion') !== null || document.querySelector('.fa-bug') !== null",
-            timeout=timeout_ms,
-        )
-        while self._changelog_requests:
-            response = await self._changelog_requests.pop(0).response()
-            if response is None or not response.ok:
-                continue
-            self.logger.info("Closing release notes overlay.")
-            await page.locator("#updateOverlay").wait_for(state="visible", timeout=timeout_ms)
-            await page.keyboard.press("Escape")
-            await page.locator("#overlay-shade").wait_for(state="hidden", timeout=timeout_ms)
-
-    def _track_changelog_request(self, request: playwright.async_api._generated.Request) -> None:
-        if request.url.startswith("https://api.github.com/repos/difegue/lanraragi/releases/latest"):
-            self._changelog_requests.append(request)
+        changelog_error = page.locator(".Toastify__toast--error", has_text="changelog")
+        debug_toast = page.locator(".Toastify__toast", has=page.locator(".fa-bug"))
+        try:
+            await overlay.or_(changelog_error).or_(debug_toast).first.wait_for(state="visible", timeout=timeout_ms)
+        except playwright.async_api.TimeoutError:
+            self.logger.info(f"No release notes overlay within {timeout_ms} ms.")
+            return
+        if not await overlay.is_visible():
+            return
+        self.logger.info("Closing release notes overlay.")
+        await page.keyboard.press("Escape")
+        await page.locator("#overlay-shade").wait_for(state="hidden")
 
     @override
     async def __aenter__(self: _PlaywrightTestContextManagerLike) -> _PlaywrightTestContextManagerLike:
@@ -186,7 +184,6 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self._page.on("console", lambda console: self.console_evts.append(console))
         self._page.on("requestfailed", lambda request: self.failed_requests.append(request))
         self._page.on("pageerror", lambda error: self.page_errors.append(error))
-        self._page.on("request", self._track_changelog_request)
         return self
 
     @override

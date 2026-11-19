@@ -450,7 +450,6 @@ async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semap
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_INDEX_TITLE
 
-        # enter admin portal
         await pcm.close_release_notes()
 
         # click search bar
