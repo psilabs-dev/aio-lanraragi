@@ -84,19 +84,17 @@ async def test_header_click_sort(
 
         await pcm.close_release_notes()
 
-        # The index performs its initial DataTables draw on load; ensure the processing spinner
-        # clears (guards against a wedged index spinner, e.g. a throwing drawCallback).
         await assert_no_spinner(page)
 
-        # switch to compact/table mode
         await pcm.assert_ok()
         pcm.clear()
 
+        # switch to compact/table mode
         await switch_display_mode(page, "compact")
         await page.wait_for_load_state("networkidle")
         await page.wait_for_timeout(500)
 
-        # drag-resize the title header to trigger resizableColumns mousedown
+        # drag-resize the title header
         title_header = page.locator("th.title")
         box = await title_header.bounding_box()
         right_edge_x = box["x"] + box["width"] - 5
@@ -110,8 +108,6 @@ async def test_header_click_sort(
         # click title header to sort descending (default is already asc)
         await title_header.click()
         await page.wait_for_load_state("networkidle")
-        # The header sort class is set during the (async) DataTables redraw, which can land after
-        # networkidle; wait for the index spinner to clear before reading post-draw DOM state.
         await assert_no_spinner(page)
 
         # verify header has sorting_desc class
@@ -299,8 +295,8 @@ async def test_compact_column_sort_with_three_columns(
         # <<<<< 3 COLUMNS (CHANGE COLUMN COUNT) <<<<<
 
         # >>>>> EDIT COLUMN 3 NAMESPACE >>>>>
-        # Phase 3a: "Group" (capital G) — invalid namespace, cells must be empty
-        LOGGER.info("Phase 3a: editing column 3 to 'Group' (invalid namespace)")
+        # mixed-case "Group" is not a tagged namespace, so column 3 cells stay empty
+        LOGGER.debug("Editing column 3 to 'Group'.")
 
         edit_btn = page.locator("#edit-header-3")
         await edit_btn.click()
@@ -313,7 +309,6 @@ async def test_compact_column_sort_with_three_columns(
         await page.wait_for_load_state("networkidle")
         await page.wait_for_timeout(500)
 
-        # "Group" does not match "group:" tags — column 3 cells must be empty
         col3_cells = page.locator("td.customheader3")
         cell_count = await col3_cells.count()
         assert cell_count == num_archives, (
@@ -325,8 +320,8 @@ async def test_compact_column_sort_with_three_columns(
                 f"Expected empty cell for invalid namespace 'Group', got: '{text}'"
             )
 
-        # Phase 3b: "group" (lowercase) — valid namespace, cells populated + sort works
-        LOGGER.info("Phase 3b: editing column 3 to 'group' (valid namespace)")
+        # lowercase "group" matches the tagged namespace, so column 3 cells are populated and sortable
+        LOGGER.debug("Editing column 3 to 'group'.")
 
         edit_btn = page.locator("#edit-header-3")
         await edit_btn.click()
@@ -339,7 +334,6 @@ async def test_compact_column_sort_with_three_columns(
         await page.wait_for_load_state("networkidle")
         await page.wait_for_timeout(500)
 
-        # "group" matches "group:" tags — column 3 cells must be populated
         col3_cells = page.locator("td.customheader3")
         for i in range(await col3_cells.count()):
             text = (await col3_cells.nth(i).inner_text()).strip()
@@ -472,18 +466,18 @@ async def test_custom_column_sort_display(
 
         await pcm.close_release_notes()
 
-        # wait for stat-driven namespace options to populate the sort dropdown
+        # wait for namespace options to populate the sort dropdown
         sort_dropdown = page.locator("#namespace-sortby")
         await sort_dropdown.locator("option[value='artist']").wait_for(state="attached", timeout=10000)
 
-        # verify dropdown was populated with namespaces from stat hash
+        # verify dropdown lists the tagged namespaces
         options = await sort_dropdown.locator("option").all()
         option_values = []
         for opt in options:
             option_values.append(await opt.get_attribute("value"))
         assert "title" in option_values, "Expected 'title' in sort dropdown options"
-        assert "artist" in option_values, "Expected 'artist' in sort dropdown options (from stat hash)"
-        assert "series" in option_values, "Expected 'series' in sort dropdown options (from stat hash)"
+        assert "artist" in option_values, "Expected 'artist' in sort dropdown options"
+        assert "series" in option_values, "Expected 'series' in sort dropdown options"
 
         # select artist namespace from dropdown and verify sort order
         pcm.clear()
@@ -639,7 +633,7 @@ async def test_search_autocomplete_namespace_exclusion(
         await pcm.assert_ok()
     # <<<<< SETTINGS STAGE <<<<<
 
-    # verify /api/info returns the excluded namespaces
+    # verify the server reports the excluded namespaces
     response, error = await lrr_client.misc_api.get_server_info()
     assert not error, f"Failed to get server info (status {error.status}): {error.error}"
 
@@ -653,7 +647,7 @@ async def test_search_autocomplete_namespace_exclusion(
 
         await pcm.close_release_notes()
 
-        # wait for stat-driven namespace options to populate the sort dropdown
+        # wait for namespace options to populate the sort dropdown
         sort_dropdown = page.locator("#namespace-sortby")
         await sort_dropdown.locator("option[value='artist']").wait_for(state="attached", timeout=10000)
 

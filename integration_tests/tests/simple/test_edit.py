@@ -111,7 +111,7 @@ async def test_tank_edit_archive_title_escape(
         canary_requests: list[str] = []
         page.on("request", lambda request: canary_requests.append(request.url) if "xss-canary.invalid" in request.url else None)
 
-        # >>> SERVER-RENDER PATH (finding #7) >>>
+        # >>>>> EDIT PAGE LOAD STAGE >>>>>
         await page.goto(f"{lrr_client.lrr_base_url}/edit?id={tank_id}", timeout=60000)
         await page.wait_for_load_state("domcontentloaded")
         await page.wait_for_load_state("networkidle")
@@ -134,14 +134,14 @@ async def test_tank_edit_archive_title_escape(
 
         assert not canary_requests, f"Canary network request fired (server render): {canary_requests}"
 
-        # Sanity: the escaped title should appear as text in the list.
+        # the escaped title should appear as text in the list
         list_text = await tank_list.inner_text()
         assert "<script>" in list_text or "&lt;script&gt;" not in list_text, (
             f"Expected escaped script literal in list text; got: {list_text!r}"
         )
-        # <<< SERVER-RENDER PATH <<<
+        # <<<<< EDIT PAGE LOAD STAGE <<<<<
 
-        # >>> CLIENT-RENDER PATH (finding #8) >>>
+        # >>>>> ADD ARCHIVE STAGE >>>>>
         await page.locator("#add-archive-id").fill(archive_ids[1])
         await page.locator("#add-archive-btn").click()
         await page.locator(f"#tank-archive-list li[data-id='{archive_ids[1]}']").wait_for(state="attached", timeout=10000)
@@ -158,9 +158,9 @@ async def test_tank_edit_archive_title_escape(
             assert canary_marker not in (evt.text or ""), f"Canary marker fired in console (client render): {evt.text}"
 
         assert not canary_requests, f"Canary network request fired (client render): {canary_requests}"
-        # <<< CLIENT-RENDER PATH <<<
+        # <<<<< ADD ARCHIVE STAGE <<<<<
 
-        # >>> SAVE + RELOAD (server-render after persist) >>>
+        # >>>>> SAVE AND RELOAD STAGE >>>>>
         await page.locator("#save-metadata").click()
         await page.wait_for_load_state("networkidle")
         await page.reload()
@@ -182,7 +182,7 @@ async def test_tank_edit_archive_title_escape(
             assert canary_marker not in (evt.text or ""), f"Canary marker fired in console (after save+reload): {evt.text}"
 
         assert not canary_requests, f"Canary network request fired (after save+reload): {canary_requests}"
-        # <<< SAVE + RELOAD <<<
+        # <<<<< SAVE AND RELOAD STAGE <<<<<
 
         await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
@@ -244,7 +244,6 @@ async def test_tankoubon_edit_page_save(
     async with PlaywrightTestContextManager(lrr_client) as pcm:
         page = pcm.page
 
-        # log in (edit page requires session auth since enable_pass defaults to 1)
         await page.goto(f"{lrr_client.lrr_base_url}/login", timeout=60000)
         await page.wait_for_load_state("networkidle")
         await page.locator("#pw_field").fill(DEFAULT_LRR_PASSWORD)

@@ -231,7 +231,7 @@ async def test_archive_navigation(
     1. Upload 3 archives, 3 pages each.
     2. Go to index page and click on first archive; collect the search draw metadata from
         network (to know what the 2nd and 3rd archives are supposed to be).
-        - Confirm the prev/next-archive buttons are visible after datatables entry.
+        - Confirm the prev/next-archive buttons are visible.
     3. Navigate (via "right" key press) from first archive to 3rd archive.
         - Confirm that the 3rd and 6th key presses correspond to changes in archive title
           and that the page bytes are the first pages of the 2nd and 3rd archives resp.
@@ -239,7 +239,7 @@ async def test_archive_navigation(
     4. Navigate to 2nd from 3rd archive via ",".
     5. Navigate from 2nd to 1st archive via "left" keypress.
     6. Navigate from 1st to 2nd archive via the forward-step button (icon-driven nav).
-    7. Open an archive directly (no datatables referrer); confirm the prev/next-archive
+    7. Open an archive directly by its reader URL; confirm the prev/next-archive
         buttons stay hidden.
     """
 
@@ -269,7 +269,6 @@ async def test_archive_navigation(
     async with PlaywrightTestContextManager(lrr_client) as pcm:
         page = pcm.page
 
-        # Go to index page, wait for DT draw to complete.
         await page.goto(lrr_client.lrr_base_url)
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_INDEX_TITLE
@@ -285,7 +284,7 @@ async def test_archive_navigation(
         for title, arcid in dt_entries:
             dt_arcids.append(arcid)
             dt_titles.append(title)
-        LOGGER.info(f"Datatables archive order: {list(zip(dt_titles, dt_arcids))}")
+        LOGGER.debug(f"Index archive order: {list(zip(dt_titles, dt_arcids))}")
 
         # Assert and clear index page responses before navigating to reader.
         await pcm.assert_http_ok()
@@ -293,8 +292,6 @@ async def test_archive_navigation(
         pcm.clear()
 
         # Open the first archive from the thumbnail view (default index mode).
-        # #thumbs_container links trigger the datatables click handler,
-        # which sets sessionStorage.navigationState = 'datatables'.
         LOGGER.info(f"Opening first archive: {dt_titles[0]}")
         await page.locator("#thumbs_container a", has_text=dt_titles[0]).first.click()
         await page.wait_for_load_state("networkidle")
@@ -302,9 +299,9 @@ async def test_archive_navigation(
         await page.wait_for_timeout(500)
         assert f"id={dt_arcids[0]}" in page.url, f"Expected first archive in URL, got {page.url}"
 
-        # Datatables entry exposes the prev/next-archive buttons.
+        # Opening from the index shows the prev/next-archive buttons.
         visible_count = await page.locator(".archive-nav-link:visible").count()
-        assert visible_count > 0, "Expected archive-jump buttons visible after datatables entry"
+        assert visible_count > 0, "Expected prev/next-archive buttons visible after opening from the index"
 
         # Navigate forward via ArrowRight through all 3 archives.
         # 3 pages per archive, so presses at index 2 and 5 are archive transitions.
@@ -392,8 +389,7 @@ async def test_archive_navigation(
         landing_page_text = await page.locator("span.current-page").first.text_content()
         assert landing_page_text.strip() == "1", f"Expected '[' to land on page 1, got {landing_page_text!r}"
 
-        # Navigate from 2nd to 1st archive via ArrowLeft.
-        # "[" landed on page 1 (first page), so ArrowLeft triggers readPreviousArchive.
+        # Navigate from 2nd to 1st archive via ArrowLeft from page 1.
         await pcm.assert_http_ok()
         await pcm.assert_console_ok()
         pcm.clear()
@@ -425,7 +421,7 @@ async def test_archive_navigation(
         await pcm.assert_http_ok()
         await pcm.assert_console_ok()
 
-        # Direct-URL entry has no datatables referrer, so the archive-jump buttons stay hidden.
+        # Opening the reader directly by URL keeps the prev/next-archive buttons hidden.
         bc2 = await pcm.browser_context.browser.new_context()
         try:
             page2 = await bc2.new_page()
@@ -491,7 +487,6 @@ async def test_slideshow_continue_navigation(
     async with PlaywrightTestContextManager(lrr_client) as pcm:
         page = pcm.page
 
-        # Go to index page, wait for DT draw to complete.
         await page.goto(lrr_client.lrr_base_url)
         await page.wait_for_load_state("networkidle")
         assert await page.title() == LRR_INDEX_TITLE
@@ -507,7 +502,7 @@ async def test_slideshow_continue_navigation(
         for title, arcid in dt_entries:
             dt_arcids.append(arcid)
             dt_titles.append(title)
-        LOGGER.info(f"Datatables archive order: {list(zip(dt_titles, dt_arcids))}")
+        LOGGER.debug(f"Index archive order: {list(zip(dt_titles, dt_arcids))}")
 
         # Assert and clear index page responses before navigating to reader.
         await pcm.assert_http_ok()
@@ -718,7 +713,7 @@ async def test_toc_reader(
         await dialog_textbox.fill("Chapter 1.5")
         await page.get_by_role("button", name="OK").click()
 
-        # overlay reopens only after PUT + metadata reload completes
+        # overlay closes and reopens once the change is saved
         await page.locator("#archivePagesOverlay").wait_for(state="hidden")
         await page.locator("#archivePagesOverlay").wait_for(state="visible")
 
@@ -728,8 +723,7 @@ async def test_toc_reader(
         # <<<<< ADD CHAPTER VIA UI <<<<<
 
         # >>>>> EDIT CHAPTER VIA UI >>>>>
-        # After the add step, the reader navigated to page 2 (the added chapter's page).
-        # Navigate back to Chapter 1 via dropdown so the edit targets Chapter 1.
+        # navigate back to Chapter 1 via dropdown so the edit targets it
         await chapter_select.select_option(value="1")
         await page.wait_for_timeout(500)
 
@@ -742,7 +736,7 @@ async def test_toc_reader(
         await dialog_textbox.fill("Chapter 1 Renamed")
         await page.get_by_role("button", name="OK").click()
 
-        # overlay reopens only after PUT + metadata reload completes
+        # overlay closes and reopens once the change is saved
         await page.locator("#archivePagesOverlay").wait_for(state="hidden")
         await page.locator("#archivePagesOverlay").wait_for(state="visible")
         first_option_text = await page.locator("#chapter-select option").first.text_content()
@@ -762,8 +756,7 @@ async def test_toc_reader(
         # <<<<< EDIT CHAPTER VIA UI <<<<<
 
         # >>>>> DELETE CHAPTER VIA UI >>>>>
-        # After the edit, goToPage moved to page 2 (Chapter 1.5).
-        # Navigate back to Chapter 1 Renamed so the delete targets it.
+        # navigate back to Chapter 1 Renamed via dropdown so the delete targets it
         await chapter_select.select_option(value="1")
         await page.wait_for_timeout(500)
 
@@ -776,12 +769,11 @@ async def test_toc_reader(
         await delete_confirm.wait_for(state="visible", timeout=5000)
         await delete_confirm.click()
 
-        # overlay reopens only after DELETE + metadata reload completes
+        # overlay closes and reopens once the change is saved
         await page.locator("#archivePagesOverlay").wait_for(state="hidden")
         await page.locator("#archivePagesOverlay").wait_for(state="visible")
 
-        # dropdown still shows 4 options: buildChapterObject adds an implicit
-        # untitled chapter for pages before the first toc entry (now page 2)
+        # dropdown still shows 4 options, including an untitled chapter for page 1
         option_count = await options.count()
         assert option_count == 4, f"Expected 4 chapter options after delete, got {option_count}"
         first_option_text = await options.nth(0).text_content()

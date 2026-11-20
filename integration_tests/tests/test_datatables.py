@@ -111,9 +111,7 @@ async def test_reader_to_index_cross_dt(
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> EXPECTED ORDER STAGE >>>>>
-    # The cross-DT hop is driven by /api/search/ids, which delivers DT page 2's lineup.
-    # Capture the full search order so we can assert the exact landing archive: DT page 2's
-    # first archive is the 4th in the order (pagesize=3).
+    # expected landing archive is the first on index page 2 (4th in search order)
     response, error = await lrr_client.search_api.search_archive_index(SearchArchiveIndexRequest(start="-1"))
     assert not error, f"Failed to fetch full search order (status {error.status}): {error.error}"
     full_order = []
@@ -133,28 +131,28 @@ async def test_reader_to_index_cross_dt(
         await page.wait_for_load_state("networkidle")
         await pcm.close_release_notes()
 
-        # Collect DT order as rendered (pagesize=3, so first page shows 3 archives).
+        # Collect the order of the 3 archives on index page 1.
         await assert_no_spinner(page)
         dt_entries = await read_rendered_entries(page, 3)
-        assert len(dt_entries) == 3, f"Expected 3 archives rendered on DT page 1, got {len(dt_entries)}"
+        assert len(dt_entries) == 3, f"Expected 3 archives rendered on index page 1, got {len(dt_entries)}"
         dt_titles = []
         dt_arcids = []
         for title, arcid in dt_entries:
             dt_titles.append(title)
             dt_arcids.append(arcid)
-        LOGGER.info(f"DT page 1 order: {list(zip(dt_titles, dt_arcids))}")
-        assert dt_arcids[2] == full_order[2], "Index DT order disagrees with search API order at the page boundary"
+        LOGGER.debug(f"Index page 1 order: {list(zip(dt_titles, dt_arcids))}")
+        assert dt_arcids[2] == full_order[2], "Index order disagrees with search API order at the page boundary"
         pcm.clear()
 
-        # Open last archive on DT page 1 (3rd of 3).
-        LOGGER.info(f"Opening last archive on DT page 1: {dt_titles[2]}")
+        # Open last archive on index page 1 (3rd of 3).
+        LOGGER.debug(f"Opening last archive on index page 1: {dt_titles[2]}")
         await page.locator("#thumbs_container a", has_text=dt_titles[2]).first.click()
         await page.wait_for_load_state("networkidle")
         await assert_no_spinner(page)
         assert f"id={dt_arcids[2]}" in page.url
 
-        # Navigate forward through 3 pages to cross into DT page 2.
-        LOGGER.info("Navigating forward to cross DT boundary.")
+        # Navigate forward through 3 pages to cross into index page 2.
+        LOGGER.debug("Navigating forward across the index page boundary.")
         pcm.clear()
         for i in range(3):
             await page.keyboard.press("ArrowRight")
@@ -162,13 +160,13 @@ async def test_reader_to_index_cross_dt(
             await assert_no_spinner(page)
             await page.wait_for_timeout(500)
 
-        # After 3 ArrowRight presses from page 1 of archive 3 (last on DT page 1),
-        # we should have crossed into the next archive (first on DT page 2).
+        # After 3 ArrowRight presses from page 1 of archive 3 (last on index page 1),
+        # we should have crossed into the next archive (first on index page 2).
         cross_dt_url = page.url
-        LOGGER.info(f"After cross-DT navigation: {cross_dt_url}")
-        assert f"id={dt_arcids[2]}" not in cross_dt_url, "Expected to have crossed DT boundary"
+        LOGGER.debug(f"After crossing the index page boundary: {cross_dt_url}")
+        assert f"id={dt_arcids[2]}" not in cross_dt_url, "Expected to have crossed the index page boundary"
         assert f"id={expected_next_arcid}" in cross_dt_url, (
-            f"Expected to land on DT page 2's first archive {expected_next_arcid}, got {cross_dt_url}"
+            f"Expected to land on index page 2's first archive {expected_next_arcid}, got {cross_dt_url}"
         )
 
         # Return-to-index icon should navigate to index.
@@ -224,7 +222,7 @@ async def test_forward_history_after_redraw(
         await page.wait_for_load_state("networkidle")
         await pcm.close_release_notes()
 
-        # Find the archive as rendered in DT results.
+        # Find the archive as rendered in the index results.
         await assert_no_spinner(page)
         dt_entries = await read_rendered_entries(page, 1)
         assert len(dt_entries) == 1, f"Expected 1 archive rendered, got {len(dt_entries)}"
@@ -237,13 +235,11 @@ async def test_forward_history_after_redraw(
         assert "/reader" in page.url
         LOGGER.debug(f"Entered reader: {page.url}")
 
-        # Browser back to index (popstate-guarded, pushState skipped).
         pcm.clear()
         await page.go_back(wait_until="networkidle")
         LOGGER.debug(f"After back: {page.url}")
         assert "/reader" not in page.url
 
-        # Reload triggers a fresh drawCallback (not popstate-guarded).
         pcm.clear()
         await page.reload(wait_until="networkidle")
         LOGGER.debug(f"After reload: {page.url}")
@@ -253,7 +249,7 @@ async def test_forward_history_after_redraw(
         await page.go_forward(wait_until="networkidle")
         forward_url = page.url
         LOGGER.debug(f"After forward: {forward_url}")
-        assert "/reader" in forward_url, f"Forward history was wiped by drawCallback pushState, got {forward_url}"
+        assert "/reader" in forward_url, f"Expected browser forward to return to the reader after reload, got {forward_url}"
 
         await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
@@ -293,21 +289,17 @@ async def test_back_stack_no_growth_on_reload(
         await pcm.close_release_notes()
         pcm.clear()
 
-        # Reload (drawCallback fires with non-popstate pushState).
         await page.reload(wait_until="networkidle")
         LOGGER.debug(f"After reload: {page.url}")
         pcm.clear()
 
-        # Back twice should reach the login anchor.
-        # Without fix: reload added a duplicate, so 2 backs only reaches
-        # the goto entry (still index).
-        # With fix: reload pushState was skipped, so 2 backs reaches login.
+        # Back twice should reach the login page.
         await page.go_back(wait_until="networkidle")
         LOGGER.debug(f"After first back: {page.url}")
         await page.go_back(wait_until="networkidle")
         back_url = page.url
         LOGGER.debug(f"After second back: {back_url}")
-        assert "/login" in back_url, f"Back stack has duplicate entries from reload, got {back_url}"
+        assert "/login" in back_url, f"Expected two browser backs after reload to reach the login page, got {back_url}"
 
         await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
