@@ -589,7 +589,6 @@ async def test_slideshow_continue_navigation(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.xfail(reason="flaky: stale wait_for(state='hidden') resolves on a previous overlay-hide cycle rather than the edit-step's hide; PR #1492 reduced the rate but did not eliminate", strict=False)
 async def test_toc_reader(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
 ):
@@ -645,6 +644,7 @@ async def test_toc_reader(
         await page.fill("#pw_field", DEFAULT_LRR_PASSWORD)
         await page.click("input[type='submit']")
         await page.wait_for_load_state("networkidle")
+        await pcm.assert_ok()
         pcm.clear()
 
         await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}")
@@ -713,8 +713,8 @@ async def test_toc_reader(
         await dialog_textbox.fill("Chapter 1.5")
         await page.get_by_role("button", name="OK").click()
 
-        # overlay closes and reopens once the change is saved
-        await page.locator("#archivePagesOverlay").wait_for(state="hidden")
+        # wait for the new chapter to appear, then for the overlay to be visible
+        await chapter_select.locator("option", has_text="Chapter 1.5").wait_for(state="attached")
         await page.locator("#archivePagesOverlay").wait_for(state="visible")
 
         # verify dropdown now has 4 options
@@ -736,8 +736,8 @@ async def test_toc_reader(
         await dialog_textbox.fill("Chapter 1 Renamed")
         await page.get_by_role("button", name="OK").click()
 
-        # overlay closes and reopens once the change is saved
-        await page.locator("#archivePagesOverlay").wait_for(state="hidden")
+        # wait for the renamed chapter to appear, then for the overlay to be visible
+        await chapter_select.locator("option", has_text="Chapter 1 Renamed").wait_for(state="attached")
         await page.locator("#archivePagesOverlay").wait_for(state="visible")
         first_option_text = await page.locator("#chapter-select option").first.text_content()
         assert first_option_text == "Chapter 1 Renamed", f"Expected renamed chapter in dropdown, got {first_option_text!r}"
@@ -769,8 +769,8 @@ async def test_toc_reader(
         await delete_confirm.wait_for(state="visible", timeout=5000)
         await delete_confirm.click()
 
-        # overlay closes and reopens once the change is saved
-        await page.locator("#archivePagesOverlay").wait_for(state="hidden")
+        # wait for the deleted chapter to disappear, then for the overlay to be visible
+        await chapter_select.locator("option", has_text="Chapter 1 Renamed").wait_for(state="detached")
         await page.locator("#archivePagesOverlay").wait_for(state="visible")
 
         # dropdown still shows 4 options, including an untitled chapter for page 1

@@ -12,9 +12,11 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from lanraragi.clients.client import LRRClient
-from lanraragi.models.search import SearchArchiveIndexRequest
 
-from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.deployment.base import (
+    AbstractLRRDeploymentContext,
+    expect_no_error_logs,
+)
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
 from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
@@ -76,17 +78,22 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerato
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-async def test_reader_to_index_cross_dt(
+async def test_index_reader_navigation(
         lrr_client: LRRClient, semaphore: asyncio.Semaphore,
         environment: AbstractLRRDeploymentContext,
 ):
     """
-    Test reader to index after cross-DT archive navigation.
+    Test navigation and browser history between the index and the reader.
 
     1. Set pagesize=3, upload 5 archives (3 pages each).
-    2. Navigate to index, open last archive on DT page 1.
-    3. Navigate forward via ArrowRight into DT page 2 archive.
-    4. Click return-to-index icon, verify return to index.
+    2. Open the index, verify index page 1 shows archives 1-3.
+    3. Search for "archive" with the search bar, verify index page 1 still shows archives 1-3.
+    4. Reload the search results, press back, verify arrival at the unfiltered index; press forward,
+       verify the search results.
+    5. Open archive 3; press back, reload the search results, press forward, verify archive 3 in the reader.
+    6. Navigate forward via ArrowRight into archive 4, the first archive on index page 2.
+    7. Click return-to-index icon, verify return to index.
+    8. Expect no server error logs.
     """
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -99,207 +106,105 @@ async def test_reader_to_index_cross_dt(
     # <<<<< CONFIG STAGE <<<<<
 
     # >>>>> UPLOAD STAGE >>>>>
+    title_to_arcid: dict[str, str] = {}
     with tempfile.TemporaryDirectory() as tmpdir:
         for i in range(5):
-            archive_path = create_archive_file(Path(tmpdir), f"archive-{i+1}", num_pages=3)
+            title = f"archive {i+1}"
+            archive_path = create_archive_file(Path(tmpdir), f"archive_{i+1}", num_pages=3)
             response, error = await upload_archive(
                 lrr_client, archive_path, archive_path.name, semaphore,
-                title=f"CrossDT {i+1}", tags="",
+                title=title, tags="",
             )
             assert not error, f"Upload failed (status {error.status}): {error.error}"
+            title_to_arcid[title] = response.arcid
     del response, error
     # <<<<< UPLOAD STAGE <<<<<
-
-    # >>>>> EXPECTED ORDER STAGE >>>>>
-    # expected landing archive is the first on index page 2 (4th in search order)
-    response, error = await lrr_client.search_api.search_archive_index(SearchArchiveIndexRequest(start="-1"))
-    assert not error, f"Failed to fetch full search order (status {error.status}): {error.error}"
-    full_order = []
-    for record in response.data:
-        full_order.append(record.arcid)
-    assert len(full_order) == 5, f"Expected 5 archives in search order, got {len(full_order)}"
-    expected_next_arcid = full_order[3]
-    del response, error
-    # <<<<< EXPECTED ORDER STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
     async with PlaywrightTestContextManager(lrr_client) as pcm:
         page = pcm.page
 
-        # Navigate to index page.
         await page.goto(lrr_client.lrr_base_url)
         await page.wait_for_load_state("networkidle")
         await pcm.close_release_notes()
-
-        # Collect the order of the 3 archives on index page 1.
         await assert_no_spinner(page)
-        dt_entries = await read_rendered_entries(page, 3)
-        assert len(dt_entries) == 3, f"Expected 3 archives rendered on index page 1, got {len(dt_entries)}"
-        dt_titles = []
-        dt_arcids = []
-        for title, arcid in dt_entries:
-            dt_titles.append(title)
-            dt_arcids.append(arcid)
-        LOGGER.debug(f"Index page 1 order: {list(zip(dt_titles, dt_arcids))}")
-        assert dt_arcids[2] == full_order[2], "Index order disagrees with search API order at the page boundary"
+        expected_page_1 = ["archive 1", "archive 2", "archive 3"]
+        entries = await read_rendered_entries(page, 3, expected_page_1)
+        page_1_titles = []
+        for title, _ in entries:
+            page_1_titles.append(title)
+        assert page_1_titles == expected_page_1, f"Expected index page 1 to show {expected_page_1}, got {page_1_titles}"
+        await pcm.assert_ok()
         pcm.clear()
 
-        # Open last archive on index page 1 (3rd of 3).
-        LOGGER.debug(f"Opening last archive on index page 1: {dt_titles[2]}")
-        await page.locator("#thumbs_container a", has_text=dt_titles[2]).first.click()
+        await page.locator("#search-input").fill("archive")
+        await page.get_by_role("button", name="Apply Filter").click()
+        await page.wait_for_url(lambda url: "q=archive" in url)
         await page.wait_for_load_state("networkidle")
         await assert_no_spinner(page)
-        assert f"id={dt_arcids[2]}" in page.url
-
-        # Navigate forward through 3 pages to cross into index page 2.
-        LOGGER.debug("Navigating forward across the index page boundary.")
+        entries = await read_rendered_entries(page, 3, expected_page_1)
+        page_1_titles = []
+        for title, _ in entries:
+            page_1_titles.append(title)
+        assert page_1_titles == expected_page_1, f"Expected search results page 1 to show {expected_page_1}, got {page_1_titles}"
+        await pcm.assert_ok()
         pcm.clear()
-        for i in range(3):
+
+        # verify reloading the search results does not add a history entry
+        await page.reload(wait_until="networkidle")
+        await page.go_back(wait_until="networkidle")
+        assert "/reader" not in page.url and "q=archive" not in page.url, (
+            f"Expected browser back after reload to reach the unfiltered index, got {page.url}"
+        )
+        await page.go_forward(wait_until="networkidle")
+        assert "q=archive" in page.url, f"Expected browser forward to reach the search results, got {page.url}"
+        await assert_no_spinner(page)
+        entries = await read_rendered_entries(page, 3, expected_page_1)
+        page_1_titles = []
+        for title, _ in entries:
+            page_1_titles.append(title)
+        assert page_1_titles == expected_page_1, f"Expected search results page 1 to show {expected_page_1}, got {page_1_titles}"
+        await pcm.assert_ok()
+        pcm.clear()
+
+        await pcm.close_release_notes()
+        LOGGER.debug("Opening archive 3 from search results page 1.")
+        await page.locator("#thumbs_container a", has_text="archive 3").first.click()
+        await page.wait_for_load_state("networkidle")
+        await assert_no_spinner(page)
+        assert f"id={title_to_arcid['archive 3']}" in page.url, f"Expected archive 3 (id={title_to_arcid['archive 3']}) in the reader, got {page.url}"
+
+        # verify forward history to the reader survives a search results reload
+        await page.go_back(wait_until="networkidle")
+        assert "q=archive" in page.url, f"Expected browser back to reach the search results, got {page.url}"
+        await page.reload(wait_until="networkidle")
+        await page.go_forward(wait_until="networkidle")
+        assert f"id={title_to_arcid['archive 3']}" in page.url, (
+            f"Expected browser forward to return to archive 3 (id={title_to_arcid['archive 3']}) after reload, got {page.url}"
+        )
+        await assert_no_spinner(page)
+        await pcm.assert_ok()
+        pcm.clear()
+
+        # 3 presses move from page 1 of archive 3 into archive 4
+        LOGGER.debug("Navigating forward across the index page boundary.")
+        for _ in range(3):
             await page.keyboard.press("ArrowRight")
             await page.wait_for_load_state("networkidle")
             await assert_no_spinner(page)
             await page.wait_for_timeout(500)
-
-        # After 3 ArrowRight presses from page 1 of archive 3 (last on index page 1),
-        # we should have crossed into the next archive (first on index page 2).
-        cross_dt_url = page.url
-        LOGGER.debug(f"After crossing the index page boundary: {cross_dt_url}")
-        assert f"id={dt_arcids[2]}" not in cross_dt_url, "Expected to have crossed the index page boundary"
-        assert f"id={expected_next_arcid}" in cross_dt_url, (
-            f"Expected to land on index page 2's first archive {expected_next_arcid}, got {cross_dt_url}"
+        assert f"id={title_to_arcid['archive 4']}" in page.url, (
+            f"Expected to land on archive 4 (id={title_to_arcid['archive 4']}), the first on index page 2, got {page.url}"
         )
-
-        # Return-to-index icon should navigate to index.
-        LOGGER.info("Clicking return-to-index icon.")
+        await pcm.assert_ok()
         pcm.clear()
+
+        LOGGER.debug("Clicking return-to-index icon.")
         await page.locator("#return-to-index").click()
         await page.wait_for_load_state("networkidle")
-        index_url = page.url
-        LOGGER.info(f"After return-to-index: {index_url}")
-        assert "/reader" not in index_url, f"Expected index page after icon click, got {index_url}"
+        assert "/reader" not in page.url, f"Expected index page after icon click, got {page.url}"
 
         await pcm.assert_ok()
     # <<<<< UI STAGE <<<<<
 
-
-@pytest.mark.asyncio
-@pytest.mark.playwright
-async def test_forward_history_after_redraw(
-        lrr_client: LRRClient, semaphore: asyncio.Semaphore,
-):
-    """
-    Test that forward history is preserved after a datatables redraw.
-
-    1. Upload 1 archive.
-    2. Navigate to index with search filter matching the archive.
-    3. Click archive to enter reader.
-    4. Browser back to index, then reload (triggers non-popstate drawCallback).
-    5. Browser forward, verify return to reader.
-    """
-
-    # >>>>> TEST CONNECTION STAGE >>>>>
-    _, error = await lrr_client.misc_api.get_server_info()
-    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-    # <<<<< TEST CONNECTION STAGE <<<<<
-
-    # >>>>> UPLOAD STAGE >>>>>
-    with tempfile.TemporaryDirectory() as tmpdir:
-        archive_path = create_archive_file(Path(tmpdir), "archive_1", num_pages=3)
-        response, error = await upload_archive(
-            lrr_client, archive_path, archive_path.name, semaphore,
-            title="History 1", tags="",
-        )
-        assert not error, f"Upload failed (status {error.status}): {error.error}"
-    del response, error
-    # <<<<< UPLOAD STAGE <<<<<
-
-    # >>>>> UI STAGE >>>>>
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
-        page = pcm.page
-
-        # Navigate to index with search filter.
-        await page.goto(f"{lrr_client.lrr_base_url}/?q=History")
-        await page.wait_for_load_state("networkidle")
-        await pcm.close_release_notes()
-
-        # Find the archive as rendered in the index results.
-        await assert_no_spinner(page)
-        dt_entries = await read_rendered_entries(page, 1)
-        assert len(dt_entries) == 1, f"Expected 1 archive rendered, got {len(dt_entries)}"
-        dt_title = dt_entries[0][0]
-        pcm.clear()
-
-        # Click archive to enter reader.
-        await page.locator("#thumbs_container a", has_text=dt_title).first.click()
-        await page.wait_for_load_state("networkidle")
-        assert "/reader" in page.url
-        LOGGER.debug(f"Entered reader: {page.url}")
-
-        pcm.clear()
-        await page.go_back(wait_until="networkidle")
-        LOGGER.debug(f"After back: {page.url}")
-        assert "/reader" not in page.url
-
-        pcm.clear()
-        await page.reload(wait_until="networkidle")
-        LOGGER.debug(f"After reload: {page.url}")
-
-        # Browser forward should return to reader.
-        pcm.clear()
-        await page.go_forward(wait_until="networkidle")
-        forward_url = page.url
-        LOGGER.debug(f"After forward: {forward_url}")
-        assert "/reader" in forward_url, f"Expected browser forward to return to the reader after reload, got {forward_url}"
-
-        await pcm.assert_ok()
-    # <<<<< UI STAGE <<<<<
-
-
-@pytest.mark.asyncio
-@pytest.mark.playwright
-async def test_back_stack_no_growth_on_reload(
-        lrr_client: LRRClient,
-):
-    """
-    Test that reloading the index does not add duplicate history entries.
-
-    1. Navigate to login page (anchor).
-    2. Navigate to index with search filter.
-    3. Reload the page.
-    4. Press back twice, verify arrival at login page (no duplicate entries).
-    """
-
-    # >>>>> TEST CONNECTION STAGE >>>>>
-    _, error = await lrr_client.misc_api.get_server_info()
-    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-    # <<<<< TEST CONNECTION STAGE <<<<<
-
-    # >>>>> UI STAGE >>>>>
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
-        page = pcm.page
-
-        # Navigate to login page as anchor.
-        await page.goto(f"{lrr_client.lrr_base_url}/login")
-        await page.wait_for_load_state("networkidle")
-        pcm.clear()
-
-        # Navigate to index with search filter.
-        await page.goto(f"{lrr_client.lrr_base_url}/?q=test")
-        await page.wait_for_load_state("networkidle")
-        await pcm.close_release_notes()
-        pcm.clear()
-
-        await page.reload(wait_until="networkidle")
-        LOGGER.debug(f"After reload: {page.url}")
-        pcm.clear()
-
-        # Back twice should reach the login page.
-        await page.go_back(wait_until="networkidle")
-        LOGGER.debug(f"After first back: {page.url}")
-        await page.go_back(wait_until="networkidle")
-        back_url = page.url
-        LOGGER.debug(f"After second back: {back_url}")
-        assert "/login" in back_url, f"Expected two browser backs after reload to reach the login page, got {back_url}"
-
-        await pcm.assert_ok()
-    # <<<<< UI STAGE <<<<<
+    expect_no_error_logs(environment, LOGGER)

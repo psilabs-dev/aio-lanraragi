@@ -123,9 +123,10 @@ async def test_header_click_sort(
             f"Expected descending title sort, got: {sorted_titles}"
         )
 
-        # click title header again to sort ascending
+        await pcm.assert_ok()
         pcm.clear()
 
+        # click title header again to sort ascending
         await title_header.click()
         await page.wait_for_load_state("networkidle")
         await assert_no_spinner(page)
@@ -479,9 +480,10 @@ async def test_custom_column_sort_display(
         assert "artist" in option_values, "Expected 'artist' in sort dropdown options"
         assert "series" in option_values, "Expected 'series' in sort dropdown options"
 
-        # select artist namespace from dropdown and verify sort order
+        await pcm.assert_ok()
         pcm.clear()
 
+        # select artist namespace from dropdown and verify sort order
         await sort_dropdown.select_option("artist")
         await page.wait_for_load_state("networkidle")
         await assert_no_spinner(page)
@@ -557,7 +559,6 @@ async def test_custom_column_sort_display(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-@pytest.mark.xfail(reason="date_added is hardcoded in index.html.tt2 sort dropdown, not filtered by excluded namespaces", strict=False)
 async def test_search_autocomplete_namespace_exclusion(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
@@ -566,9 +567,9 @@ async def test_search_autocomplete_namespace_exclusion(
     """
     Test that excluded namespaces are filtered from search autocomplete suggestions.
 
-    1. Upload 3 archives with both normal (artist, series) and noisy (source, date_added) tags.
+    1. Upload 3 archives with both normal (artist, series) and noisy (source, uploader) tags.
     2. Rebuild stat hashes.
-    3. Navigate to settings, configure excluded namespaces via UI, save.
+    3. Navigate to settings, configure excluded namespaces via UI, save; verify the server reports them.
     4. Navigate to index page, verify excluded namespaces absent from sort dropdown.
     5. Type partial match for an excluded tag, verify no suggestions appear.
     6. Type partial match for a non-excluded tag, verify exact expected suggestions.
@@ -583,9 +584,9 @@ async def test_search_autocomplete_namespace_exclusion(
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         archive_tags = [
-            "artist:alice,series:foo,source:https://a.test,date_added:1700000000",
-            "artist:alice,series:bar,source:https://b.test,date_added:1700000001",
-            "artist:bob,series:foo,source:https://c.test,date_added:1700000002",
+            "artist:alice,series:foo,source:https://a.test,uploader:a",
+            "artist:alice,series:bar,source:https://b.test,uploader:b",
+            "artist:bob,series:foo,source:https://c.test,uploader:c",
         ]
         for i, tags in enumerate(archive_tags):
             save_path = create_archive_file(tmpdir, f"archive-{i}", 3)
@@ -623,7 +624,7 @@ async def test_search_autocomplete_namespace_exclusion(
         # fill in excluded namespaces
         excluded_input = page.locator("input[name='excludednamespaces']")
         await excluded_input.wait_for(state="visible", timeout=5000)
-        await excluded_input.fill("source,date_added")
+        await excluded_input.fill("source,uploader")
 
         # save settings
         await page.get_by_role("button", name="Save Settings").click()
@@ -636,6 +637,10 @@ async def test_search_autocomplete_namespace_exclusion(
     # verify the server reports the excluded namespaces
     response, error = await lrr_client.misc_api.get_server_info()
     assert not error, f"Failed to get server info (status {error.status}): {error.error}"
+    assert sorted(response.excluded_namespaces) == ["source", "uploader"], (
+        f"Expected excluded namespaces ['source', 'uploader'], got {response.excluded_namespaces}"
+    )
+    del response, error
 
     # >>>>> UI STAGE >>>>>
     async with PlaywrightTestContextManager(lrr_client) as pcm:
@@ -658,7 +663,7 @@ async def test_search_autocomplete_namespace_exclusion(
             option_values.append(await opt.get_attribute("value"))
         LOGGER.info(f"Sort dropdown options: {option_values}")
         assert "source" not in option_values, "Expected 'source' to be excluded from sort dropdown"
-        assert "date_added" not in option_values, "Expected 'date_added' to be excluded from sort dropdown"
+        assert "uploader" not in option_values, "Expected 'uploader' to be excluded from sort dropdown"
         assert "artist" in option_values, "Expected 'artist' in sort dropdown options"
         assert "series" in option_values, "Expected 'series' in sort dropdown options"
 

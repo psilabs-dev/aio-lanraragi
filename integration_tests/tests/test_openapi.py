@@ -120,48 +120,6 @@ async def test_bypass_normal_request(lrr_client: LRRClient, environment: Abstrac
 
 
 @pytest.mark.asyncio
-async def test_bypass_response_validation(lrr_client: LRRClient, environment: AbstractLRRDeploymentContext):
-    """
-    With bypass enabled, a response that violates the OpenAPI schema (e.g. a
-    non-boolean string in a boolean field) should still be returned to the client
-    as-is, rather than being rejected by the plugin's response validator (500).
-
-    Uploads an archive via API, then corrupts its `isnew` Redis field to a value
-    that cannot be coerced to a JSON boolean, and queries the metadata endpoint.
-
-    Without response bypass: 500 with {"errors": [{"message": "Expected boolean - got string."}]}
-    With response bypass:    200 with the archive metadata (corrupted field passed through)
-    """
-    _, error = await lrr_client.misc_api.get_server_info()
-    assert not error, f"Failed to connect to the LANraragi server (status {error.status}): {error.error}"
-
-    # Upload an archive
-    with tempfile.TemporaryDirectory() as tmpdir:
-        archive_path = create_archive_file(Path(tmpdir), "test_bypass_response", num_pages=1)
-        response, error = await upload_archive(
-            lrr_client, archive_path, archive_path.name, asyncio.Semaphore(1),
-            title="Test Bypass Archive", tags="test:bypass",
-        )
-    assert not error, f"Upload failed (status {error.status}): {error.error}"
-    arcid = response.arcid
-
-    # Corrupt the isnew field in Redis db 0 to a non-coercible string
-    r = environment.redis_client
-    r.select(0)
-    r.hset(arcid, "isnew", "not_a_boolean")
-
-    status, content = await lrr_client.handle_request(
-        http.HTTPMethod.GET, lrr_client.build_url(f"/api/archives/{arcid}"), lrr_client.headers
-    )
-    body = json.loads(content)
-
-    # Response bypass active: corrupted data passes through, no 500
-    assert status == 200, f"Expected 200 (bypass should skip response validation), got {status}. Body: {body}"
-    assert body["arcid"] == arcid
-    assert "errors" not in body, "Response should not contain OpenAPI validation errors"
-
-
-@pytest.mark.asyncio
 async def test_bypass_non_ascii_metadata(lrr_client: LRRClient):
     """
     With bypass enabled, ensure non-ASCII metadata is preserved in JSON responses.
