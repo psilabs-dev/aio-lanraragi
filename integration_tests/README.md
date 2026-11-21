@@ -4,7 +4,9 @@ This directory contains the API/integration testing package for "aio-lanraragi".
 
 Integration testing version updates apply only if changes to integration testing code or tests have occurred.
 
-For information on setting up a developer environment for testing, refer to [development](/docs/development.md). Additionally, see [resource management](/integration_tests/docs/resource_management.md) for documentation on how resources are managed during test-time.
+- [Development](../docs/development.md): setting up a developer environment for testing.
+- [Resource management](docs/resource_management.md): documentation on how resources are managed during test-time.
+- [Testing](docs/testing.md): documentation on test design, selection, and portfolio management/optimization.
 
 ## Usage
 

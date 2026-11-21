@@ -96,6 +96,12 @@ class ExtractArchiveResponse(LanraragiResponse):
     job: int | None = Field(None)
     pages: list[str] = Field([])
 
+class SetNewArchiveFlagRequest(LanraragiRequest):
+    arcid: str = Field(..., min_length=40, max_length=40)
+
+class SetNewArchiveFlagResponse(LanraragiResponse):
+    arcid: str = Field(..., min_length=40, max_length=40)
+
 class ClearNewArchiveFlagRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
 
@@ -177,6 +183,8 @@ __all__ = [
     "GetArchivePageResponse",
     "ExtractArchiveRequest",
     "ExtractArchiveResponse",
+    "SetNewArchiveFlagRequest",
+    "SetNewArchiveFlagResponse",
     "ClearNewArchiveFlagRequest",
     "ClearNewArchiveFlagResponse",
     "UpdateReadingProgressionRequest",

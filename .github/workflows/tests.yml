@@ -33,7 +33,7 @@ jobs:
 
   tests-ubuntu:
     name: Tests (Ubuntu)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 80
 
     permissions:
@@ -188,6 +188,13 @@ jobs:
           New-Item -ItemType Directory -Path $dest -Force | Out-Null
           $zip = Join-Path $env:GITHUB_WORKSPACE "windist\win-dist.zip"
           Expand-Archive -Path $zip -DestinationPath $dest -Force
+
+      - name: Install .NET SDK
+        if: steps.cache-windist.outputs.cache-hit != 'true'
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            11.0.x
 
       - name: Setup MSYS2 UCRT64
         if: steps.cache-windist.outputs.cache-hit != 'true'

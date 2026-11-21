@@ -1,16 +1,32 @@
 import logging
+import os
 import sys
 
 import docker
 import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.deployment.docker import (
-    DockerLRRCacheBackend,
-    DockerLRRDeploymentContext,
+from aio_lanraragi_tests.deployment.container import (
+    ContainerLRRCacheBackend,
+    ContainerLRRDeploymentContext,
+    ContainerRuntime,
 )
 from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
+
+
+def _resolve_socket(runtime: ContainerRuntime, container_host: str | None) -> str | None:
+    """
+    Resolve the container runtime API socket URL. An explicit --container-host wins; otherwise
+    rootless Podman uses its conventional per-user socket and Docker falls back to docker-py's
+    environment discovery (honoring DOCKER_HOST). Returns None to signal "discover from environment".
+    """
+    if container_host:
+        return container_host
+    if runtime.is_rootless:
+        runtime_dir = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+        return f"unix://{runtime_dir}/podman/podman.sock"
+    return None
 
 
 def generate_deployment(
@@ -47,18 +63,26 @@ def generate_deployment(
             use_docker_api: bool = request.config.getoption("--docker-api")
             staging_dir: str = request.config.getoption("--staging")
             cache_backend: str = request.config.getoption("--cache-backend")
+            container_runtime = ContainerRuntime(request.config.getoption("--container-runtime"))
+            container_host: str = request.config.getoption("--container-host")
             if dockerfile and git_url:
                 raise DeploymentException("--dockerfile cannot be combined with --git-url.")
             if dockerfile and image:
                 raise DeploymentException("--dockerfile cannot be combined with --image.")
+
+            # Resolve the socket once and export it as DOCKER_HOST for all clients and processes
+            socket_url = _resolve_socket(container_runtime, container_host)
+            if socket_url:
+                os.environ["DOCKER_HOST"] = socket_url
             docker_client = docker.from_env()
-            docker_api = docker.APIClient(base_url="unix://var/run/docker.sock") if use_docker_api else None
-            environment = DockerLRRDeploymentContext(
+            docker_api = docker_client.api if use_docker_api else None
+            environment = ContainerLRRDeploymentContext(
                 build_path, image, git_url, git_ref, docker_client, staging_dir, resource_prefix, port_offset,
                 build_ref=build_ref, dockerfile=dockerfile, docker_api=docker_api,
                 global_run_id=global_run_id, is_allow_uploads=True,
                 logger=logger,
-                cache_backend=DockerLRRCacheBackend(cache_backend),
+                cache_backend=ContainerLRRCacheBackend(cache_backend),
+                container_runtime=container_runtime,
             )
 
     return environment
