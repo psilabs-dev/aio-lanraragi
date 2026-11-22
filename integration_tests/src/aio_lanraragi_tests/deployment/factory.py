@@ -15,14 +15,14 @@ from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
 
 
-def _resolve_socket(runtime: ContainerRuntime, container_host: str | None) -> str | None:
+def _resolve_socket(runtime: ContainerRuntime, container_url: str | None) -> str | None:
     """
-    Resolve the container runtime API socket URL: --container-host if given, else the rootless
+    Resolve the container runtime API socket URL: --container-url if given, else the rootless
     per-user Podman socket on Linux for podman. Returns None for docker, deferring to docker-py's
     `from_env` (https://docker-py.readthedocs.io/en/stable/client.html#docker.client.from_env).
     """
-    if container_host:
-        return container_host
+    if container_url:
+        return container_url
     if runtime.is_rootless:
         runtime_dir = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
         return f"unix://{runtime_dir}/podman/podman.sock"
@@ -64,14 +64,14 @@ def generate_deployment(
             staging_dir: str = request.config.getoption("--staging")
             cache_backend: str = request.config.getoption("--cache-backend")
             container_runtime = ContainerRuntime(request.config.getoption("--container-runtime"))
-            container_host: str = request.config.getoption("--container-host")
+            container_url: str = request.config.getoption("--container-url")
             if dockerfile and git_url:
                 raise DeploymentException("--dockerfile cannot be combined with --git-url.")
             if dockerfile and image:
                 raise DeploymentException("--dockerfile cannot be combined with --image.")
 
             # Resolve the socket once and export it as DOCKER_HOST for all clients and processes
-            socket_url = _resolve_socket(container_runtime, container_host)
+            socket_url = _resolve_socket(container_runtime, container_url)
             if socket_url:
                 os.environ["DOCKER_HOST"] = socket_url
             docker_client = docker.from_env()

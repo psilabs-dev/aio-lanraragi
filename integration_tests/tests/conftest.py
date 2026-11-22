@@ -88,9 +88,9 @@ def pytest_addoption(parser: pytest.Parser):
 
     container-runtime : `str = "docker"`
         Container runtime for linux/macos deployments: "docker" or "podman". Podman is supported
-        only in rootless mode, through its API socket. On macOS, Podman requires --container-host.
+        only in rootless mode, through its API socket. On macOS, Podman requires --container-url.
 
-    container-host : `str = None`
+    container-url : `str = None`
         Override the container runtime socket URL (e.g.
         "unix:///run/user/1000/podman/podman.sock"). Defaults to
         https://docker-py.readthedocs.io/en/stable/client.html#docker.client.from_env for docker,
@@ -123,8 +123,8 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--no-rate-limit", action="store_true", default=False, help="Skip tests that depend on rate-limited external resources (e.g. raw.githubusercontent.com).")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
     parser.addoption("--cache-backend", action="store", default="valkey", choices=["redis", "valkey", "valkey7", "valkey8"], help="Cache backend for container deployments. Default: valkey (9.x).")
-    parser.addoption("--container-runtime", action="store", default="docker", choices=["docker", "podman"], help="Container runtime for linux/macos deployments. Podman is supported only in rootless mode, through its API socket; on macOS it requires --container-host. Default: docker.")
-    parser.addoption("--container-host", action="store", default=None, help="Override container runtime socket URL (e.g. unix:///run/user/1000/podman/podman.sock). Defaults to docker.from_env() for docker, or the rootless per-user socket on Linux for podman.")
+    parser.addoption("--container-runtime", action="store", default="docker", choices=["docker", "podman"], help="Container runtime for linux/macos deployments. Podman is supported only in rootless mode, through its API socket; on macOS it requires --container-url. Default: docker.")
+    parser.addoption("--container-url", action="store", default=None, help="Override container runtime socket URL (e.g. unix:///run/user/1000/podman/podman.sock). Defaults to docker.from_env() for docker, or the rootless per-user socket on Linux for podman.")
     parser.addoption("--port-offset", type=int, action="store", default=0, help="Session-wide base port offset added to per-module offsets. Use to avoid conflicts between parallel sessions.")
     parser.addoption("--resource-prefix", action="store", default="", help="Session-wide prefix prepended to per-module resource prefixes. Use to isolate parallel sessions.")
 
