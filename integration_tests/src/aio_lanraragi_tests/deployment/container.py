@@ -67,8 +67,8 @@ class ContainerLRRCacheBackend(Enum):
 
 class ContainerRuntime(Enum):
     """
-    Container runtime backing a deployment. Both are driven through the same docker-py client over
-    a Docker-compatible API; Podman is assumed to be rootless and reachable only via its socket.
+    Container runtime backing a deployment, driven through docker-py. Podman is supported only in
+    rootless mode, through its API socket.
     """
     DOCKER = "docker"
     PODMAN = "podman"
@@ -76,17 +76,14 @@ class ContainerRuntime(Enum):
     @property
     def is_rootless(self) -> bool:
         """
-        Whether the runtime runs containers in a rootless user namespace (Podman). When rootless,
-        the deployment runs services as the user-namespace root (UID 0 maps to the host user) so the
-        images' privileged startup steps succeed and bind-mounted files remain host-owned.
+        Whether the harness treats the runtime as rootless; services then run as the namespace root.
         """
         return self is ContainerRuntime.PODMAN
 
     @property
     def uses_cli_build(self) -> bool:
         """
-        Whether image builds may shell out to a runtime CLI (`docker buildx`). The rootless Podman
-        backend is socket-only with no assumed CLI, so it builds over the socket instead.
+        Whether image builds use the `docker buildx` CLI.
         """
         return self is ContainerRuntime.DOCKER
 
@@ -651,7 +648,7 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if self.cache_backend.is_valkey:
                 create_kwargs["working_dir"] = self.redis_container_data_path
             if self.container_runtime.is_rootless:
-                # Run the cache server as our own user, so the data it writes stays ours to clean up.
+                # clear the image entrypoint for rootless runtimes
                 create_kwargs["entrypoint"] = [""]
             self.redis_container = self.docker_client.containers.create(
                 self.cache_image_tag, **create_kwargs
@@ -685,8 +682,7 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
             if needs_recreate_lrr:
                 self.logger.debug("LRR image was rebuilt; removing existing container for recreation.")
             else:
-                # in this situation, whether we restart the LRR container depends on whether or not the images used for both containers
-                # match.
+                # recreate the LRR container if its image differs from the target image
                 try:
                     needs_recreate_lrr = self.lrr_container.image.id != self.docker_client.images.get(image_id).id
                 except docker.errors.ImageNotFound:
@@ -923,7 +919,6 @@ class ContainerLRRDeploymentContext(AbstractLRRDeploymentContext):
             with contextlib.suppress(docker.errors.NotFound):
                 self.redis_container.reload()
                 if self.redis_container.status == 'running':
-                    # Clear the cache data from inside the container, where it's ours to delete.
                     self.redis_container.exec_run(["bash", "-c", f"rm -rf {self.redis_container_data_path}/*"], user='root')
         if self.redis_container:
             self.redis_container.stop(timeout=1)

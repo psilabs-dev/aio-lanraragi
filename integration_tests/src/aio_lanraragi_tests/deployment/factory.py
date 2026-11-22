@@ -17,9 +17,9 @@ from aio_lanraragi_tests.exceptions import DeploymentException
 
 def _resolve_socket(runtime: ContainerRuntime, container_host: str | None) -> str | None:
     """
-    Resolve the container runtime API socket URL. An explicit --container-host wins; otherwise
-    rootless Podman uses its conventional per-user socket and Docker falls back to docker-py's
-    environment discovery (honoring DOCKER_HOST). Returns None to signal "discover from environment".
+    Resolve the container runtime API socket URL: --container-host if given, else the rootless
+    per-user Podman socket on Linux for podman. Returns None for docker, deferring to docker-py's
+    `from_env` (https://docker-py.readthedocs.io/en/stable/client.html#docker.client.from_env).
     """
     if container_host:
         return container_host
