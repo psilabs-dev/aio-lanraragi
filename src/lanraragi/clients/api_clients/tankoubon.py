@@ -24,10 +24,17 @@ from lanraragi.models.tankoubon import (
     GetTankoubonFullResponse,
     GetTankoubonRequest,
     GetTankoubonResponse,
+    GetTankoubonTagsResponse,
+    GetTankoubonThumbnailRequest,
+    GetTankoubonThumbnailResponse,
     RemoveArchiveFromTankoubonRequest,
     RemoveArchiveFromTankoubonResponse,
+    UpdateTankoubonProgressRequest,
+    UpdateTankoubonProgressResponse,
     UpdateTankoubonRequest,
     UpdateTankoubonResponse,
+    UpdateTankoubonThumbnailRequest,
+    UpdateTankoubonThumbnailResponse,
 )
 
 
@@ -39,7 +46,7 @@ class _TankoubonApiClient(_ApiClient):
         """
         url = self.api_context.build_url("/api/tankoubons")
         params = {}
-        if request.page:
+        if request.page is not None:
             params["page"] = request.page
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers, params=params)
         if status == 200:
@@ -90,7 +97,7 @@ class _TankoubonApiClient(_ApiClient):
         """
         url = self.api_context.build_url(f"/api/tankoubons/{request.tank_id}")
         payload = {}
-        if request.archives:
+        if request.archives is not None:
             payload["archives"] = request.archives
         if request.metadata:
             payload["metadata"] = request.metadata.model_dump(exclude_none=True)
@@ -137,6 +144,49 @@ class _TankoubonApiClient(_ApiClient):
             response_j = json.loads(content)
             return (DeleteTankoubonResponse(success_message=response_j.get("successMessage")), None)
         return (None, _build_err_response(content, status))
+
+    async def get_tankoubon_tags(self, request: GetTankoubonRequest) -> _LRRClientResponse[GetTankoubonTagsResponse]:
+        url = self.api_context.build_url(f"/api/tankoubons/{request.tank_id}/tags")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
+        if status == 200:
+            return (GetTankoubonTagsResponse.model_validate_json(content), None)
+        return (None, _build_err_response(content, status))
+
+    async def get_tankoubon_thumbnail(
+            self, request: GetTankoubonThumbnailRequest
+    ) -> _LRRClientResponse[GetTankoubonThumbnailResponse]:
+        url = self.api_context.build_url(f"/api/tankoubons/{request.tank_id}/thumbnail")
+        params = {}
+        if request.no_fallback is not None:
+            params["no_fallback"] = str(request.no_fallback).lower()
+        status, content = await self.api_context.download_thumbnail(url, self.headers, params=params)
+        if status == 200:
+            return (GetTankoubonThumbnailResponse(data=content), None)
+        if status == 202:
+            response = json.loads(content)
+            if response.get("success") == 1:
+                return (GetTankoubonThumbnailResponse(job=response["job"]), None)
+        return (None, _build_err_response(content, status))
+
+    async def update_tankoubon_thumbnail(
+            self, request: UpdateTankoubonThumbnailRequest
+    ) -> _LRRClientResponse[UpdateTankoubonThumbnailResponse]:
+        url = self.api_context.build_url(f"/api/tankoubons/{request.tank_id}/thumbnail")
+        params = {"page": request.page}
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers, params=params)
+        if status == 200 and json.loads(content).get("success") == 1:
+            return (UpdateTankoubonThumbnailResponse.model_validate_json(content), None)
+        return (None, _build_err_response(content, status))
+
+    async def update_tankoubon_progress(
+            self, request: UpdateTankoubonProgressRequest
+    ) -> _LRRClientResponse[UpdateTankoubonProgressResponse]:
+        url = self.api_context.build_url(f"/api/tankoubons/{request.tank_id}/progress/{request.page}")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers)
+        if status == 200 and json.loads(content).get("success") == 1:
+            return (UpdateTankoubonProgressResponse.model_validate_json(content), None)
+        return (None, _build_err_response(content, status))
+
 
 __all__ = [
     "_TankoubonApiClient"

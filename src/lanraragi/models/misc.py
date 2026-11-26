@@ -22,6 +22,7 @@ class GetServerInfoResponse(LanraragiResponse):
     version_desc: str = Field(...)
     version_name: str = Field(...)
     excluded_namespaces: list[str] = Field(default_factory=list)
+    restart_required: bool = Field(...)
 
 class GetOpdsCatalogRequest(LanraragiRequest):
     arcid: str | None = Field(None, min_length=40, max_length=40)
@@ -49,6 +50,10 @@ class GetAvailablePluginsResponsePlugin(BaseModel):
     parameters: list[PluginParameter] | None = Field(None)
     type: Literal["login", "metadata", "script", "download", "all"] = Field(...)
     version: str = Field(...)
+    hidden: bool = Field(False)
+    priority: int = Field(0)
+    registry: str | None = Field(None)
+    sha256: str | None = Field(None)
 
 class GetAvailablePluginsResponse(LanraragiResponse):
     plugins: list[GetAvailablePluginsResponsePlugin] = Field(...)
@@ -73,6 +78,7 @@ class UsePluginAsyncRequest(LanraragiRequest):
     plugin: str = Field(..., description="Namespace of the plugin to use.")
     arcid: str | None = Field(None, description="ID of the archive to use the plugin on. This is only mandatory for metadata plugins.")
     arg: str | None = Field(None, description="Optional One-Shot argument to use when executing this Plugin.")
+    priority: int | None = None
 
 class UsePluginAsyncResponse(LanraragiResponse):
     job: int = Field(...)
@@ -94,7 +100,78 @@ class RegenerateThumbnailRequest(LanraragiRequest):
 class RegenerateThumbnailResponse(LanraragiResponse):
     job: int = Field(...)
 
+class RegistryConfig(BaseModel):
+    id: str = Field(...)
+    name: str = Field(...)
+    provider: Literal["github", "gitea", "cdn", "local"] = Field(...)
+    url: str | None = Field(None)
+    ref: str | None = Field(None)
+    path: str | None = Field(None)
+    created: int = Field(...)
+    updated: int = Field(...)
+    index: dict[str, Any] | None = None
+
+class CreateRegistryRequest(LanraragiRequest):
+    name: str = Field(...)
+    provider: Literal["github", "gitea", "cdn", "local"] = Field(...)
+    url: str | None = Field(None)
+    ref: str | None = Field(None)
+    path: str | None = Field(None)
+
+class CreateRegistryResponse(LanraragiResponse):
+    id: str = Field(...)
+
+class UpdateRegistryRequest(LanraragiRequest):
+    name: str | None = Field(None)
+    provider: Literal["github", "gitea", "cdn", "local"] | None = Field(None)
+    url: str | None = Field(None)
+    ref: str | None = Field(None)
+    path: str | None = Field(None)
+
+class UpdateRegistryResponse(LanraragiResponse):
+    id: str = Field(...)
+
+class GetRegistryResponse(LanraragiResponse):
+    registry: RegistryConfig = Field(...)
+
+class ListRegistriesResponse(LanraragiResponse):
+    registries: list[RegistryConfig] = Field(...)
+
+class RefreshRegistryResponse(LanraragiResponse):
+    index: dict[str, Any] | None = Field(None)
+
+class GetDefaultRegistryResponse(LanraragiResponse):
+    id: str = Field(...)
+
+class UpdateDefaultRegistryResponse(LanraragiResponse):
+    id: str = Field(...)
+
+class RemoveDefaultRegistryResponse(LanraragiResponse):
+    id: str = Field(...)
+
+class InstallPluginRequest(LanraragiRequest):
+    namespace: str = Field(...)
+    registry: str = Field(...)
+    version: str | None = Field(None)
+    force: bool | None = Field(None)
+
+class InstallPluginResponse(LanraragiResponse):
+    namespace: str
+    job: int
+
+
+class GetOpdsPageRequest(LanraragiRequest):
+    arcid: str
+    page: int | None = None
+
+
+class GetOpdsPageResponse(LanraragiResponse):
+    data: bytes
+
+
 __all__ = [
+    "GetOpdsPageRequest",
+    "GetOpdsPageResponse",
     "GetServerInfoResponse",
     "GetOpdsCatalogRequest",
     "GetOpdsCatalogResponse",
@@ -111,4 +188,17 @@ __all__ = [
     "QueueUrlDownloadResponse",
     "RegenerateThumbnailRequest",
     "RegenerateThumbnailResponse",
+    "RegistryConfig",
+    "CreateRegistryRequest",
+    "CreateRegistryResponse",
+    "UpdateRegistryRequest",
+    "UpdateRegistryResponse",
+    "GetRegistryResponse",
+    "ListRegistriesResponse",
+    "RefreshRegistryResponse",
+    "GetDefaultRegistryResponse",
+    "UpdateDefaultRegistryResponse",
+    "RemoveDefaultRegistryResponse",
+    "InstallPluginRequest",
+    "InstallPluginResponse",
 ]
