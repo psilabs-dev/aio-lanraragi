@@ -1,8 +1,11 @@
 import json
 
+from lanraragi.clients.utils import _build_err_response
+from lanraragi.models.generics import _LRRClientResponse
 from lanraragi.models.minion import (
     GetMinionJobDetailResponse,
     GetMinionJobDetailResponseResult,
+    QueuedMinionJobResponse,
 )
 
 
@@ -65,6 +68,15 @@ def _process_get_minion_job_detail_response(content: str) -> GetMinionJobDetailR
         worker=worker
     )
 
+def _process_queued_minion_job_response(content: str, status: int) -> _LRRClientResponse[QueuedMinionJobResponse]:
+    if status == 200:
+        payload = json.loads(content)
+        if payload.get("success") == 1:
+            return (QueuedMinionJobResponse.model_validate(payload), None)
+    return (None, _build_err_response(content, status))
+
+
 __all__ = [
-    "_process_get_minion_job_detail_response"
+    "_process_get_minion_job_detail_response",
+    "_process_queued_minion_job_response",
 ]

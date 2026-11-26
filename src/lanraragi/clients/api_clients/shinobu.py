@@ -48,6 +48,14 @@ class _ShinobuApiClient(_ApiClient):
             return (RestartShinobuResponse(new_pid=new_pid), None)
         return (None, _build_err_response(content, status))
 
+    async def rescan_archives(self) -> _LRRClientResponse[RestartShinobuResponse]:
+        url = self.api_context.build_url("/api/shinobu/rescan")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers)
+        if status == 200 and json.loads(content).get("success") == 1:
+            return (RestartShinobuResponse.model_validate_json(content), None)
+        return (None, _build_err_response(content, status))
+
+
 __all__ = [
     "_ShinobuApiClient"
 ]

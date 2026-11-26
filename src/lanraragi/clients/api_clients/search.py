@@ -14,6 +14,7 @@ from lanraragi.models.search import (
     CompositeSearchRequest,
     GetRandomArchivesRequest,
     GetRandomArchivesResponse,
+    SearchArchiveIdsResponse,
     SearchArchiveIndexRequest,
     SearchArchiveIndexResponse,
 )
@@ -28,24 +29,7 @@ class _SearchApiClient(_ApiClient):
         GET /api/search
         """
         url = self.api_context.build_url("/api/search")
-        params = {}
-        for key, value in [
-            ("category", request.category),
-            ("filter", request.search_filter),
-            ("start", request.start),
-            ("sortby", request.sortby),
-            ("order", request.order),
-            ("newonly", request.newonly),
-            ("untaggedonly", request.untaggedonly),
-            ("hidecompleted", request.hidecompleted),
-            ("groupby_tanks", request.groupby_tanks),
-        ]:
-            if value is None:
-                continue
-            if isinstance(value, bool):
-                params[key] = str(value).lower()
-            elif value:
-                params[key] = value
+        params = self._search_params(request)
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers, params=params)
         if status == 200:
             return (_process_search_archive_index_response(content), None)
@@ -125,6 +109,37 @@ class _SearchApiClient(_ApiClient):
         if status == 200:
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))
+
+    async def search_archive_ids(self, request: SearchArchiveIndexRequest) -> _LRRClientResponse[SearchArchiveIdsResponse]:
+        url = self.api_context.build_url("/api/search/ids")
+        params = self._search_params(request)
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers, params=params)
+        if status == 200:
+            return (SearchArchiveIdsResponse.model_validate_json(content), None)
+        return (None, _build_err_response(content, status))
+
+    @staticmethod
+    def _search_params(request: SearchArchiveIndexRequest) -> dict[str, str | int]:
+        params = {}
+        for key, value in [
+            ("category", request.category),
+            ("filter", request.search_filter),
+            ("start", request.start),
+            ("sortby", request.sortby),
+            ("order", request.order),
+            ("newonly", request.newonly),
+            ("untaggedonly", request.untaggedonly),
+            ("hidecompleted", request.hidecompleted),
+            ("groupby_tanks", request.groupby_tanks),
+        ]:
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                params[key] = str(value).lower()
+            else:
+                params[key] = value
+        return params
+
 
 __all__ = [
     "_SearchApiClient"

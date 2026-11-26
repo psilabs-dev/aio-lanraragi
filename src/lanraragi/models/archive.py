@@ -28,15 +28,16 @@ class GetArchiveMetadataRequest(LanraragiRequest):
 
 class GetArchiveMetadataResponse(LanraragiResponse):
     arcid: str = Field(..., min_length=40, max_length=40)
-    isnew: bool = Field(...)
+    isnew: bool | None = Field(...)
     pagecount: int = Field(...)
     progress: int = Field(...)
     tags: str = Field(...)
-    summary: str = Field(...)
+    summary: str | None = None
     lastreadtime: int = Field(...)
     title: str = Field(...)
     filename: str = Field(...)
     extension: str = Field(...)
+    size: int | None = None
     toc: list[TocEntry] = Field(default_factory=list)
 
 class GetArchiveCategoriesRequest(LanraragiRequest):

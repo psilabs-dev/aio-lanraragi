@@ -6,13 +6,13 @@ from lanraragi.models.base import LanraragiRequest, LanraragiResponse
 class SearchArchiveIndexRequest(LanraragiRequest):
     category: str | None = Field(None)
     search_filter: str | None = Field(None)
-    start: str | None = Field(None)
+    start: int | str | None = Field(None)
     sortby: str | None = Field(None)
     order: str | None = Field(None)
     newonly: bool | None = Field(None)
     untaggedonly: bool | None = Field(None)
     hidecompleted: bool | None = Field(None)
-    groupby_tanks: bool = Field("true")
+    groupby_tanks: bool = True
 
 class SearchArchiveIndexResponseRecord(BaseModel):
     arcid: str = Field(...)  # 40-char SHA1 for archives, TANK_<timestamp> for tankoubons
@@ -69,7 +69,14 @@ class CompositeSearchRequest(LanraragiRequest):
 
 # <<<<< SEARCH <<<<<
 
+class SearchArchiveIdsResponse(LanraragiResponse):
+    data: list[str]
+    records_filtered: int = Field(validation_alias="recordsFiltered")
+    records_total: int = Field(validation_alias="recordsTotal")
+
+
 __all__ = [
+    "SearchArchiveIdsResponse",
     "SearchArchiveIndexRequest",
     "SearchArchiveIndexResponseRecord",
     "SearchArchiveIndexResponse",
