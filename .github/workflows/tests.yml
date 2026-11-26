@@ -33,7 +33,7 @@ jobs:
 
   tests-ubuntu:
     name: Tests (Ubuntu)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 80
 
     permissions:
@@ -287,7 +287,7 @@ jobs:
     needs:
       - tests-ubuntu
       - tests-windows
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Check if tests passed
         uses: re-actors/alls-green@release/v1
