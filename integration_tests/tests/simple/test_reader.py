@@ -17,6 +17,7 @@ from lanraragi.models.archive import (
     GetArchiveMetadataRequest,
     GetArchivePageRequest,
 )
+from playwright.async_api import expect
 
 from aio_lanraragi_tests.common import DEFAULT_LRR_PASSWORD, LRR_INDEX_TITLE
 from aio_lanraragi_tests.utils.api_wrappers import (
@@ -655,53 +656,29 @@ async def test_toc_reader(
         await page.keyboard.press("q")
         await page.locator("#archivePagesOverlay").wait_for(state="visible")
 
-        # verify chapter selector has 3 options
         chapter_select = page.locator("#chapter-select")
         options = chapter_select.locator("option")
-        option_count = await options.count()
-        assert option_count == 3, f"Expected 3 chapter options, got {option_count}"
-
-        option_texts = []
-        for i in range(option_count):
-            option_texts.append(await options.nth(i).text_content())
-        assert "Chapter 1" in option_texts[0]
-        assert "Chapter 2" in option_texts[1]
-        assert "Chapter 3" in option_texts[2]
-
-        # verify overlay scoping for chapter 1: pages 1-3 (3 thumbnails)
         thumbnails = page.locator("#pages-section .quick-thumbnail")
-        ch1_count = await thumbnails.count()
-        assert ch1_count == 3, f"Expected 3 thumbnails for Chapter 1, got {ch1_count}"
+        current_page = page.locator("span.current-page").first
 
-        # navigate to chapter 2 via dropdown
-        LOGGER.debug("Selecting Chapter 2 from dropdown.")
+        await expect(options).to_have_text(["Chapter 1", "Chapter 2", "Chapter 3"])
+        await expect(thumbnails).to_have_count(3)
+        await expect(thumbnails.first).to_have_attribute("page", "0")
+
         await chapter_select.select_option(value="4")
-        await page.wait_for_timeout(500)
+        await expect(current_page).to_have_text("4")
+        await expect(thumbnails.first).to_have_attribute("page", "3")
+        await expect(thumbnails).to_have_count(3)
 
-        # verify page counter jumped to page 4
-        current_page_text = await page.locator("span.current-page").first.text_content()
-        assert current_page_text.strip() == "4", f"Expected page 4 after chapter select, got {current_page_text!r}"
-
-        # verify overlay scoping for chapter 2: pages 4-6 (3 thumbnails)
-        ch2_count = await thumbnails.count()
-        assert ch2_count == 3, f"Expected 3 thumbnails for Chapter 2, got {ch2_count}"
-
-        # navigate to chapter 3 via dropdown
-        LOGGER.debug("Selecting Chapter 3 from dropdown.")
         await chapter_select.select_option(value="7")
-        await page.wait_for_timeout(500)
-
-        # verify overlay scoping for chapter 3: pages 7-10 (4 thumbnails)
-        ch3_count = await thumbnails.count()
-        assert ch3_count == 4, f"Expected 4 thumbnails for Chapter 3, got {ch3_count}"
+        await expect(current_page).to_have_text("7")
+        await expect(thumbnails.first).to_have_attribute("page", "6")
+        await expect(thumbnails).to_have_count(4)
 
         # >>>>> ADD CHAPTER VIA UI >>>>>
-        # navigate back to chapter 1 to add a chapter at page 2
         await chapter_select.select_option(value="1")
-        await page.wait_for_timeout(1000)
-
-        # wait for thumbnails to render
-        await thumbnails.first.wait_for(state="visible")
+        await expect(current_page).to_have_text("1")
+        await expect(thumbnails.first).to_have_attribute("page", "0")
 
         # force-click the add-chapter icon on the 2nd thumbnail (page 2)
         add_toc_icon = page.locator("#pages-section .quick-thumbnail").nth(1).locator(".add-toc")
@@ -718,14 +695,14 @@ async def test_toc_reader(
         await page.locator("#archivePagesOverlay").wait_for(state="visible")
 
         # verify dropdown now has 4 options
-        option_count = await options.count()
-        assert option_count == 4, f"Expected 4 chapter options after add, got {option_count}"
+        await expect(options).to_have_count(4)
         # <<<<< ADD CHAPTER VIA UI <<<<<
 
         # >>>>> EDIT CHAPTER VIA UI >>>>>
         # navigate back to Chapter 1 via dropdown so the edit targets it
         await chapter_select.select_option(value="1")
-        await page.wait_for_timeout(500)
+        await expect(current_page).to_have_text("1")
+        await expect(thumbnails.first).to_have_attribute("page", "0")
 
         LOGGER.debug("Editing chapter title via UI.")
         edit_icon = page.locator(".edit-toc").first
@@ -739,8 +716,7 @@ async def test_toc_reader(
         # wait for the renamed chapter to appear, then for the overlay to be visible
         await chapter_select.locator("option", has_text="Chapter 1 Renamed").wait_for(state="attached")
         await page.locator("#archivePagesOverlay").wait_for(state="visible")
-        first_option_text = await page.locator("#chapter-select option").first.text_content()
-        assert first_option_text == "Chapter 1 Renamed", f"Expected renamed chapter in dropdown, got {first_option_text!r}"
+        await expect(options.first).to_have_text("Chapter 1 Renamed")
 
         # verify via API that the rename took effect
         response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
@@ -758,7 +734,8 @@ async def test_toc_reader(
         # >>>>> DELETE CHAPTER VIA UI >>>>>
         # navigate back to Chapter 1 Renamed via dropdown so the delete targets it
         await chapter_select.select_option(value="1")
-        await page.wait_for_timeout(500)
+        await expect(current_page).to_have_text("1")
+        await expect(thumbnails.first).to_have_attribute("page", "0")
 
         LOGGER.debug("Deleting chapter via UI.")
         delete_icon = page.locator(".remove-toc").first
@@ -774,10 +751,8 @@ async def test_toc_reader(
         await page.locator("#archivePagesOverlay").wait_for(state="visible")
 
         # dropdown still shows 4 options, including an untitled chapter for page 1
-        option_count = await options.count()
-        assert option_count == 4, f"Expected 4 chapter options after delete, got {option_count}"
-        first_option_text = await options.nth(0).text_content()
-        assert "Chapter 1 Renamed" not in first_option_text, f"Deleted chapter still in dropdown: {first_option_text!r}"
+        await expect(options).to_have_count(4)
+        await expect(options.first).not_to_have_text("Chapter 1 Renamed")
 
         # verify deletion via API
         response, error = await lrr_client.archive_api.get_archive_metadata(GetArchiveMetadataRequest(arcid=arcid))
