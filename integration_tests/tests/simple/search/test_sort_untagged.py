@@ -34,15 +34,16 @@ async def test_custom_sort_unkeyed_order(
 ):
     """
     Test that archives missing the sort namespace appear at the back,
-    and that keyed archives are correctly ordered by sort direction.
+    and that numeric namespace values and titles sort naturally.
 
-    1. Upload 6 archives: 4 with source namespace, 2 without (but with other tags).
+    1. Upload 6 archives with numeric titles, 4 with numeric source tags.
     2. For each sort direction (asc, desc):
        a. Clear cache, search sorted by source -- verify keyed order and unkeyed at back.
        b. Repeat same search -- verify idempotent (cached path), count, and order.
     3. Clear cache, search asc, then search desc -- verify order and unkeyed at back
        (reversed-from-cache path).
     4. Clear cache, search desc, then search asc -- same verification.
+    5. Sort by title and verify natural numeric order.
     """
 
     # >>>>> TEST CONNECTION STAGE >>>>>
@@ -57,20 +58,18 @@ async def test_custom_sort_unkeyed_order(
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> CREATE & UPLOAD ARCHIVES >>>>>
-    # archives 1-4 have source: namespace, archives 5-6 have tags but no source:
     archive_specs = [
-        {"name": "archive_1", "title": "Title 1", "tags": "source:d,artist:a", "pages": 3},
-        {"name": "archive_2", "title": "Title 2", "tags": "source:b,artist:b", "pages": 3},
-        {"name": "archive_3", "title": "Title 3", "tags": "source:c,artist:c", "pages": 3},
-        {"name": "archive_4", "title": "Title 4", "tags": "source:a,artist:d", "pages": 3},
-        {"name": "archive_5", "title": "Title 5", "tags": "artist:e,series:a", "pages": 3},
-        {"name": "archive_6", "title": "Title 6", "tags": "artist:f,group:a", "pages": 3},
+        {"name": "archive_1", "title": "Title 10", "tags": "source:99,artist:a", "pages": 3},
+        {"name": "archive_2", "title": "Title 2", "tags": "source:9,artist:b", "pages": 3},
+        {"name": "archive_3", "title": "Title 99", "tags": "source:10,artist:c", "pages": 3},
+        {"name": "archive_4", "title": "Title 9", "tags": "source:2,artist:d", "pages": 3},
+        {"name": "archive_5", "title": "Title 100", "tags": "artist:e,series:a", "pages": 3},
+        {"name": "archive_6", "title": "Title 1000", "tags": "artist:f,group:a", "pages": 3},
     ]
 
-    unkeyed_titles = {"Title 5", "Title 6"}
-    # source:a=Title 4, source:b=Title 2, source:c=Title 3, source:d=Title 1
-    keyed_asc = ["Title 4", "Title 2", "Title 3", "Title 1"]
-    keyed_desc = ["Title 1", "Title 3", "Title 2", "Title 4"]
+    unkeyed_titles = {"Title 100", "Title 1000"}
+    keyed_asc = ["Title 9", "Title 2", "Title 99", "Title 10"]
+    keyed_desc = ["Title 10", "Title 99", "Title 2", "Title 9"]
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -196,4 +195,13 @@ async def test_custom_sort_unkeyed_order(
     # <<<<< DISCARD SEARCH CACHE <<<<<
 
     # no error logs
+    # >>>>> SORT TESTS: NATURAL TITLE ORDER >>>>>
+    response, error = await lrr_client.search_api.search_archive_index(
+        SearchArchiveIndexRequest(start="-1", sortby="title", order="asc", groupby_tanks=False)
+    )
+    assert not error, f"Sort by title failed (status {error.status}): {error.error}"
+    titles = [record.title for record in response.data]
+    assert titles == ["Title 2", "Title 9", "Title 10", "Title 99", "Title 100", "Title 1000"]
+    # <<<<< SORT TESTS: NATURAL TITLE ORDER <<<<<
+
     expect_no_error_logs(environment, LOGGER)
