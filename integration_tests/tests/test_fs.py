@@ -15,7 +15,10 @@ import numpy as np
 import pytest
 import pytest_asyncio
 from lanraragi.clients.client import LRRClient
-from lanraragi.models.archive import DeleteArchiveRequest, DeleteArchiveResponse
+from lanraragi.models.archive import (
+    DeleteArchiveRequest,
+    DeleteArchiveResponse,
+)
 from lanraragi.models.base import LanraragiErrorResponse
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext

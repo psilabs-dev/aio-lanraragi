@@ -1,0 +1,20 @@
+{
+  "client": {
+    "manifest": "pyproject.toml",
+    "tag_prefix": "v",
+    "watch": [
+      "src",
+      "pyproject.toml"
+    ]
+  },
+  "tests": {
+    "manifest": "integration_tests/pyproject.toml",
+    "depends_on": [
+      "client"
+    ],
+    "watch": [
+      "integration_tests/src",
+      "integration_tests/pyproject.toml"
+    ]
+  }
+}

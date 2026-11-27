@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "aio-lanraragi-integration-tests"
-version = "0.1.24.post5"
+version = "0.1.25"
 description = "Integration tests for aio-lanraragi"
 requires-python = ">=3.12, <=3.14"
 dependencies = [
@@ -15,7 +15,7 @@ dependencies = [
     "matplotlib",
     "numpy",
     "pillow",
-    "playwright",
+    "playwright>=1.61",
     "psutil",
     "pydantic>=2.0.0",
     "pytest",

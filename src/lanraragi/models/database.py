@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from lanraragi.models.base import LanraragiRequest, LanraragiResponse
@@ -8,7 +10,7 @@ class GetDatabaseStatsRequest(LanraragiRequest):
     hide_excluded_namespaces: bool | None = Field(None)
 
 class GetDatabaseStatsResponseTag(BaseModel):
-    namespace: str = Field(...)
+    namespace: str | None = Field(...)
     text: str = Field(...)
     weight: int = Field(...)
 
@@ -43,7 +45,24 @@ class GetDatabaseBackupResponse(LanraragiResponse):
     categories: list[GetDatabaseBackupCategoryRecord] = Field(default_factory=list)
     tankoubons: list[GetDatabaseBackupTankoubonRecord] = Field(default_factory=list)
 
+class DownloadDatabaseBackupRequest(LanraragiRequest):
+    job_id: int
+    format: Literal["json", "file"] | None = None
+
+
+class DownloadDatabaseBackupResponse(LanraragiResponse):
+    data: bytes
+
+
+class QueueDatabaseRestoreRequest(LanraragiRequest):
+    data: bytes
+    filename: str = "backup.json"
+
+
 __all__ = [
+    "DownloadDatabaseBackupRequest",
+    "DownloadDatabaseBackupResponse",
+    "QueueDatabaseRestoreRequest",
     "GetDatabaseStatsRequest",
     "GetDatabaseStatsResponseTag",
     "GetDatabaseStatsResponse",

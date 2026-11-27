@@ -28,15 +28,16 @@ class GetArchiveMetadataRequest(LanraragiRequest):
 
 class GetArchiveMetadataResponse(LanraragiResponse):
     arcid: str = Field(..., min_length=40, max_length=40)
-    isnew: bool = Field(...)
+    isnew: bool | None = Field(...)
     pagecount: int = Field(...)
     progress: int = Field(...)
     tags: str = Field(...)
-    summary: str = Field(...)
+    summary: str | None = None
     lastreadtime: int = Field(...)
     title: str = Field(...)
     filename: str = Field(...)
     extension: str = Field(...)
+    size: int | None = None
     toc: list[TocEntry] = Field(default_factory=list)
 
 class GetArchiveCategoriesRequest(LanraragiRequest):
@@ -95,6 +96,12 @@ class ExtractArchiveRequest(LanraragiRequest):
 class ExtractArchiveResponse(LanraragiResponse):
     job: int | None = Field(None)
     pages: list[str] = Field([])
+
+class SetNewArchiveFlagRequest(LanraragiRequest):
+    arcid: str = Field(..., min_length=40, max_length=40)
+
+class SetNewArchiveFlagResponse(LanraragiResponse):
+    arcid: str = Field(..., min_length=40, max_length=40)
 
 class ClearNewArchiveFlagRequest(LanraragiRequest):
     arcid: str = Field(..., min_length=40, max_length=40)
@@ -177,6 +184,8 @@ __all__ = [
     "GetArchivePageResponse",
     "ExtractArchiveRequest",
     "ExtractArchiveResponse",
+    "SetNewArchiveFlagRequest",
+    "SetNewArchiveFlagResponse",
     "ClearNewArchiveFlagRequest",
     "ClearNewArchiveFlagResponse",
     "UpdateReadingProgressionRequest",

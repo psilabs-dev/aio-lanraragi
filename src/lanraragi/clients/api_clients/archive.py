@@ -37,6 +37,8 @@ from lanraragi.models.archive import (
     QueueArchiveThumbnailExtractionRequest,
     QueueArchiveThumbnailExtractionResponse,
     RemoveTocEntryRequest,
+    SetNewArchiveFlagRequest,
+    SetNewArchiveFlagResponse,
     UpdateArchiveMetadataRequest,
     UpdateArchiveThumbnailRequest,
     UpdateArchiveThumbnailResponse,
@@ -69,6 +71,13 @@ class _ArchiveApiClient(_ApiClient):
         status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
         if status == 200:
             return (GetUntaggedArchivesResponse(data=json.loads(content)), None) # the content data should just be a list of string.
+        return (None, _build_err_response(content, status))
+
+    async def get_archive(self, request: GetArchiveMetadataRequest) -> _LRRClientResponse[GetArchiveMetadataResponse]:
+        url = self.api_context.build_url(f"/api/archives/{request.arcid}")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.GET, url, self.headers)
+        if status == 200:
+            return (_process_get_archive_metadata_response(content), None)
         return (None, _build_err_response(content, status))
 
     async def get_archive_metadata(self, request: GetArchiveMetadataRequest) -> _LRRClientResponse[GetArchiveMetadataResponse]:
@@ -123,10 +132,10 @@ class _ArchiveApiClient(_ApiClient):
         POST /api/archives/:id/files/thumbnails
         """
         url = self.api_context.build_url(f"/api/archives/{request.arcid}/files/thumbnails")
-        form_data = aiohttp.FormData(quote_fields=False)
-        if request.force:
-            form_data.add_field('force', request.force)
-        status, data = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, data=form_data)
+        params = {}
+        if request.force is not None:
+            params["force"] = str(request.force).lower()
+        status, data = await self.api_context.handle_request(http.HTTPMethod.POST, url, self.headers, params=params)
         if status in [200, 202]:
             response_j = json.loads(data)
             job = response_j.get("job")
@@ -174,6 +183,16 @@ class _ArchiveApiClient(_ApiClient):
             pages = response_j.get("pages") if 'pages' in response_j else []
             return (ExtractArchiveResponse(job=job, pages=pages), None)
         return (None, _build_err_response(data, status))
+
+    async def set_new_archive_flag(self, request: SetNewArchiveFlagRequest) -> _LRRClientResponse[SetNewArchiveFlagResponse]:
+        """
+        PUT /api/archives/:id/isnew
+        """
+        url = self.api_context.build_url(f"/api/archives/{request.arcid}/isnew")
+        status, content = await self.api_context.handle_request(http.HTTPMethod.PUT, url, self.headers)
+        if status == 200:
+            return (SetNewArchiveFlagResponse(arcid=request.arcid), None)
+        return (None, _build_err_response(content, status))
 
     async def clear_new_archive_flag(self, request: ClearNewArchiveFlagRequest) -> _LRRClientResponse[ClearNewArchiveFlagResponse]:
         """
@@ -299,6 +318,8 @@ class _ArchiveApiClient(_ApiClient):
         if status == 200:
             return (LanraragiResponse(), None)
         return (None, _build_err_response(content, status))
+
+
 
 __all__ = [
     "_ArchiveApiClient"

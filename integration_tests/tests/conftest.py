@@ -2,6 +2,8 @@ import logging
 import platform
 import re
 import time
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -9,8 +11,14 @@ import psutil
 import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.utils.playwright import (
+    PlaywrightContextFactory,
+    PlaywrightTestContextManager,
+)
 
 LOGGER = logging.getLogger(__name__)
+
+_BROWSER_LOG_SNAPSHOTS = pytest.StashKey[list[Callable[[], str]]]()
 
 # constants
 DEFAULT_REDIS_TAG = "redis:7.2.4"
@@ -85,17 +93,28 @@ def pytest_addoption(parser: pytest.Parser):
 
     resource-prefix : `str = ""`
         Session-wide prefix prepended to per-module resource prefixes.
+
+    container-runtime : `str = "docker"`
+        Container runtime for linux/macos deployments: "docker" or "podman". Podman is supported
+        only in rootless mode, through its API socket. On macOS, Podman requires --container-url.
+
+    container-url : `str = None`
+        Override the container runtime socket URL (e.g.
+        "unix:///run/user/1000/podman/podman.sock"). Defaults to
+        https://docker-py.readthedocs.io/en/stable/client.html#docker.client.from_env for docker,
+        or the rootless per-user socket on Linux for podman.
     """
     parser.addoption("--build", action="store", default=None, help="Absolute path to docker build context for LANraragi.")
     parser.addoption("--build-ref", action="store", default=None, help="Git ref (commit, branch, tag) to checkout before building. Requires --build.")
     parser.addoption("--image", action="store", default=None, help="LANraragi image to use.")
     parser.addoption("--git-url", action="store", default=None, help="Link to a LANraragi git repository (e.g. fork or branch).")
     parser.addoption("--git-ref", action="store", default=None, help="Git ref to checkout; if not supplied, uses the default branch.")
-    parser.addoption("--docker-api", action="store_true", default=False, help="Enable docker api to build image (e.g., to see logs). Needs access to unix://var/run/docker.sock.")
+    parser.addoption("--docker-api", action="store_true", default=False, help="Enable the low-level API client to stream image build logs. Uses the same socket as the container runtime.")
     parser.addoption("--dockerfile", action="store", default=None, help="Path to a custom Dockerfile. If relative, resolved relative to --build. Cannot be combined with --git-url or --image.")
     parser.addoption("--windist", action="store", default=None, help="Path to the LRR app distribution for Windows.")
     parser.addoption("--staging", action="store", default=Path.cwd() / ".staging", help="Path to the LRR staging directory (defaults to .staging).")
     parser.addoption("--server-logs", action="store", default=None, help="Absolute path to generated test-time server logs directory (not saved by default).")
+    parser.addoption("--browser-logs", action="store", default=None, help="Absolute path to generated test-time browser logs directory (not saved by default).")
     parser.addoption("--lrr-debug", action="store_true", default=False, help="Enable debug mode for the LRR logs.")
     parser.addoption(
         "--dev",
@@ -112,7 +131,9 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--benchmark-label", action="store", default=None, help="Label for this benchmark run (e.g. c0-r0).")
     parser.addoption("--no-rate-limit", action="store_true", default=False, help="Skip tests that depend on rate-limited external resources (e.g. raw.githubusercontent.com).")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
-    parser.addoption("--cache-backend", action="store", default="valkey", choices=["redis", "valkey", "valkey8"], help="Cache backend for Docker deployments. Default: valkey.")
+    parser.addoption("--cache-backend", action="store", default="valkey", choices=["redis", "valkey", "valkey7", "valkey8"], help="Cache backend for container deployments. Default: valkey (9.x).")
+    parser.addoption("--container-runtime", action="store", default="docker", choices=["docker", "podman"], help="Container runtime for linux/macos deployments. Podman is supported only in rootless mode, through its API socket; on macOS it requires --container-url. Default: docker.")
+    parser.addoption("--container-url", action="store", default=None, help="Override container runtime socket URL (e.g. unix:///run/user/1000/podman/podman.sock). Defaults to docker.from_env() for docker, or the rootless per-user socket on Linux for podman.")
     parser.addoption("--port-offset", type=int, action="store", default=0, help="Session-wide base port offset added to per-module offsets. Use to avoid conflicts between parallel sessions.")
     parser.addoption("--resource-prefix", action="store", default="", help="Session-wide prefix prepended to per-module resource prefixes. Use to isolate parallel sessions.")
 
@@ -214,9 +235,10 @@ def pytest_sessionstart(session: pytest.Session):
     """
     config = session.config
 
-    server_logs = config.getoption("--server-logs")
-    if server_logs is not None and not Path(server_logs).is_absolute():
-        raise pytest.UsageError("--server-logs must be an absolute path.")
+    for option in ("--server-logs", "--browser-logs"):
+        directory = config.getoption(option)
+        if directory is not None and not Path(directory).is_absolute():
+            raise pytest.UsageError(f"{option} must be an absolute path.")
 
     config.global_run_id = int(time.time() * 1000)
     global_run_id = config.global_run_id
@@ -287,14 +309,66 @@ def _save_server_logs(
             (out_dir / "redis.log").write_text(redis_logs, encoding='utf-8')
 
 
+@pytest.fixture
+def playwright_context(request: pytest.FixtureRequest) -> PlaywrightContextFactory:
+    if request.config.getoption("--browser-logs") is None:
+        return PlaywrightTestContextManager
+
+    snapshots: list[Callable[[], str]] = []
+    request.node.stash[_BROWSER_LOG_SNAPSHOTS] = snapshots
+    return partial(PlaywrightTestContextManager, browser_log_snapshots=snapshots)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    if _BROWSER_LOG_SNAPSHOTS in item.stash:
+        del item.stash[_BROWSER_LOG_SNAPSHOTS]
+
+
+def _save_browser_logs(
+    browser_logs_dir: Path,
+    nodeid: str,
+    snapshots: list[Callable[[], str]],
+    attempt: int,
+    call: pytest.CallInfo[Any],
+) -> None:
+    failure = call.excinfo.typename if call.excinfo is not None else "unknown"
+    text = [f"Test: {nodeid} ({call.when}, attempt {attempt}, {failure})\n"]
+    for snapshot in snapshots:
+        try:
+            text.append(snapshot())
+        except Exception:  # noqa: BLE001 - Preserve the failed test report and continue saving other snapshots.
+            LOGGER.exception("Could not read browser log")
+
+    directory = browser_logs_dir / _sanitize_nodeid(nodeid)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"browser-attempt-{attempt}-{call.when}.log"
+    path.write_text("\n".join(text), encoding="utf-8", errors="backslashreplace")
+    LOGGER.info(f"Browser logs saved to {path}")
+
+
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
     """
-    Save server logs to the --server-logs directory on test failure.
+    Save browser and server logs on test failure when requested.
     """
     outcome = yield
     report: pytest.TestReport = outcome.get_result()
-    if report.when in ("call", "setup") and report.failed:
+    snapshots = item.stash.get(_BROWSER_LOG_SNAPSHOTS, [])
+    if report.when == "teardown" and _BROWSER_LOG_SNAPSHOTS in item.stash:
+        del item.stash[_BROWSER_LOG_SNAPSHOTS]
+
+    if not report.failed:
+        return
+
+    browser_logs_dir = item.config.getoption("--browser-logs")
+    if browser_logs_dir and snapshots:
+        try:
+            _save_browser_logs(Path(browser_logs_dir), item.nodeid, snapshots, getattr(item, "execution_count", 1), call)
+        except OSError:
+            LOGGER.exception("Could not save browser logs")
+
+    if report.when in ("call", "setup"):
         server_logs_dir = item.config.getoption("--server-logs")
         if not server_logs_dir:
             return

@@ -59,7 +59,7 @@ class _CategoryApiClient(_ApiClient):
         url = self.api_context.build_url("/api/categories")
         form_data = aiohttp.FormData(quote_fields=False)
         if request.pinned is not None:
-            form_data.add_field('pinned', request.pinned)
+            form_data.add_field('pinned', str(request.pinned).lower())
         form_data.add_field('name', request.name)
         if request.search is not None:
             form_data.add_field('search', request.search)
@@ -77,7 +77,7 @@ class _CategoryApiClient(_ApiClient):
         url = self.api_context.build_url(f"/api/categories/{request.category_id}")
         form_data = aiohttp.FormData(quote_fields=False)
         if request.pinned is not None:
-            form_data.add_field('pinned', request.pinned)
+            form_data.add_field('pinned', str(request.pinned).lower())
         if request.name is not None:
             form_data.add_field('name', request.name)
         if request.search is not None:

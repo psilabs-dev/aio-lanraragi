@@ -25,7 +25,7 @@ class TankoubonFullDataRecord(TankoubonRecord):
     full_data: list[TankoubonArchiveRecord] | None = Field(None)
 
 class GetAllTankoubonsRequest(LanraragiRequest):
-    page: int = Field(..., description="The page of the list of Tankoubons.")
+    page: int | None = Field(None, description="The page of the list of Tankoubons.")
 
 class GetAllTankoubonsResponse(LanraragiResponse):
     result: list[TankoubonRecord] = Field(...)
@@ -92,7 +92,45 @@ class DeleteTankoubonRequest(LanraragiRequest):
 class DeleteTankoubonResponse(LanraragiResponse):
     success_message: str | None = Field(None)
 
+class GetTankoubonTagsResponse(LanraragiResponse):
+    tags: str
+
+
+class GetTankoubonThumbnailRequest(GetTankoubonRequest):
+    no_fallback: bool | None = None
+
+
+class GetTankoubonThumbnailResponse(LanraragiResponse):
+    data: bytes | None = None
+    job: int | None = None
+
+
+class UpdateTankoubonThumbnailRequest(GetTankoubonRequest):
+    page: int = Field(ge=1)
+
+
+class UpdateTankoubonThumbnailResponse(LanraragiResponse):
+    new_thumbnail: str
+
+
+class UpdateTankoubonProgressRequest(GetTankoubonRequest):
+    page: int = Field(ge=1)
+
+
+class UpdateTankoubonProgressResponse(LanraragiResponse):
+    tank_id: str = Field(validation_alias="id")
+    page: int
+    lastreadtime: int
+
+
 __all__ = [
+    "GetTankoubonTagsResponse",
+    "GetTankoubonThumbnailRequest",
+    "GetTankoubonThumbnailResponse",
+    "UpdateTankoubonThumbnailRequest",
+    "UpdateTankoubonThumbnailResponse",
+    "UpdateTankoubonProgressRequest",
+    "UpdateTankoubonProgressResponse",
     "TankoubonRecord",
     "TankoubonArchiveRecord",
     "TankoubonFullDataRecord",

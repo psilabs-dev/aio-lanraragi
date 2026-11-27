@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -12,7 +12,7 @@ class GetMinionJobStatusResponse(LanraragiResponse):
     state: str = Field(...)
     task: str = Field(...)
     error: str | None = Field(None)
-    notes: dict[str, str] | None = Field(None)
+    notes: dict[str, Any] | None = Field(None)
 
 class GetMinionJobDetailRequest(LanraragiRequest):
     job_id: int = Field(..., description="ID of the job.")
@@ -49,9 +49,26 @@ class GetMinionJobDetailResponse(LanraragiResponse):
     state: str = Field(...)
     task: str = Field(...)
     time: str | None = Field(None)
-    worker: int = Field(default=0)
+    worker: int | None = Field(default=None)
+
+class QueueMinionJobRequest(LanraragiRequest):
+    job_name: Literal[
+        "thumbnail_task", "tank_thumbnail_task", "page_thumbnails", "regen_all_thumbnails",
+        "find_duplicates", "build_stat_hashes", "handle_upload", "download_url", "run_plugin",
+    ]
+    args: list[Any]
+    priority: int | None = None
+
+
+class QueuedMinionJobResponse(LanraragiResponse):
+    job: int
+    operation: str
+    success: Literal[1]
+
 
 __all__ = [
+    "QueueMinionJobRequest",
+    "QueuedMinionJobResponse",
     "GetMinionJobStatusRequest",
     "GetMinionJobStatusResponse",
     "GetMinionJobDetailRequest",

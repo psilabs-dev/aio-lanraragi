@@ -2,6 +2,7 @@ import contextlib
 import logging
 import re
 import time
+from collections.abc import Callable
 from types import TracebackType
 from typing import TypeVar, override
 from urllib.parse import urlparse
@@ -25,9 +26,11 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
             responses: list[playwright.async_api._generated.Response] = []
             console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
             failed_requests: list[playwright.async_api._generated.Request] = []
+            page_errors: list[playwright.async_api.Error] = []
             page.on("response", lambda response: responses.append(response))
             page.on("console", lambda console: console_evts.append(console))
             page.on("requestfailed", lambda request: failed_requests.append(request))
+            page.on("pageerror", lambda error: page_errors.append(error))
         finally:
             await bc.close()
             await browser.close()
@@ -41,8 +44,10 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
     - `assert_requests_ok`: assert only requests are OK.
     - `assert_http_ok`: assert only browser HTTP responses are OK.
     - `assert_console_ok`: assert only console logs are OK.
+    - `assert_page_errors_ok`: assert only that no uncaught page errors occurred.
     - `assert_toasts_ok`: assert only toasts are OK.
     - `clear`: drop captured traffic, for tests that assert per stage.
+    - `close_release_notes`: close the index's release notes overlay if it opens.
 
     User guide:
 
@@ -66,7 +71,7 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
     @property
     def page(self) -> playwright.async_api._generated.Page:
         """
-        The page under test, with response, console and failed-request tracking attached.
+        The page under test, with response, console, failed-request and page-error tracking attached.
         """
         if self._page is None:
             raise RuntimeError("page is only available inside the context manager.")
@@ -86,6 +91,8 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
             lrr_client: LRRClient,
             browser_type: str="chromium",
             logger: logging.Logger=LOGGER,
+            *,
+            browser_log_snapshots: list[Callable[[], str]] | None = None,
     ):
         """
         `browser_type` selects the Playwright browser; use the chromium default unless the test
@@ -103,6 +110,10 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self.responses: list[playwright.async_api._generated.Response] = []
         self.console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
         self.failed_requests: list[playwright.async_api._generated.Request] = []
+        self.page_errors: list[playwright.async_api.Error] = []
+        self._pending: dict[playwright.async_api.Request, tuple[float, int | None]] = {}
+        self._browser_log: str | None = None
+        self._browser_log_snapshots = browser_log_snapshots
 
     def clear(self) -> None:
         """
@@ -111,6 +122,7 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self.responses.clear()
         self.console_evts.clear()
         self.failed_requests.clear()
+        self.page_errors.clear()
 
     async def assert_requests_ok(self) -> None:
         await assert_no_failed_requests(self.failed_requests, self._lrr_client, logger=self.logger)
@@ -121,20 +133,51 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
     async def assert_console_ok(self) -> None:
         await assert_console_logs_ok(self.console_evts, self._lrr_client.lrr_base_url)
 
+    async def assert_page_errors_ok(self) -> None:
+        messages = [str(error) for error in self.page_errors]
+        assert not messages, f"Uncaught page error(s): {messages}"
+
     async def assert_toasts_ok(self) -> None:
         await assert_toasts_ok(self.page)
 
     async def assert_ok(self) -> None:
         """
-        Assert no failed requests, no HTTP errors, no console errors and no error toasts.
+        Assert no failed requests, no HTTP errors, no console errors, no uncaught page errors and no error toasts.
         """
         await self.assert_requests_ok()
         await self.assert_http_ok()
         await self.assert_console_ok()
+        await self.assert_page_errors_ok()
         await self.assert_toasts_ok()
+
+    async def close_release_notes(self, timeout_ms: int = 10000) -> None:
+        """
+        Wait up to `timeout_ms` for the index's release notes overlay, and close it with Escape.
+
+        Returns early on pages without the overlay, and when LRR shows a changelog error or debug mode toast instead.
+        """
+        page = self.page
+        overlay = page.locator("#updateOverlay")
+        if not await overlay.count():
+            return
+        changelog_error = page.locator(".Toastify__toast--error", has_text="changelog")
+        debug_toast = page.locator(".Toastify__toast", has=page.locator(".fa-bug"))
+        try:
+            await overlay.or_(changelog_error).or_(debug_toast).first.wait_for(state="visible", timeout=timeout_ms)
+        except playwright.async_api.TimeoutError:
+            self.logger.info(f"No release notes overlay within {timeout_ms} ms.")
+            return
+        if not await overlay.is_visible():
+            return
+        self.logger.info("Closing release notes overlay.")
+        await page.keyboard.press("Escape")
+        await page.locator("#overlay-shade").wait_for(state="hidden")
 
     @override
     async def __aenter__(self: _PlaywrightTestContextManagerLike) -> _PlaywrightTestContextManagerLike:
+        self._browser_log = None
+        if self._browser_log_snapshots is not None:
+            self._browser_log_snapshots.append(self._browser_log_snapshot)
         self._playwright = await playwright.async_api.async_playwright().start()
         try:
             browser_launcher: playwright.async_api._generated.BrowserType = getattr(self._playwright, self._browser_type)
@@ -148,6 +191,12 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self._page.on("response", lambda response: self.responses.append(response))
         self._page.on("console", lambda console: self.console_evts.append(console))
         self._page.on("requestfailed", lambda request: self.failed_requests.append(request))
+        self._page.on("pageerror", lambda error: self.page_errors.append(error))
+        if self._browser_log_snapshots is not None:
+            self._browser_context.on("request", self._record_request_start)
+            self._browser_context.on("response", self._record_response)
+            self._browser_context.on("requestfinished", self._remove_pending)
+            self._browser_context.on("requestfailed", self._remove_pending)
         return self
 
     @override
@@ -162,7 +211,54 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         await self._teardown()
         return False
 
+    def _record_request_start(self, request: playwright.async_api.Request) -> None:
+        self._pending[request] = (time.monotonic(), None)
+
+    def _record_response(self, response: playwright.async_api.Response) -> None:
+        request = response.request
+        if request in self._pending:
+            started, _ = self._pending[request]
+            self._pending[request] = (started, response.status)
+
+    def _remove_pending(self, request: playwright.async_api.Request) -> None:
+        self._pending.pop(request, None)
+
+    def _browser_log_snapshot(self) -> str:
+        if self._browser_log is not None:
+            return self._browser_log
+
+        lines = [f"Browser: {self._browser_type}"]
+        if self._browser_context is not None:
+            for page in self._browser_context.pages:
+                lines.append(f"Page: {page.url}")
+
+        lines.append(f"Pending requests: {len(self._pending)}")
+        now = time.monotonic()
+        for request, (started, status) in self._pending.items():
+            elapsed_ms = round((now - started) * 1000)
+            response_status = f"HTTP {status}" if status is not None else "no response headers"
+            lines.append(f"  {request.method} {request.url} ({request.resource_type}, {response_status}, {elapsed_ms} ms)")
+
+        lines.append("Request failures:")
+        for request in self.failed_requests:
+            failure = request.failure or "request failed"
+            lines.append(f"  {request.method} {request.url} ({failure})")
+
+        lines.append("HTTP errors:")
+        for response in self.responses:
+            if response.status >= 400:
+                lines.append(f"  {response.request.method} {response.url} (HTTP {response.status})")
+
+        return "\n".join(lines) + "\n"
+
     async def _teardown(self) -> None:
+        if self._browser_log_snapshots is not None:
+            try:
+                self._browser_log = self._browser_log_snapshot()
+            except Exception:  # noqa: BLE001 - Preserve the test outcome when diagnostic capture fails.
+                self.logger.exception("Could not capture browser log")
+            self._pending.clear()
+
         try:
             if self._browser_context:
                 await self._browser_context.close()
@@ -173,6 +269,9 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
             finally:
                 if self._playwright:
                     await self._playwright.stop()
+
+type PlaywrightContextFactory = Callable[..., PlaywrightTestContextManager]
+
 
 async def assert_browser_responses_ok(
         responses: list[playwright.async_api._generated.Response],
@@ -220,8 +319,7 @@ async def assert_no_failed_requests(requests: list[playwright.async_api._generat
 
     - Any LRR-side URL that never reached the server, e.g. net::ERR_CONNECTION_FAILED.
 
-    These never produce a response, so assert_browser_responses_ok cannot see them. Cancelled
-    requests (net::ERR_ABORTED) are tolerated.
+    Cancelled requests (net::ERR_ABORTED) are tolerated.
     """
     lrr_hostname: str = urlparse(lrr_client.lrr_host).hostname or ''
     hostnames: set[str] = {'127.0.0.1', 'localhost'} if lrr_hostname == '127.0.0.1' else {lrr_hostname}
@@ -331,27 +429,6 @@ async def read_rendered_titles(
     for title, _ in entries:
         titles.append(title)
     return titles
-
-
-async def wait_for_input_value(
-        page: playwright.async_api._generated.Page,
-        locator: playwright.async_api._generated.Locator,
-        expected: str,
-        timeout_ms: int = 10000,
-) -> str:
-    """
-    Return the first `expected` observation or the last observation on timeout.
-    """
-    deadline = time.monotonic() + (timeout_ms / 1000)
-    value = ""
-    while True:
-        try:
-            value = await locator.input_value(timeout=1000)
-        except Exception:  # noqa: BLE001 - element may be mid-rerender
-            value = ""
-        if value == expected or time.monotonic() >= deadline:
-            return value
-        await page.wait_for_timeout(200)
 
 
 async def read_rendered_entries(

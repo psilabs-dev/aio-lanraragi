@@ -33,7 +33,7 @@ jobs:
 
   tests-ubuntu:
     name: Tests (Ubuntu)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 80
 
     permissions:
@@ -102,6 +102,7 @@ jobs:
             --image lanraragi:ci \
             --staging "$GITHUB_WORKSPACE/staging" \
             --server-logs "$GITHUB_WORKSPACE/server-logs" \
+            --browser-logs "$GITHUB_WORKSPACE/browser-logs" \
             --playwright \
             --no-rate-limit \
             --npseed 42
@@ -114,6 +115,15 @@ jobs:
         with:
           name: server-logs-ubuntu
           path: ${{ github.workspace }}/server-logs/
+          retention-days: 14
+
+      - name: Upload browser logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-logs-ubuntu
+          path: ${{ github.workspace }}/browser-logs/
+          if-no-files-found: ignore
           retention-days: 14
 
   # windows integration tests
@@ -189,6 +199,13 @@ jobs:
           $zip = Join-Path $env:GITHUB_WORKSPACE "windist\win-dist.zip"
           Expand-Archive -Path $zip -DestinationPath $dest -Force
 
+      - name: Install .NET SDK
+        if: steps.cache-windist.outputs.cache-hit != 'true'
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            11.0.x
+
       - name: Setup MSYS2 UCRT64
         if: steps.cache-windist.outputs.cache-hit != 'true'
         uses: msys2/setup-msys2@v2
@@ -262,6 +279,7 @@ jobs:
           --windist "$env:GITHUB_WORKSPACE\LANraragi\win-dist" `
           --staging "$env:GITHUB_WORKSPACE\staging" `
           --server-logs "$env:GITHUB_WORKSPACE\server-logs" `
+          --browser-logs "$env:GITHUB_WORKSPACE\browser-logs" `
           --playwright `
           --no-rate-limit `
           --npseed 42
@@ -274,13 +292,22 @@ jobs:
           path: ${{ github.workspace }}\server-logs\
           retention-days: 14
 
+      - name: Upload browser logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-logs-windows
+          path: ${{ github.workspace }}\browser-logs\
+          if-no-files-found: ignore
+          retention-days: 14
+
   check:
     if: always()
 
     needs:
       - tests-ubuntu
       - tests-windows
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Check if tests passed
         uses: re-actors/alls-green@release/v1
