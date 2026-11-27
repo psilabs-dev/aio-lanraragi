@@ -9,6 +9,7 @@ import psutil
 import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
+from aio_lanraragi_tests.utils.playwright import browser_log_snapshots
 
 LOGGER = logging.getLogger(__name__)
 
@@ -106,6 +107,7 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--windist", action="store", default=None, help="Path to the LRR app distribution for Windows.")
     parser.addoption("--staging", action="store", default=Path.cwd() / ".staging", help="Path to the LRR staging directory (defaults to .staging).")
     parser.addoption("--server-logs", action="store", default=None, help="Absolute path to generated test-time server logs directory (not saved by default).")
+    parser.addoption("--browser-logs", action="store", default=None, help="Absolute path to save failed tests' browser logs.")
     parser.addoption("--lrr-debug", action="store_true", default=False, help="Enable debug mode for the LRR logs.")
     parser.addoption(
         "--dev",
@@ -226,9 +228,10 @@ def pytest_sessionstart(session: pytest.Session):
     """
     config = session.config
 
-    server_logs = config.getoption("--server-logs")
-    if server_logs is not None and not Path(server_logs).is_absolute():
-        raise pytest.UsageError("--server-logs must be an absolute path.")
+    for option in ("--server-logs", "--browser-logs"):
+        directory = config.getoption(option)
+        if directory is not None and not Path(directory).is_absolute():
+            raise pytest.UsageError(f"{option} must be an absolute path.")
 
     config.global_run_id = int(time.time() * 1000)
     global_run_id = config.global_run_id
@@ -300,12 +303,55 @@ def _save_server_logs(
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_protocol(item: pytest.Item):
+    if item.config.getoption("--browser-logs") is None:
+        yield
+        return
+
+    token = browser_log_snapshots.set([])
+    try:
+        yield
+    finally:
+        browser_log_snapshots.reset(token)
+
+
+def pytest_runtest_logstart():
+    if (snapshots := browser_log_snapshots.get()) is not None:
+        snapshots.clear()
+
+
+def _save_browser_logs(item: pytest.Item, call: pytest.CallInfo[Any]) -> None:
+    if not (snapshots := browser_log_snapshots.get()):
+        return
+
+    attempt = getattr(item, "execution_count", 1)
+    directory = Path(item.config.getoption("--browser-logs")) / _sanitize_nodeid(item.nodeid)
+    path = directory / f"browser-attempt-{attempt}-{call.when}.log"
+    failure = call.excinfo.typename if call.excinfo is not None else "unknown"
+    text = [f"Test: {item.nodeid} ({call.when}, attempt {attempt}, {failure})\n"]
+    for snapshot in snapshots:
+        try:
+            text.append(snapshot())
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning(f"Could not read browser log ({type(exc).__name__})")
+
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(text), encoding="utf-8")
+        LOGGER.info(f"Browser logs saved to {path}")
+    except OSError as exc:
+        LOGGER.warning(f"Could not save browser logs ({type(exc).__name__})")
+
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
     """
-    Save server logs to the --server-logs directory on test failure.
+    Save browser and server logs on test failure when requested.
     """
     outcome = yield
     report: pytest.TestReport = outcome.get_result()
+    if report.failed:
+        _save_browser_logs(item, call)
     if report.when in ("call", "setup") and report.failed:
         server_logs_dir = item.config.getoption("--server-logs")
         if not server_logs_dir:
