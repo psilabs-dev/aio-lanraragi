@@ -2,6 +2,7 @@ import contextlib
 import logging
 import re
 import time
+from collections.abc import Callable
 from types import TracebackType
 from typing import TypeVar, override
 from urllib.parse import urlparse
@@ -90,6 +91,8 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
             lrr_client: LRRClient,
             browser_type: str="chromium",
             logger: logging.Logger=LOGGER,
+            *,
+            browser_log_snapshots: list[Callable[[], str]] | None = None,
     ):
         """
         `browser_type` selects the Playwright browser; use the chromium default unless the test
@@ -108,6 +111,9 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self.console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
         self.failed_requests: list[playwright.async_api._generated.Request] = []
         self.page_errors: list[playwright.async_api.Error] = []
+        self._pending: dict[playwright.async_api.Request, tuple[float, int | None]] = {}
+        self._browser_log: str | None = None
+        self._browser_log_snapshots = browser_log_snapshots
 
     def clear(self) -> None:
         """
@@ -169,6 +175,9 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
 
     @override
     async def __aenter__(self: _PlaywrightTestContextManagerLike) -> _PlaywrightTestContextManagerLike:
+        self._browser_log = None
+        if self._browser_log_snapshots is not None:
+            self._browser_log_snapshots.append(self._browser_log_snapshot)
         self._playwright = await playwright.async_api.async_playwright().start()
         try:
             browser_launcher: playwright.async_api._generated.BrowserType = getattr(self._playwright, self._browser_type)
@@ -183,6 +192,11 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self._page.on("console", lambda console: self.console_evts.append(console))
         self._page.on("requestfailed", lambda request: self.failed_requests.append(request))
         self._page.on("pageerror", lambda error: self.page_errors.append(error))
+        if self._browser_log_snapshots is not None:
+            self._browser_context.on("request", self._record_request_start)
+            self._browser_context.on("response", self._record_response)
+            self._browser_context.on("requestfinished", self._remove_pending)
+            self._browser_context.on("requestfailed", self._remove_pending)
         return self
 
     @override
@@ -197,7 +211,54 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         await self._teardown()
         return False
 
+    def _record_request_start(self, request: playwright.async_api.Request) -> None:
+        self._pending[request] = (time.monotonic(), None)
+
+    def _record_response(self, response: playwright.async_api.Response) -> None:
+        request = response.request
+        if request in self._pending:
+            started, _ = self._pending[request]
+            self._pending[request] = (started, response.status)
+
+    def _remove_pending(self, request: playwright.async_api.Request) -> None:
+        self._pending.pop(request, None)
+
+    def _browser_log_snapshot(self) -> str:
+        if self._browser_log is not None:
+            return self._browser_log
+
+        lines = [f"Browser: {self._browser_type}"]
+        if self._browser_context is not None:
+            for page in self._browser_context.pages:
+                lines.append(f"Page: {page.url}")
+
+        lines.append(f"Pending requests: {len(self._pending)}")
+        now = time.monotonic()
+        for request, (started, status) in self._pending.items():
+            elapsed_ms = round((now - started) * 1000)
+            response_status = f"HTTP {status}" if status is not None else "no response headers"
+            lines.append(f"  {request.method} {request.url} ({request.resource_type}, {response_status}, {elapsed_ms} ms)")
+
+        lines.append("Request failures:")
+        for request in self.failed_requests:
+            failure = request.failure or "request failed"
+            lines.append(f"  {request.method} {request.url} ({failure})")
+
+        lines.append("HTTP errors:")
+        for response in self.responses:
+            if response.status >= 400:
+                lines.append(f"  {response.request.method} {response.url} (HTTP {response.status})")
+
+        return "\n".join(lines) + "\n"
+
     async def _teardown(self) -> None:
+        if self._browser_log_snapshots is not None:
+            try:
+                self._browser_log = self._browser_log_snapshot()
+            except Exception:  # noqa: BLE001 - Preserve the test outcome when diagnostic capture fails.
+                self.logger.exception("Could not capture browser log")
+            self._pending.clear()
+
         try:
             if self._browser_context:
                 await self._browser_context.close()
@@ -208,6 +269,9 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
             finally:
                 if self._playwright:
                     await self._playwright.stop()
+
+type PlaywrightContextFactory = Callable[..., PlaywrightTestContextManager]
+
 
 async def assert_browser_responses_ok(
         responses: list[playwright.async_api._generated.Response],

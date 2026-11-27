@@ -8,7 +8,6 @@ import logging
 import tempfile
 from pathlib import Path
 
-import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import (
@@ -25,9 +24,7 @@ from aio_lanraragi_tests.utils.api_wrappers import (
     upload_archive,
 )
 from aio_lanraragi_tests.utils.playwright import (
-    PlaywrightTestContextManager,
-    assert_browser_responses_ok,
-    assert_console_logs_ok,
+    PlaywrightContextFactory,
     assert_no_spinner,
     get_image_bytes_from_responses,
     read_rendered_entries,
@@ -40,6 +37,7 @@ LOGGER = logging.getLogger(__name__)
 @pytest.mark.playwright
 async def test_slideshow(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+    playwright_context: PlaywrightContextFactory,
 ):
     """
     Tests basic slideshow functionality.
@@ -76,7 +74,7 @@ async def test_slideshow(
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}")
@@ -129,6 +127,7 @@ async def test_slideshow(
 @pytest.mark.regression
 async def test_double_page_navigation(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+    playwright_context: PlaywrightContextFactory,
 ):
     """
     Verify that forward and backward navigation in double-page mode serves
@@ -165,7 +164,7 @@ async def test_double_page_navigation(
         return f"{archive_name}-pg-{page_index + 1}.png"
 
     # >>>>> UI STAGE >>>>>
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(f"{lrr_client.lrr_base_url}/reader?id={arcid}")
@@ -225,6 +224,7 @@ async def test_double_page_navigation(
 @pytest.mark.playwright
 async def test_archive_navigation(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+    playwright_context: PlaywrightContextFactory,
 ):
     """
     Test navigation capabilities.
@@ -267,7 +267,7 @@ async def test_archive_navigation(
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(lrr_client.lrr_base_url)
@@ -423,13 +423,8 @@ async def test_archive_navigation(
         await pcm.assert_console_ok()
 
         # Opening the reader directly by URL keeps the prev/next-archive buttons hidden.
-        bc2 = await pcm.browser_context.browser.new_context()
-        try:
-            page2 = await bc2.new_page()
-            responses2: list[playwright.async_api._generated.Response] = []
-            console_evts2: list[playwright.async_api._generated.ConsoleMessage] = []
-            page2.on("response", lambda response: responses2.append(response))
-            page2.on("console", lambda console: console_evts2.append(console))
+        async with playwright_context(lrr_client, logger=LOGGER) as pcm2:
+            page2 = pcm2.page
 
             await page2.goto(f"{lrr_client.lrr_base_url}/reader?id={dt_arcids[0]}")
             await page2.wait_for_load_state("networkidle")
@@ -439,10 +434,8 @@ async def test_archive_navigation(
             visible_count = await page2.locator(".archive-nav-link:visible").count()
             assert visible_count == 0, f"Expected archive-jump buttons hidden on direct entry, found {visible_count} visible"
 
-            await assert_browser_responses_ok(responses2, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts2, lrr_client.lrr_base_url)
-        finally:
-            await bc2.close()
+            await pcm2.assert_http_ok()
+            await pcm2.assert_console_ok()
         await pcm.assert_toasts_ok()
     # <<<<< UI STAGE <<<<<
 
@@ -451,6 +444,7 @@ async def test_archive_navigation(
 @pytest.mark.playwright
 async def test_slideshow_continue_navigation(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+    playwright_context: PlaywrightContextFactory,
 ):
     """
     Test that slideshow continues to the next archive.
@@ -485,7 +479,7 @@ async def test_slideshow_continue_navigation(
     # <<<<< UPLOAD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(lrr_client.lrr_base_url)
@@ -592,6 +586,7 @@ async def test_slideshow_continue_navigation(
 @pytest.mark.playwright
 async def test_toc_reader(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
+    playwright_context: PlaywrightContextFactory,
 ):
     """
     Test ToC reader UI.
@@ -636,7 +631,7 @@ async def test_toc_reader(
     # <<<<< ADD TOC VIA API <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         # login to get admin access (required for add/edit/delete toc icons)

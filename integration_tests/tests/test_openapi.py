@@ -29,9 +29,7 @@ from aio_lanraragi_tests.deployment.base import (
 from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.log_parse import parse_lrr_logs
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
-from aio_lanraragi_tests.utils.playwright import (
-    PlaywrightTestContextManager,
-)
+from aio_lanraragi_tests.utils.playwright import PlaywrightContextFactory
 
 LOGGER = logging.getLogger(__name__)
 
@@ -234,7 +232,7 @@ async def test_bypass_via_redis_config(request: pytest.FixtureRequest, resource_
 @pytest.mark.asyncio
 @pytest.mark.playwright
 @pytest.mark.regression
-async def test_validation_carousel_search(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int):
+async def test_validation_carousel_search(request: pytest.FixtureRequest, resource_prefix: str, port_offset: int, playwright_context: PlaywrightContextFactory):
     """
     Verify the inbox carousel does not send empty `filter=`/`category=` params
     that would violate openapi.yaml's minLength:14 constraint on `category`.
@@ -255,7 +253,7 @@ async def test_validation_carousel_search(request: pytest.FixtureRequest, resour
             _, error = await client.misc_api.get_server_info()
             assert not error, f"Failed to connect (status {error.status}): {error.error}"
 
-            async with PlaywrightTestContextManager(client) as pcm:
+            async with playwright_context(client) as pcm:
                 page = pcm.page
                 await page.add_init_script(
                     "localStorage.setItem('carouselType', 'inbox');"
