@@ -12,33 +12,6 @@ from lanraragi.clients.client import LRRClient
 
 LOGGER = logging.getLogger(__name__)
 
-def _browser_log_url(url: str, lrr_url: str) -> str:
-    """Keep LRR paths and omit URL fields that may contain credentials."""
-    try:
-        parts = urlparse(url)
-        if parts.scheme not in ("http", "https"):
-            return f"{parts.scheme or 'relative'}:[redacted]"
-        host = parts.hostname
-        if host is None:
-            return "[invalid URL]"
-        port = parts.port or (443 if parts.scheme == "https" else 80)
-        authority = f"[{host}]" if ":" in host else host
-        origin = f"{parts.scheme}://{authority}:{port}"
-
-        lrr = urlparse(lrr_url)
-        lrr_port = lrr.port or (443 if lrr.scheme == "https" else 80)
-        return origin + parts.path if (parts.scheme, host, port) == (lrr.scheme, lrr.hostname, lrr_port) else origin
-    except ValueError:
-        return "[invalid URL]"
-
-
-def _browser_log_failure(failure: str | None) -> str:
-    """Keep browser error codes and redact free-form network error messages."""
-    if failure and re.fullmatch(r"(?:net::)?ERR_[A-Z0-9_]+|NS_ERROR_[A-Z0-9_]+", failure):
-        return failure
-    return "request failed"
-
-
 _PlaywrightTestContextManagerLike = TypeVar('_PlaywrightTestContextManagerLike', bound='PlaywrightTestContextManager')
 class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
     """
@@ -254,31 +227,27 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         if self._browser_log is not None:
             return self._browser_log
 
-        lrr_url = self._lrr_client.lrr_base_url
         lines = [f"Browser: {self._browser_type}"]
         if self._browser_context is not None:
             for page in self._browser_context.pages:
-                lines.append(f"Page: {_browser_log_url(page.url, lrr_url)}")
+                lines.append(f"Page: {page.url}")
 
         lines.append(f"Pending requests: {len(self._pending)}")
         now = time.monotonic()
         for request, (started, status) in self._pending.items():
             elapsed_ms = round((now - started) * 1000)
-            url = _browser_log_url(request.url, lrr_url)
             response_status = f"HTTP {status}" if status is not None else "no response headers"
-            lines.append(f"  {request.method} {url} ({request.resource_type}, {response_status}, {elapsed_ms} ms)")
+            lines.append(f"  {request.method} {request.url} ({request.resource_type}, {response_status}, {elapsed_ms} ms)")
 
         lines.append("Request failures:")
         for request in self.failed_requests:
-            url = _browser_log_url(request.url, lrr_url)
-            failure = _browser_log_failure(request.failure)
-            lines.append(f"  {request.method} {url} ({failure})")
+            failure = request.failure or "request failed"
+            lines.append(f"  {request.method} {request.url} ({failure})")
 
         lines.append("HTTP errors:")
         for response in self.responses:
             if response.status >= 400:
-                url = _browser_log_url(response.url, lrr_url)
-                lines.append(f"  {response.request.method} {url} (HTTP {response.status})")
+                lines.append(f"  {response.request.method} {response.url} (HTTP {response.status})")
 
         return "\n".join(lines) + "\n"
 

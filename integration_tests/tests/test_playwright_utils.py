@@ -1,34 +1,43 @@
-import pytest
+from unittest.mock import Mock
 
-from aio_lanraragi_tests.utils.playwright import _browser_log_failure, _browser_log_url
+from lanraragi.clients.client import LRRClient
+from playwright.async_api import BrowserContext, Page, Request, Response
 
-
-@pytest.mark.parametrize(
-    ("failure", "expected"),
-    [
-        ("net::ERR_CONNECTION_FAILED", "net::ERR_CONNECTION_FAILED"),
-        ("ERR_TIMED_OUT", "ERR_TIMED_OUT"),
-        ("NS_ERROR_NET_TIMEOUT", "NS_ERROR_NET_TIMEOUT"),
-        ("net::ERR_FAILED for /private", "request failed"),
-        ("net::ERR_FAILED\nmore details", "request failed"),
-        ("", "request failed"),
-        (None, "request failed"),
-    ],
-)
-def test_browser_log_failure(failure: str | None, expected: str) -> None:
-    assert _browser_log_failure(failure) == expected
+from aio_lanraragi_tests.utils.playwright import PlaywrightTestContextManager
 
 
-@pytest.mark.parametrize(
-    ("url", "expected"),
-    [
-        ("http://user:password@127.0.0.1:3010/index?token=hidden#details", "http://127.0.0.1:3010/index"),
-        ("http://127.0.0.1:3011/webhook/private", "http://127.0.0.1:3011"),
-        ("https://example.com/webhook/private?token=hidden", "https://example.com:443"),
-        ("https://[::1]:3010/webhook/private", "https://[::1]:3010"),
-        ("data:text/html,private", "data:[redacted]"),
-        ("http://example.com:bogus/private", "[invalid URL]"),
-    ],
-)
-def test_browser_log_url(url: str, expected: str) -> None:
-    assert _browser_log_url(url, "http://127.0.0.1:3010") == expected
+def test_browser_log_snapshot_preserves_playwright_details() -> None:
+    page = Mock(spec=Page, url="about:blank#reader")
+    browser_context = Mock(spec=BrowserContext, pages=[page])
+    pending_request = Mock(
+        spec=Request,
+        method="GET",
+        resource_type="fetch",
+        url="http://127.0.0.1:3010/api/search?search=language%3Aenglish",
+    )
+    failed_request = Mock(
+        spec=Request,
+        method="GET",
+        url="https://example.test/releases/latest",
+        failure="Connection closed while receiving headers",
+    )
+    error_url = "https://example.test/releases/download?version=dev"
+    error_request = Mock(spec=Request, method="GET", url=error_url)
+    error_response = Mock(
+        spec=Response,
+        request=error_request,
+        status=503,
+        url=error_url,
+    )
+    context = PlaywrightTestContextManager(Mock(spec=LRRClient))
+    context._browser_context = browser_context
+    context._record_request_start(pending_request)
+    context.failed_requests.append(failed_request)
+    context.responses.append(error_response)
+
+    snapshot = context._browser_log_snapshot()
+
+    assert "Page: about:blank#reader" in snapshot
+    assert f"GET {pending_request.url} (fetch, no response headers," in snapshot
+    assert f"GET {failed_request.url} ({failed_request.failure})" in snapshot
+    assert f"GET {error_response.url} (HTTP 503)" in snapshot
