@@ -26,6 +26,7 @@ from aio_lanraragi_tests.utils.api_wrappers import (
     create_archive_file,
     upload_archive,
 )
+from aio_lanraragi_tests.utils.playwright import PlaywrightContextFactory
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ async def test_tank_edit_archive_title_escape(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
     environment: AbstractLRRDeploymentContext,
-    playwright_context,
+    playwright_context: PlaywrightContextFactory,
 ) -> None:
     """
     Stored XSS regression — archive titles rendered in the tank-edit page must be HTML-escaped
@@ -198,7 +199,7 @@ async def test_tankoubon_edit_page_save(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
     environment: AbstractLRRDeploymentContext,
-    playwright_context,
+    playwright_context: PlaywrightContextFactory,
 ) -> None:
     """
     Test that the tank metadata edit page saves the name via the UI.

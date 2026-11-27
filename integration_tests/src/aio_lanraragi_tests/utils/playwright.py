@@ -13,7 +13,7 @@ from lanraragi.clients.client import LRRClient
 LOGGER = logging.getLogger(__name__)
 
 def _browser_log_url(url: str, lrr_url: str) -> str:
-    """Retain LRR paths and show only the origin for external requests."""
+    """Keep LRR paths and omit URL fields that may contain credentials."""
     try:
         parts = urlparse(url)
         if parts.scheme not in ("http", "https"):
@@ -286,8 +286,8 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         if self._browser_log_snapshots is not None:
             try:
                 self._browser_log = self._browser_log_snapshot()
-            except Exception as exc:  # noqa: BLE001
-                self.logger.warning(f"Could not capture browser log ({type(exc).__name__})")
+            except Exception:  # noqa: BLE001 - Preserve the test outcome when diagnostic capture fails.
+                self.logger.exception("Could not capture browser log")
             self._pending.clear()
 
         try:
@@ -300,6 +300,9 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
             finally:
                 if self._playwright:
                     await self._playwright.stop()
+
+type PlaywrightContextFactory = Callable[..., PlaywrightTestContextManager]
+
 
 async def assert_browser_responses_ok(
         responses: list[playwright.async_api._generated.Response],

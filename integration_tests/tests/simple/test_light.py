@@ -39,6 +39,7 @@ from aio_lanraragi_tests.utils.api_wrappers import (
     save_archives,
     upload_archive,
 )
+from aio_lanraragi_tests.utils.playwright import PlaywrightContextFactory
 
 LOGGER = logging.getLogger(__name__)
 
@@ -409,7 +410,7 @@ async def test_toc_api(lrr_client: LRRClient, semaphore: asyncio.Semaphore, envi
 @pytest.mark.asyncio
 @pytest.mark.playwright
 @pytest.mark.dev("demo")
-async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, playwright_context):
+async def test_webkit_search_bar(lrr_client: LRRClient, semaphore: asyncio.Semaphore, npgenerator: np.random.Generator, playwright_context: PlaywrightContextFactory):
     """
     Upload two archive, apply search filter, read archive, then go back and check the search filter is still populated.
     """

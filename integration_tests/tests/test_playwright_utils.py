@@ -25,6 +25,7 @@ def test_browser_log_failure(failure: str | None, expected: str) -> None:
         ("http://user:password@127.0.0.1:3010/index?token=hidden#details", "http://127.0.0.1:3010/index"),
         ("http://127.0.0.1:3011/webhook/private", "http://127.0.0.1:3011"),
         ("https://example.com/webhook/private?token=hidden", "https://example.com:443"),
+        ("https://[::1]:3010/webhook/private", "https://[::1]:3010"),
         ("data:text/html,private", "data:[redacted]"),
         ("http://example.com:bogus/private", "[invalid URL]"),
     ],

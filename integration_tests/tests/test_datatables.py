@@ -21,6 +21,7 @@ from aio_lanraragi_tests.deployment.factory import generate_deployment
 from aio_lanraragi_tests.utils.api_wrappers import create_archive_file, upload_archive
 from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
 from aio_lanraragi_tests.utils.playwright import (
+    PlaywrightContextFactory,
     assert_no_spinner,
     read_rendered_entries,
 )
@@ -80,7 +81,7 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerato
 async def test_index_reader_navigation(
         lrr_client: LRRClient, semaphore: asyncio.Semaphore,
         environment: AbstractLRRDeploymentContext,
-        playwright_context,
+        playwright_context: PlaywrightContextFactory,
 ):
     """
     Test navigation and browser history between the index and the reader.

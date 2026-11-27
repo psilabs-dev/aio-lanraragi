@@ -24,6 +24,7 @@ from aio_lanraragi_tests.utils.api_wrappers import (
     upload_archive,
 )
 from aio_lanraragi_tests.utils.playwright import (
+    PlaywrightContextFactory,
     assert_no_spinner,
     get_image_bytes_from_responses,
     read_rendered_entries,
@@ -36,7 +37,7 @@ LOGGER = logging.getLogger(__name__)
 @pytest.mark.playwright
 async def test_slideshow(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
-    playwright_context,
+    playwright_context: PlaywrightContextFactory,
 ):
     """
     Tests basic slideshow functionality.
@@ -126,7 +127,7 @@ async def test_slideshow(
 @pytest.mark.regression
 async def test_double_page_navigation(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
-    playwright_context,
+    playwright_context: PlaywrightContextFactory,
 ):
     """
     Verify that forward and backward navigation in double-page mode serves
@@ -223,7 +224,7 @@ async def test_double_page_navigation(
 @pytest.mark.playwright
 async def test_archive_navigation(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
-    playwright_context,
+    playwright_context: PlaywrightContextFactory,
 ):
     """
     Test navigation capabilities.
@@ -443,7 +444,7 @@ async def test_archive_navigation(
 @pytest.mark.playwright
 async def test_slideshow_continue_navigation(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
-    playwright_context,
+    playwright_context: PlaywrightContextFactory,
 ):
     """
     Test that slideshow continues to the next archive.
@@ -585,7 +586,7 @@ async def test_slideshow_continue_navigation(
 @pytest.mark.playwright
 async def test_toc_reader(
     lrr_client: LRRClient, semaphore: asyncio.Semaphore,
-    playwright_context,
+    playwright_context: PlaywrightContextFactory,
 ):
     """
     Test ToC reader UI.

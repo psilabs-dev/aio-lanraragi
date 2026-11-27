@@ -30,6 +30,7 @@ from aio_lanraragi_tests.utils.api_wrappers import (
     upload_archives,
 )
 from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
+from aio_lanraragi_tests.utils.playwright import PlaywrightContextFactory
 
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False # for debugging.
@@ -95,7 +96,7 @@ async def sample_test_api_auth_matrix(
     is_nofunmode: bool, is_api_key_configured_server: bool, is_api_key_configured_client: bool,
     is_matching_api_key: bool, is_auth_progress: bool, environment: AbstractLRRDeploymentContext, lrr_client: LRRClient,
     arcid: str,
-    playwright_context,
+    playwright_context: PlaywrightContextFactory,
 ):
     # sanity check.
     if is_matching_api_key and ((not is_api_key_configured_client) or (not is_api_key_configured_server)):
@@ -204,7 +205,7 @@ async def sample_test_api_auth_matrix(
 @pytest.mark.asyncio
 @pytest.mark.playwright
 async def test_ui_nofunmode_login_right_password(
-    environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient, playwright_context,
+    environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient, playwright_context: PlaywrightContextFactory,
 ):
     """
     Login with correct password.
@@ -233,7 +234,7 @@ async def test_ui_nofunmode_login_right_password(
 @pytest.mark.asyncio
 @pytest.mark.playwright
 async def test_ui_nofunmode_login_empty_password(
-    environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient, playwright_context,
+    environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient, playwright_context: PlaywrightContextFactory,
 ):
     """
     Login without password.
@@ -262,7 +263,7 @@ async def test_ui_nofunmode_login_empty_password(
 @pytest.mark.asyncio
 @pytest.mark.playwright
 async def test_ui_nofunmode_login_wrong_password(
-    environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient, playwright_context,
+    environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient, playwright_context: PlaywrightContextFactory,
 ):
     """
     Login with wrong password.
@@ -292,7 +293,7 @@ async def test_ui_nofunmode_login_wrong_password(
 @pytest.mark.asyncio
 @pytest.mark.playwright
 async def test_ui_enable_nofunmode(
-    environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient, playwright_context,
+    environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient, playwright_context: PlaywrightContextFactory,
 ):
     """
     Simulate UI: enable nofunmode and check that login is enforced.
@@ -358,7 +359,7 @@ async def test_ui_enable_nofunmode(
 async def test_api_auth_matrix(
     environment: AbstractLRRDeploymentContext, lrr_client: LRRClient, semaphore: asyncio.Semaphore,
     npgenerator: np.random.Generator, is_lrr_debug_mode: bool,
-    playwright_context,
+    playwright_context: PlaywrightContextFactory,
 ):
     """
     Test the following situation combinations:

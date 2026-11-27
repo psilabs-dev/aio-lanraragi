@@ -11,7 +11,10 @@ import psutil
 import pytest
 
 from aio_lanraragi_tests.deployment.base import AbstractLRRDeploymentContext
-from aio_lanraragi_tests.utils.playwright import PlaywrightTestContextManager
+from aio_lanraragi_tests.utils.playwright import (
+    PlaywrightContextFactory,
+    PlaywrightTestContextManager,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -307,7 +310,7 @@ def _save_server_logs(
 
 
 @pytest.fixture
-def playwright_context(request: pytest.FixtureRequest) -> Callable[..., PlaywrightTestContextManager]:
+def playwright_context(request: pytest.FixtureRequest) -> PlaywrightContextFactory:
     if request.config.getoption("--browser-logs") is None:
         return PlaywrightTestContextManager
 
@@ -334,13 +337,13 @@ def _save_browser_logs(
     for snapshot in snapshots:
         try:
             text.append(snapshot())
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.warning(f"Could not read browser log ({type(exc).__name__})")
+        except Exception:  # noqa: BLE001 - Preserve the failed test report and continue saving other snapshots.
+            LOGGER.exception("Could not read browser log")
 
     directory = browser_logs_dir / _sanitize_nodeid(nodeid)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"browser-attempt-{attempt}-{call.when}.log"
-    path.write_text("\n".join(text), encoding="utf-8")
+    path.write_text("\n".join(text), encoding="utf-8", errors="backslashreplace")
     LOGGER.info(f"Browser logs saved to {path}")
 
 
@@ -362,8 +365,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]):
     if browser_logs_dir and snapshots:
         try:
             _save_browser_logs(Path(browser_logs_dir), item.nodeid, snapshots, getattr(item, "execution_count", 1), call)
-        except OSError as exc:
-            LOGGER.warning(f"Could not save browser logs ({type(exc).__name__})")
+        except OSError:
+            LOGGER.exception("Could not save browser logs")
 
     if report.when in ("call", "setup"):
         server_logs_dir = item.config.getoption("--server-logs")
