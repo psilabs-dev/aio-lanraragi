@@ -1,6 +1,8 @@
+import contextlib
 import logging
 import os
 import sys
+from pathlib import Path
 
 import docker
 import pytest
@@ -11,8 +13,15 @@ from aio_lanraragi_tests.deployment.container import (
     ContainerLRRDeploymentContext,
     ContainerRuntime,
 )
+from aio_lanraragi_tests.deployment.homebrew import (
+    HomebrewBuild,
+    HomebrewLRRDeploymentContext,
+    install_homebrew_build,
+)
 from aio_lanraragi_tests.deployment.windows import WindowsLRRDeploymentContext
 from aio_lanraragi_tests.exceptions import DeploymentException
+
+_HOMEBREW_BUILD = pytest.StashKey[HomebrewBuild | str]()
 
 
 def _resolve_socket(runtime: ContainerRuntime, container_url: str | None) -> str | None:
@@ -39,7 +48,38 @@ def generate_deployment(
     global_run_id: int = request.config.global_run_id
     environment: AbstractLRRDeploymentContext = None
 
-    # check operating system.
+    if request.config.getoption("--homebrew"):
+        if sys.platform != "darwin":
+            raise DeploymentException("--homebrew is supported on macOS.")
+        build_path: str | None = request.config.getoption("--build")
+        if not build_path:
+            raise DeploymentException("--homebrew requires --build <path to local LANraragi source>.")
+        for option in ("--image", "--git-url", "--git-ref", "--dockerfile", "--windist", "--container-url", "--docker-api"):
+            if request.config.getoption(option):
+                raise DeploymentException(f"--homebrew cannot be combined with {option}.")
+        if request.config.getoption("--container-runtime") != "docker":
+            raise DeploymentException("--homebrew cannot use a container runtime.")
+        if request.config.getoption("--cache-backend") not in (None, "redis"):
+            raise DeploymentException("--homebrew uses the Redis dependency from the bundled formula.")
+
+        build = request.config.stash.get(_HOMEBREW_BUILD, None)
+        if isinstance(build, str):
+            raise DeploymentException(build)
+        if build is None:
+            try:
+                with contextlib.ExitStack() as cleanup:
+                    build = install_homebrew_build(
+                        Path(build_path).resolve(), request.config.getoption("--build-ref"), cleanup,
+                    )
+                    request.config.add_cleanup(cleanup.pop_all().close)
+            except (DeploymentException, OSError) as exc:
+                request.config.stash[_HOMEBREW_BUILD] = str(exc)
+                raise
+            request.config.stash[_HOMEBREW_BUILD] = build
+        return HomebrewLRRDeploymentContext(
+            build, Path(request.config.getoption("--staging")).resolve(), resource_prefix, port_offset, logger,
+        )
+
     match sys.platform:
         case 'win32':
             windist: str = request.config.getoption("--windist")
@@ -50,10 +90,6 @@ def generate_deployment(
             )
 
         case 'darwin' | 'linux':
-            # TODO: we're assuming macos is used as a development environment with docker installed,
-            # not a testing environment; for macos github runners, we would be using them
-            # to run homebrew integration tests.
-
             build_path: str = request.config.getoption("--build")
             build_ref: str = request.config.getoption("--build-ref")
             image: str = request.config.getoption("--image")
@@ -62,7 +98,7 @@ def generate_deployment(
             dockerfile: str = request.config.getoption("--dockerfile")
             use_docker_api: bool = request.config.getoption("--docker-api")
             staging_dir: str = request.config.getoption("--staging")
-            cache_backend: str = request.config.getoption("--cache-backend")
+            cache_backend: str = request.config.getoption("--cache-backend") or "valkey"
             container_runtime = ContainerRuntime(request.config.getoption("--container-runtime"))
             container_url: str = request.config.getoption("--container-url")
             if dockerfile and git_url:

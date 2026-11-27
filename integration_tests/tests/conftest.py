@@ -104,7 +104,7 @@ def pytest_addoption(parser: pytest.Parser):
         https://docker-py.readthedocs.io/en/stable/client.html#docker.client.from_env for docker,
         or the rootless per-user socket on Linux for podman.
     """
-    parser.addoption("--build", action="store", default=None, help="Absolute path to docker build context for LANraragi.")
+    parser.addoption("--build", action="store", default=None, help="Absolute path to the LANraragi source to build.")
     parser.addoption("--build-ref", action="store", default=None, help="Git ref (commit, branch, tag) to checkout before building. Requires --build.")
     parser.addoption("--image", action="store", default=None, help="LANraragi image to use.")
     parser.addoption("--git-url", action="store", default=None, help="Link to a LANraragi git repository (e.g. fork or branch).")
@@ -131,7 +131,8 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--benchmark-label", action="store", default=None, help="Label for this benchmark run (e.g. c0-r0).")
     parser.addoption("--no-rate-limit", action="store_true", default=False, help="Skip tests that depend on rate-limited external resources (e.g. raw.githubusercontent.com).")
     parser.addoption("--npseed", type=int, action="store", default=42, help="Seed (in numpy) to set for any randomized behavior.")
-    parser.addoption("--cache-backend", action="store", default="valkey", choices=["redis", "valkey", "valkey7", "valkey8"], help="Cache backend for container deployments. Default: valkey (9.x).")
+    parser.addoption("--homebrew", action="store_true", default=False, help="Use the bundled Homebrew formula on macOS. Requires --build.")
+    parser.addoption("--cache-backend", action="store", default=None, choices=["redis", "valkey", "valkey7", "valkey8"], help="Cache backend. Defaults to Valkey (9.x) for containers and Redis for Homebrew.")
     parser.addoption("--container-runtime", action="store", default="docker", choices=["docker", "podman"], help="Container runtime for linux/macos deployments. Podman is supported only in rootless mode, through its API socket; on macOS it requires --container-url. Default: docker.")
     parser.addoption("--container-url", action="store", default=None, help="Override container runtime socket URL (e.g. unix:///run/user/1000/podman/podman.sock). Defaults to docker.from_env() for docker, or the rootless per-user socket on Linux for podman.")
     parser.addoption("--port-offset", type=int, action="store", default=0, help="Session-wide base port offset added to per-module offsets. Use to avoid conflicts between parallel sessions.")

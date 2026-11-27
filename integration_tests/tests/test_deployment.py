@@ -9,6 +9,7 @@ from aio_lanraragi_tests.deployment.base import (
 )
 from aio_lanraragi_tests.deployment.container import ContainerLRRDeploymentContext
 from aio_lanraragi_tests.deployment.factory import generate_deployment
+from aio_lanraragi_tests.deployment.homebrew import HomebrewLRRDeploymentContext
 
 LOGGER = logging.getLogger(__name__)
 
@@ -36,24 +37,25 @@ def test_two_deployment_toggling(request: pytest.FixtureRequest):
         # see ContainerLRRDeploymentContext.stop documentation.
         pytest.skip("Port availability condition too strict in Docker environment.")
 
+    reuse_address = isinstance(env_1, HomebrewLRRDeploymentContext)
     try:
-        assert is_port_available(env_1.lrr_port), f"Port {env_1.lrr_port} should be available!"
-        assert is_port_available(env_2.lrr_port), f"Port {env_2.lrr_port} should be available!"
+        assert is_port_available(env_1.lrr_port, reuse_address=reuse_address), f"Port {env_1.lrr_port} should be available!"
+        assert is_port_available(env_2.lrr_port, reuse_address=reuse_address), f"Port {env_2.lrr_port} should be available!"
 
         env_1.setup(lrr_debug_mode=is_lrr_debug_mode)
-        assert not is_port_available(env_1.lrr_port), f"Port {env_1.lrr_port} should not be available!"
+        assert not is_port_available(env_1.lrr_port, reuse_address=reuse_address), f"Port {env_1.lrr_port} should not be available!"
 
         env_2.setup(lrr_debug_mode=is_lrr_debug_mode)
-        assert not is_port_available(env_2.lrr_port), f"Port {env_2.lrr_port} should not be available!"
+        assert not is_port_available(env_2.lrr_port, reuse_address=reuse_address), f"Port {env_2.lrr_port} should not be available!"
 
         env_1.stop()
-        assert is_port_available(env_1.lrr_port), f"Port {env_1.lrr_port} should be available!"
+        assert is_port_available(env_1.lrr_port, reuse_address=reuse_address), f"Port {env_1.lrr_port} should be available!"
 
         env_2.stop()
-        assert is_port_available(env_2.lrr_port), f"Port {env_2.lrr_port} should be available!"
+        assert is_port_available(env_2.lrr_port, reuse_address=reuse_address), f"Port {env_2.lrr_port} should be available!"
 
         env_1.start()
-        assert not is_port_available(env_1.lrr_port), f"Port {env_1.lrr_port} should not be available!"
+        assert not is_port_available(env_1.lrr_port, reuse_address=reuse_address), f"Port {env_1.lrr_port} should not be available!"
 
         # check logs for errors
         expect_no_error_logs(env_1, LOGGER)
