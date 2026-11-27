@@ -152,11 +152,13 @@ def is_valid_signature_hex(signature: str, allowed_signatures: list[str]=ALLOWED
             is_allowed_mime = True
     return is_allowed_mime
 
-def is_port_available(port: int):
+def is_port_available(port: int, *, reuse_address: bool = False) -> bool:
     """
     Checks to see if the port on localhost is available.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if reuse_address:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("127.0.0.1", port))
             return True
