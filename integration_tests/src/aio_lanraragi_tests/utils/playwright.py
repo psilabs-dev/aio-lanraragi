@@ -3,7 +3,6 @@ import logging
 import re
 import time
 from collections.abc import Callable
-from contextvars import ContextVar
 from types import TracebackType
 from typing import TypeVar, override
 from urllib.parse import urlparse
@@ -13,10 +12,8 @@ from lanraragi.clients.client import LRRClient
 
 LOGGER = logging.getLogger(__name__)
 
-browser_log_snapshots: ContextVar[list[Callable[[], str]] | None] = ContextVar("browser_log_snapshots", default=None)
-
-
 def _browser_log_url(url: str, lrr_url: str) -> str:
+    """Retain LRR paths and show only the origin for external requests."""
     try:
         parts = urlparse(url)
         if parts.scheme not in ("http", "https"):
@@ -33,6 +30,14 @@ def _browser_log_url(url: str, lrr_url: str) -> str:
         return origin + parts.path if (parts.scheme, host, port) == (lrr.scheme, lrr.hostname, lrr_port) else origin
     except ValueError:
         return "[invalid URL]"
+
+
+def _browser_log_failure(failure: str | None) -> str:
+    """Keep browser error codes and redact free-form network error messages."""
+    if failure and re.fullmatch(r"(?:net::)?ERR_[A-Z0-9_]+|NS_ERROR_[A-Z0-9_]+", failure):
+        return failure
+    return "request failed"
+
 
 _PlaywrightTestContextManagerLike = TypeVar('_PlaywrightTestContextManagerLike', bound='PlaywrightTestContextManager')
 class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
@@ -113,6 +118,8 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
             lrr_client: LRRClient,
             browser_type: str="chromium",
             logger: logging.Logger=LOGGER,
+            *,
+            browser_log_snapshots: list[Callable[[], str]] | None = None,
     ):
         """
         `browser_type` selects the Playwright browser; use the chromium default unless the test
@@ -133,7 +140,7 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self.page_errors: list[playwright.async_api.Error] = []
         self._pending: dict[playwright.async_api.Request, tuple[float, int | None]] = {}
         self._browser_log: str | None = None
-        self._capture_browser_log = False
+        self._browser_log_snapshots = browser_log_snapshots
 
     def clear(self) -> None:
         """
@@ -195,11 +202,9 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
 
     @override
     async def __aenter__(self: _PlaywrightTestContextManagerLike) -> _PlaywrightTestContextManagerLike:
-        snapshots = browser_log_snapshots.get()
-        self._capture_browser_log = snapshots is not None
         self._browser_log = None
-        if snapshots is not None:
-            snapshots.append(self._browser_log_snapshot)
+        if self._browser_log_snapshots is not None:
+            self._browser_log_snapshots.append(self._browser_log_snapshot)
         self._playwright = await playwright.async_api.async_playwright().start()
         try:
             browser_launcher: playwright.async_api._generated.BrowserType = getattr(self._playwright, self._browser_type)
@@ -214,7 +219,7 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self._page.on("console", lambda console: self.console_evts.append(console))
         self._page.on("requestfailed", lambda request: self.failed_requests.append(request))
         self._page.on("pageerror", lambda error: self.page_errors.append(error))
-        if self._capture_browser_log:
+        if self._browser_log_snapshots is not None:
             self._browser_context.on("request", self._record_request_start)
             self._browser_context.on("response", self._record_response)
             self._browser_context.on("requestfinished", self._remove_pending)
@@ -266,9 +271,7 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         lines.append("Request failures:")
         for request in self.failed_requests:
             url = _browser_log_url(request.url, lrr_url)
-            failure = request.failure or ""
-            if not re.fullmatch(r"(?:net::)?ERR_[A-Z0-9_]+|NS_ERROR_[A-Z0-9_]+", failure):
-                failure = "request failed"
+            failure = _browser_log_failure(request.failure)
             lines.append(f"  {request.method} {url} ({failure})")
 
         lines.append("HTTP errors:")
@@ -280,7 +283,7 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         return "\n".join(lines) + "\n"
 
     async def _teardown(self) -> None:
-        if self._capture_browser_log:
+        if self._browser_log_snapshots is not None:
             try:
                 self._browser_log = self._browser_log_snapshot()
             except Exception as exc:  # noqa: BLE001

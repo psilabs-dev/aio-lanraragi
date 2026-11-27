@@ -30,9 +30,6 @@ from aio_lanraragi_tests.utils.api_wrappers import (
     upload_archives,
 )
 from aio_lanraragi_tests.utils.concurrency import get_bounded_sem
-from aio_lanraragi_tests.utils.playwright import (
-    PlaywrightTestContextManager,
-)
 
 LOGGER = logging.getLogger(__name__)
 ENABLE_SYNC_FALLBACK = False # for debugging.
@@ -97,7 +94,8 @@ async def lrr_client(environment: AbstractLRRDeploymentContext) -> AsyncGenerato
 async def sample_test_api_auth_matrix(
     is_nofunmode: bool, is_api_key_configured_server: bool, is_api_key_configured_client: bool,
     is_matching_api_key: bool, is_auth_progress: bool, environment: AbstractLRRDeploymentContext, lrr_client: LRRClient,
-    arcid: str
+    arcid: str,
+    playwright_context,
 ):
     # sanity check.
     if is_matching_api_key and ((not is_api_key_configured_client) or (not is_api_key_configured_server)):
@@ -178,7 +176,7 @@ async def sample_test_api_auth_matrix(
     # test main page.
     # playwright uses English as locale and timezone, if this changes in the future we may need to update.
     expected_title = LRR_LOGIN_TITLE if is_nofunmode else LRR_INDEX_TITLE
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(lrr_client.lrr_base_url)
@@ -205,13 +203,15 @@ async def sample_test_api_auth_matrix(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient):
+async def test_ui_nofunmode_login_right_password(
+    environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient, playwright_context,
+):
     """
     Login with correct password.
     """
     environment.setup(with_nofunmode=True, lrr_debug_mode=is_lrr_debug_mode)
 
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(lrr_client.lrr_base_url)
@@ -232,13 +232,15 @@ async def test_ui_nofunmode_login_right_password(environment: AbstractLRRDeploym
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient):
+async def test_ui_nofunmode_login_empty_password(
+    environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient, playwright_context,
+):
     """
     Login without password.
     """
     environment.setup(with_nofunmode=True, lrr_debug_mode=is_lrr_debug_mode)
 
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(lrr_client.lrr_base_url)
@@ -259,13 +261,15 @@ async def test_ui_nofunmode_login_empty_password(environment: AbstractLRRDeploym
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient):
+async def test_ui_nofunmode_login_wrong_password(
+    environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient, playwright_context,
+):
     """
     Login with wrong password.
     """
     environment.setup(with_nofunmode=True, lrr_debug_mode=is_lrr_debug_mode)
 
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(lrr_client.lrr_base_url)
@@ -287,12 +291,14 @@ async def test_ui_nofunmode_login_wrong_password(environment: AbstractLRRDeploym
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient):
+async def test_ui_enable_nofunmode(
+    environment: AbstractLRRDeploymentContext, is_lrr_debug_mode: bool, lrr_client: LRRClient, playwright_context,
+):
     """
     Simulate UI: enable nofunmode and check that login is enforced.
     """
     environment.setup(with_nofunmode=False, lrr_debug_mode=is_lrr_debug_mode)
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(lrr_client.lrr_base_url)
@@ -334,7 +340,7 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
     environment.restart()
 
     LOGGER.info("Checking that LRR server is locked after restart.")
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(lrr_client.lrr_base_url)
@@ -351,7 +357,8 @@ async def test_ui_enable_nofunmode(environment: AbstractLRRDeploymentContext, is
 @pytest.mark.playwright
 async def test_api_auth_matrix(
     environment: AbstractLRRDeploymentContext, lrr_client: LRRClient, semaphore: asyncio.Semaphore,
-    npgenerator: np.random.Generator, is_lrr_debug_mode: bool
+    npgenerator: np.random.Generator, is_lrr_debug_mode: bool,
+    playwright_context,
 ):
     """
     Test the following situation combinations:
@@ -439,7 +446,7 @@ async def test_api_auth_matrix(
         LOGGER.info(f"Test configuration ({i+1}/{num_tests}): is_nofunmode={test_param.is_nofunmode}, is_apikey_configured_server={test_param.is_api_key_configured_server}, is_apikey_configured_client={test_param.is_api_key_configured_client}, is_matching_api_key={test_param.is_matching_api_key}")
         await sample_test_api_auth_matrix(
             test_param.is_nofunmode, test_param.is_api_key_configured_server, test_param.is_api_key_configured_client,
-            test_param.is_matching_api_key, test_param.is_auth_progress, environment, lrr_client, first_arcid
+            test_param.is_matching_api_key, test_param.is_auth_progress, environment, lrr_client, first_arcid, playwright_context,
         )
 
 @pytest.mark.asyncio

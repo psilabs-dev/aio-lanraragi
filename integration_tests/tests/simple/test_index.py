@@ -23,7 +23,6 @@ from aio_lanraragi_tests.utils.api_wrappers import (
     upload_archive,
 )
 from aio_lanraragi_tests.utils.playwright import (
-    PlaywrightTestContextManager,
     assert_no_spinner,
     read_rendered_titles,
     switch_display_mode,
@@ -38,6 +37,7 @@ async def test_header_click_sort(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
     environment: AbstractLRRDeploymentContext,
+    playwright_context,
 ) -> None:
     """
     Test that clicking a column header in compact mode triggers DataTables sort.
@@ -75,7 +75,7 @@ async def test_header_click_sort(
     # <<<<< STAT REBUILD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(lrr_client.lrr_base_url, timeout=60000)
@@ -156,6 +156,7 @@ async def test_compact_column_sort_with_three_columns(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
     environment: AbstractLRRDeploymentContext,
+    playwright_context,
 ) -> None:
     """
     Test that compact mode column sorting works correctly with 2 and 3 columns.
@@ -226,7 +227,7 @@ async def test_compact_column_sort_with_three_columns(
         )
 
     # >>>>> UI STAGE >>>>>
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(lrr_client.lrr_base_url, timeout=60000)
@@ -360,7 +361,7 @@ async def test_compact_column_sort_with_three_columns(
 
 @pytest.mark.asyncio
 @pytest.mark.playwright
-async def test_index_page(lrr_client: LRRClient) -> None:
+async def test_index_page(lrr_client: LRRClient, playwright_context) -> None:
     """
     Test that the index page loads without errors.
 
@@ -381,7 +382,7 @@ async def test_index_page(lrr_client: LRRClient) -> None:
     # <<<<< TEST CONNECTION STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(lrr_client.lrr_base_url)
@@ -406,6 +407,7 @@ async def test_custom_column_sort_display(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
     environment: AbstractLRRDeploymentContext,
+    playwright_context,
 ) -> None:
     """
     Test sort dropdown population and custom column sort behavior.
@@ -458,7 +460,7 @@ async def test_custom_column_sort_display(
     # <<<<< STAT REBUILD STAGE <<<<<
 
     # >>>>> UI STAGE >>>>>
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(lrr_client.lrr_base_url, timeout=60000)
@@ -563,6 +565,7 @@ async def test_search_autocomplete_namespace_exclusion(
     lrr_client: LRRClient,
     semaphore: asyncio.Semaphore,
     environment: AbstractLRRDeploymentContext,
+    playwright_context,
 ) -> None:
     """
     Test that excluded namespaces are filtered from search autocomplete suggestions.
@@ -603,7 +606,7 @@ async def test_search_autocomplete_namespace_exclusion(
 
     # >>>>> SETTINGS STAGE >>>>>
     # Navigate to settings UI, configure excluded namespaces, save.
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         # login to access settings
@@ -643,7 +646,7 @@ async def test_search_autocomplete_namespace_exclusion(
     del response, error
 
     # >>>>> UI STAGE >>>>>
-    async with PlaywrightTestContextManager(lrr_client) as pcm:
+    async with playwright_context(lrr_client) as pcm:
         page = pcm.page
 
         await page.goto(lrr_client.lrr_base_url, timeout=60000)
