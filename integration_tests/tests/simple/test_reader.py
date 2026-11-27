@@ -8,7 +8,6 @@ import logging
 import tempfile
 from pathlib import Path
 
-import playwright.async_api._generated
 import pytest
 from lanraragi.clients.client import LRRClient
 from lanraragi.models.archive import (
@@ -26,8 +25,6 @@ from aio_lanraragi_tests.utils.api_wrappers import (
 )
 from aio_lanraragi_tests.utils.playwright import (
     PlaywrightTestContextManager,
-    assert_browser_responses_ok,
-    assert_console_logs_ok,
     assert_no_spinner,
     get_image_bytes_from_responses,
     read_rendered_entries,
@@ -423,13 +420,8 @@ async def test_archive_navigation(
         await pcm.assert_console_ok()
 
         # Opening the reader directly by URL keeps the prev/next-archive buttons hidden.
-        bc2 = await pcm.browser_context.browser.new_context()
-        try:
-            page2 = await bc2.new_page()
-            responses2: list[playwright.async_api._generated.Response] = []
-            console_evts2: list[playwright.async_api._generated.ConsoleMessage] = []
-            page2.on("response", lambda response: responses2.append(response))
-            page2.on("console", lambda console: console_evts2.append(console))
+        async with PlaywrightTestContextManager(lrr_client, logger=LOGGER) as secondary:
+            page2 = secondary.page
 
             await page2.goto(f"{lrr_client.lrr_base_url}/reader?id={dt_arcids[0]}")
             await page2.wait_for_load_state("networkidle")
@@ -439,10 +431,8 @@ async def test_archive_navigation(
             visible_count = await page2.locator(".archive-nav-link:visible").count()
             assert visible_count == 0, f"Expected archive-jump buttons hidden on direct entry, found {visible_count} visible"
 
-            await assert_browser_responses_ok(responses2, lrr_client, logger=LOGGER)
-            await assert_console_logs_ok(console_evts2, lrr_client.lrr_base_url)
-        finally:
-            await bc2.close()
+            await secondary.assert_http_ok()
+            await secondary.assert_console_ok()
         await pcm.assert_toasts_ok()
     # <<<<< UI STAGE <<<<<
 

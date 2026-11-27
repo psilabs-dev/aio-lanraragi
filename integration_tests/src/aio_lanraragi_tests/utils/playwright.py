@@ -2,6 +2,8 @@ import contextlib
 import logging
 import re
 import time
+from collections.abc import Callable
+from contextvars import ContextVar
 from types import TracebackType
 from typing import TypeVar, override
 from urllib.parse import urlparse
@@ -10,6 +12,27 @@ import playwright.async_api._generated
 from lanraragi.clients.client import LRRClient
 
 LOGGER = logging.getLogger(__name__)
+
+browser_log_snapshots: ContextVar[list[Callable[[], str]] | None] = ContextVar("browser_log_snapshots", default=None)
+
+
+def _browser_log_url(url: str, lrr_url: str) -> str:
+    try:
+        parts = urlparse(url)
+        if parts.scheme not in ("http", "https"):
+            return f"{parts.scheme or 'relative'}:[redacted]"
+        host = parts.hostname
+        if host is None:
+            return "[invalid URL]"
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+        authority = f"[{host}]" if ":" in host else host
+        origin = f"{parts.scheme}://{authority}:{port}"
+
+        lrr = urlparse(lrr_url)
+        lrr_port = lrr.port or (443 if lrr.scheme == "https" else 80)
+        return origin + parts.path if (parts.scheme, host, port) == (lrr.scheme, lrr.hostname, lrr_port) else origin
+    except ValueError:
+        return "[invalid URL]"
 
 _PlaywrightTestContextManagerLike = TypeVar('_PlaywrightTestContextManagerLike', bound='PlaywrightTestContextManager')
 class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
@@ -108,6 +131,9 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self.console_evts: list[playwright.async_api._generated.ConsoleMessage] = []
         self.failed_requests: list[playwright.async_api._generated.Request] = []
         self.page_errors: list[playwright.async_api.Error] = []
+        self._pending: dict[playwright.async_api.Request, tuple[float, int | None]] = {}
+        self._browser_log: str | None = None
+        self._capture_browser_log = False
 
     def clear(self) -> None:
         """
@@ -169,6 +195,11 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
 
     @override
     async def __aenter__(self: _PlaywrightTestContextManagerLike) -> _PlaywrightTestContextManagerLike:
+        snapshots = browser_log_snapshots.get()
+        self._capture_browser_log = snapshots is not None
+        self._browser_log = None
+        if snapshots is not None:
+            snapshots.append(self._browser_log_snapshot)
         self._playwright = await playwright.async_api.async_playwright().start()
         try:
             browser_launcher: playwright.async_api._generated.BrowserType = getattr(self._playwright, self._browser_type)
@@ -183,6 +214,11 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         self._page.on("console", lambda console: self.console_evts.append(console))
         self._page.on("requestfailed", lambda request: self.failed_requests.append(request))
         self._page.on("pageerror", lambda error: self.page_errors.append(error))
+        if self._capture_browser_log:
+            self._browser_context.on("request", self._record_request_start)
+            self._browser_context.on("response", self._record_response)
+            self._browser_context.on("requestfinished", self._remove_pending)
+            self._browser_context.on("requestfailed", self._remove_pending)
         return self
 
     @override
@@ -197,7 +233,60 @@ class PlaywrightTestContextManager(contextlib.AbstractAsyncContextManager):
         await self._teardown()
         return False
 
+    def _record_request_start(self, request: playwright.async_api.Request) -> None:
+        self._pending[request] = (time.monotonic(), None)
+
+    def _record_response(self, response: playwright.async_api.Response) -> None:
+        request = response.request
+        if request in self._pending:
+            started, _ = self._pending[request]
+            self._pending[request] = (started, response.status)
+
+    def _remove_pending(self, request: playwright.async_api.Request) -> None:
+        self._pending.pop(request, None)
+
+    def _browser_log_snapshot(self) -> str:
+        if self._browser_log is not None:
+            return self._browser_log
+
+        lrr_url = self._lrr_client.lrr_base_url
+        lines = [f"Browser: {self._browser_type}"]
+        if self._browser_context is not None:
+            for page in self._browser_context.pages:
+                lines.append(f"Page: {_browser_log_url(page.url, lrr_url)}")
+
+        lines.append(f"Pending requests: {len(self._pending)}")
+        now = time.monotonic()
+        for request, (started, status) in self._pending.items():
+            elapsed_ms = round((now - started) * 1000)
+            url = _browser_log_url(request.url, lrr_url)
+            response_status = f"HTTP {status}" if status is not None else "no response headers"
+            lines.append(f"  {request.method} {url} ({request.resource_type}, {response_status}, {elapsed_ms} ms)")
+
+        lines.append("Request failures:")
+        for request in self.failed_requests:
+            url = _browser_log_url(request.url, lrr_url)
+            failure = request.failure or ""
+            if not re.fullmatch(r"(?:net::)?ERR_[A-Z0-9_]+|NS_ERROR_[A-Z0-9_]+", failure):
+                failure = "request failed"
+            lines.append(f"  {request.method} {url} ({failure})")
+
+        lines.append("HTTP errors:")
+        for response in self.responses:
+            if response.status >= 400:
+                url = _browser_log_url(response.url, lrr_url)
+                lines.append(f"  {response.request.method} {url} (HTTP {response.status})")
+
+        return "\n".join(lines) + "\n"
+
     async def _teardown(self) -> None:
+        if self._capture_browser_log:
+            try:
+                self._browser_log = self._browser_log_snapshot()
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(f"Could not capture browser log ({type(exc).__name__})")
+            self._pending.clear()
+
         try:
             if self._browser_context:
                 await self._browser_context.close()
